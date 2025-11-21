@@ -14,12 +14,18 @@ Inventory.items = {}
 function Inventory:Init()
     self.frame = CreateFrame("Frame")
     self.frame:RegisterEvent("BAG_UPDATE")
+    self.frame:RegisterEvent("PLAYER_MONEY")
     self.frame:SetScript("OnEvent", function(self, event, arg1)
         if event == "BAG_UPDATE" then
             -- For now, we just re-scan everything on any update. 
             -- Optimization: Only scan the updated bag (arg1).
             Inventory:ScanBags()
             if NS.Frames then NS.Frames:Update() end
+        elseif event == "PLAYER_MONEY" then
+            -- Update money display
+            if NS.Frames and NS.Frames.mainFrame and NS.Frames.mainFrame:IsShown() then
+                NS.Frames:UpdateMoney()
+            end
         end
     end)
     self:ScanBags()

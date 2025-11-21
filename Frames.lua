@@ -34,6 +34,11 @@ function Frames:Init()
     -- Close Button
     self.mainFrame.closeBtn = CreateFrame("Button", nil, self.mainFrame, "UIPanelCloseButton")
     self.mainFrame.closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    
+    -- Space Counter
+    self.spaceCounter = self.mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.spaceCounter:SetPoint("TOPRIGHT", self.mainFrame.closeBtn, "TOPLEFT", -5, -8)
+    self.spaceCounter:SetText("0/0")
 
     -- Search Box
     self.searchBox = CreateFrame("EditBox", nil, self.mainFrame, "InputBoxTemplate")
@@ -44,10 +49,45 @@ function Frames:Init()
         NS.Frames:Update()
     end)
 
+    -- Money Frame
+    self.moneyFrame = CreateFrame("Frame", nil, self.mainFrame)
+    self.moneyFrame:SetSize(200, 20)
+    self.moneyFrame:SetPoint("BOTTOMRIGHT", self.mainFrame, "BOTTOMRIGHT", -15, 15)
+    
+    -- Gold
+    self.goldIcon = self.moneyFrame:CreateTexture(nil, "ARTWORK")
+    self.goldIcon:SetTexture("Interface\\MoneyFrame\\UI-GoldIcon")
+    self.goldIcon:SetSize(14, 14)
+    self.goldIcon:SetPoint("RIGHT", self.moneyFrame, "RIGHT", 0, 0)
+    
+    self.goldText = self.moneyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.goldText:SetPoint("RIGHT", self.goldIcon, "LEFT", -2, 0)
+    self.goldText:SetText("0")
+    
+    -- Silver
+    self.silverIcon = self.moneyFrame:CreateTexture(nil, "ARTWORK")
+    self.silverIcon:SetTexture("Interface\\MoneyFrame\\UI-SilverIcon")
+    self.silverIcon:SetSize(14, 14)
+    self.silverIcon:SetPoint("RIGHT", self.goldText, "LEFT", -5, 0)
+    
+    self.silverText = self.moneyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.silverText:SetPoint("RIGHT", self.silverIcon, "LEFT", -2, 0)
+    self.silverText:SetText("0")
+    
+    -- Copper
+    self.copperIcon = self.moneyFrame:CreateTexture(nil, "ARTWORK")
+    self.copperIcon:SetTexture("Interface\\MoneyFrame\\UI-CopperIcon")
+    self.copperIcon:SetSize(14, 14)
+    self.copperIcon:SetPoint("RIGHT", self.silverText, "LEFT", -5, 0)
+    
+    self.copperText = self.moneyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.copperText:SetPoint("RIGHT", self.copperIcon, "LEFT", -2, 0)
+    self.copperText:SetText("0")
+
     -- Scroll Frame (for scrolling through sections)
     self.scrollFrame = CreateFrame("ScrollFrame", "ZenBagsScrollFrame", self.mainFrame, "UIPanelScrollFrameTemplate")
     self.scrollFrame:SetPoint("TOPLEFT", 15, -65)
-    self.scrollFrame:SetPoint("BOTTOMRIGHT", -35, 15)
+    self.scrollFrame:SetPoint("BOTTOMRIGHT", -35, 40)
 
     self.content = CreateFrame("Frame", nil, self.scrollFrame)
     self.content:SetSize(350, 1000) -- Height will be dynamic
@@ -72,6 +112,49 @@ end
 
 function Frames:Hide()
     self.mainFrame:Hide()
+end
+
+function Frames:UpdateSpaceCounter()
+    local totalSlots = 0
+    local usedSlots = 0
+    
+    -- Count slots in bags 0-4
+    for bagID = 0, 4 do
+        local numSlots = GetContainerNumSlots(bagID)
+        totalSlots = totalSlots + numSlots
+        
+        for slotID = 1, numSlots do
+            local itemLink = GetContainerItemLink(bagID, slotID)
+            if itemLink then
+                usedSlots = usedSlots + 1
+            end
+        end
+    end
+    
+    local freeSlots = totalSlots - usedSlots
+    local percentFull = totalSlots > 0 and (usedSlots / totalSlots) * 100 or 0
+    
+    -- Color coding based on fullness
+    local color = "|cFF00FF00" -- Green
+    if percentFull > 90 then
+        color = "|cFFFF0000" -- Red
+    elseif percentFull > 70 then
+        color = "|cFFFFFF00" -- Yellow
+    end
+    
+    self.spaceCounter:SetText(color .. usedSlots .. "/" .. totalSlots .. "|r")
+end
+
+function Frames:UpdateMoney()
+    local money = GetMoney()
+    
+    local gold = math.floor(money / 10000)
+    local silver = math.floor((money % 10000) / 100)
+    local copper = money % 100
+    
+    self.goldText:SetText(gold)
+    self.silverText:SetText(silver)
+    self.copperText:SetText(copper)
 end
 
 function Frames:Update()
@@ -175,10 +258,49 @@ function Frames:Update()
             end
             if itemData.quality == 0 then btn.junkIcon:Show() else btn.junkIcon:Hide() end
 
+            -- Store item data reference
+            btn.itemData = itemData
+            
+            -- Register for clicks and drag
+            btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            btn:RegisterForDrag("LeftButton")
+            
+            -- Click Handler
+            btn:SetScript("OnClick", function(self, button, down)
+                local data = self.itemData
+                if button == "LeftButton" then
+                    if IsShiftKeyDown() then
+                        -- Shift + Click: Link in chat
+                        ChatEdit_InsertLink(data.link)
+                    elseif IsControlKeyDown() then
+                        -- Ctrl + Click: Try on equipment
+                        DressUpItemLink(data.link)
+                    else
+                        -- Left-click: Pick up item
+                        PickupContainerItem(data.bagID, data.slotID)
+                    end
+                elseif button == "RightButton" then
+                    -- Right-click: Use item
+                    UseContainerItem(data.bagID, data.slotID)
+                end
+            end)
+            
+            -- Drag Start Handler
+            btn:SetScript("OnDragStart", function(self)
+                local data = self.itemData
+                PickupContainerItem(data.bagID, data.slotID)
+            end)
+            
+            -- Receive Drag Handler (for placing items)
+            btn:SetScript("OnReceiveDrag", function(self)
+                local data = self.itemData
+                PickupContainerItem(data.bagID, data.slotID)
+            end)
+            
             -- Tooltip
             btn:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetBagItem(itemData.bagID, itemData.slotID)
+                GameTooltip:SetBagItem(self.itemData.bagID, self.itemData.slotID)
                 GameTooltip:Show()
             end)
             btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -194,4 +316,10 @@ function Frames:Update()
     end
     
     self.content:SetHeight(yOffset)
+    
+    -- Update space counter
+    self:UpdateSpaceCounter()
+    
+    -- Update money display
+    self:UpdateMoney()
 end
