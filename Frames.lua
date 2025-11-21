@@ -241,9 +241,15 @@ function Frames:Update()
                 -- Parent the button to the dummy bag so GetParent():GetID() returns the bag ID
                 btn = CreateFrame("Button", "ZenBagsItem"..btnIdx, dummyBag, "ContainerFrameItemButtonTemplate")
                 btn:SetSize(ITEM_SIZE, ITEM_SIZE)
+
+                -- Ensure IconBorder exists (ContainerFrameItemButtonTemplate uses $parentIconQuestTexture)
+                if not btn.IconBorder then
+                    btn.IconBorder = _G[btn:GetName() .. "IconQuestTexture"] or btn:CreateTexture(nil, "OVERLAY")
+                end
+
                 self.buttons[btnIdx] = btn
             else
-                -- Re-parent existing button if needed (though usually we just reuse)
+                -- Re-parent existing button if needed
                 if btn:GetParent() ~= dummyBag then
                     btn:SetParent(dummyBag)
                 end
