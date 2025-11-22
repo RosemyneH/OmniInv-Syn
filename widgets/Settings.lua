@@ -120,7 +120,7 @@ function NS.Settings:CreateSlider(key, label, minVal, maxVal, step, callback, y)
     slider:SetWidth(200)
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
+    -- slider:SetObeyStepOnDrag(true) -- Not available in Classic
     
     _G[slider:GetName().."Low"]:SetText(minVal)
     _G[slider:GetName().."High"]:SetText(maxVal)
