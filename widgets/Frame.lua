@@ -361,14 +361,23 @@ function Frames:Update(fullUpdate)
     for _, item in ipairs(allItems) do
         -- Filter by location (bags vs bank)
         if item.location == self.currentView then
-            -- Filter by search query
+            -- Check if item matches search
+            local matchesSearch = false
             if query == "" then
+                matchesSearch = true
                 table.insert(items, item)
             else
                 local name = GetItemInfo(item.link)
                 if name and name:lower():find(query, 1, true) then
+                    matchesSearch = true
                     table.insert(items, item)
                 end
+            end
+            -- Store search match state for highlighting
+            item.matchesSearch = matchesSearch
+            -- Always include items for rendering (we'll dim non-matches)
+            if query ~= "" and not matchesSearch then
+                table.insert(items, item)
             end
         end
     end
@@ -464,6 +473,14 @@ function Frames:Update(fullUpdate)
         hdr:SetParent(self.content)
         -- Align header with the grid start (looks cleaner)
         hdr:SetPoint("TOPLEFT", sectionX + sectionXOffset, -sectionY)
+        
+        -- Header background for better visual hierarchy
+        if not hdr.bg then
+            hdr.bg = hdr:CreateTexture(nil, "BACKGROUND")
+            hdr.bg:SetTexture(0, 0, 0, 0.4)
+            hdr.bg:SetPoint("TOPLEFT", -4, 2)
+            hdr.bg:SetPoint("BOTTOMRIGHT", 4, -2)
+        end
         
         -- Check collapsed state
         local isCollapsed = NS.Config:IsSectionCollapsed(cat)
@@ -583,6 +600,35 @@ function Frames:Update(fullUpdate)
 
                 -- Store item data reference
                 btn.itemData = itemData
+                
+                -- Search highlighting: dim non-matching items
+                local isMatch = (query == "" or itemData.matchesSearch)
+                if isMatch then
+                    btn:SetAlpha(1.0)
+                else
+                    btn:SetAlpha(0.3)
+                end
+                
+                -- Hover glow effect
+                if not btn.hoverGlow then
+                    btn.hoverGlow = btn:CreateTexture(nil, "OVERLAY")
+                    btn.hoverGlow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+                    btn.hoverGlow:SetBlendMode("ADD")
+                    btn.hoverGlow:SetAllPoints()
+                    btn.hoverGlow:SetVertexColor(1, 1, 0, 0.5)
+                    btn.hoverGlow:Hide()
+                    
+                    btn:SetScript("OnEnter", function(self)
+                        self.hoverGlow:Show()
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetBagItem(self.itemData.bagID, self.itemData.slotID)
+                        GameTooltip:Show()
+                    end)
+                    btn:SetScript("OnLeave", function(self)
+                        self.hoverGlow:Hide()
+                        GameTooltip:Hide()
+                    end)
+                end
                 
                 -- Standard Template handles clicks now!
                 -- We only need to ensure the button is shown
