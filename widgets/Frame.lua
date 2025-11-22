@@ -625,15 +625,17 @@ function Frames:Update(fullUpdate)
                 -- Store item data reference
                 btn.itemData = itemData
                 
-                -- Search Highlighting: Dim non-matching items
-                if itemData.searchMatch then
-                    -- Matching item - bright and normal
-                    btn.icon:SetAlpha(1.0)
-                    btn.icon:SetDesaturated(false)
-                else
-                    -- Non-matching item - dimmed and desaturated
-                    btn.icon:SetAlpha(0.35)
-                    btn.icon:SetDesaturated(true)
+                -- Search Highlighting: Dim non-matching items (with safety check)
+                if btn.icon then
+                    if itemData.searchMatch then
+                        -- Matching item - bright and normal
+                        btn.icon:SetAlpha(1.0)
+                        btn.icon:SetDesaturated(false)
+                    else
+                        -- Non-matching item - dimmed and desaturated
+                        btn.icon:SetAlpha(0.35)
+                        btn.icon:SetDesaturated(true)
+                    end
                 end
                 
                 -- Standard Template handles clicks now!
