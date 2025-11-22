@@ -87,7 +87,7 @@ function Frames:Init()
     -- Scroll Frame (for scrolling through sections)
     self.scrollFrame = CreateFrame("ScrollFrame", "ZenBagsScrollFrame", self.mainFrame, "UIPanelScrollFrameTemplate")
     self.scrollFrame:SetPoint("TOPLEFT", 15, -65)
-    self.scrollFrame:SetPoint("BOTTOMRIGHT", -35, 45)
+    self.scrollFrame:SetPoint("BOTTOMRIGHT", -35, 70)
 
     self.content = CreateFrame("Frame", nil, self.scrollFrame)
     self.content:SetSize(350, 1000) --Height will be dynamic
