@@ -140,8 +140,9 @@ function NS.Pools:Init()
             end)
             
             btn:SetScript("OnLeave", function(self)
-                ContainerFrameItemButton_OnLeave(self)
+                -- ContainerFrameItemButton_OnLeave(self) -- Not available globally
                 GameTooltip:Hide()
+                ResetCursor()
             end)
             
             return btn
