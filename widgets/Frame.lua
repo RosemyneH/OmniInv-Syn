@@ -85,7 +85,7 @@ function Frames:Init()
     -- Money Frame
     self.moneyFrame = CreateFrame("Frame", nil, self.mainFrame)
     self.moneyFrame:SetSize(250, 25)
-    self.moneyFrame:SetPoint("BOTTOMLEFT", self.mainFrame, "BOTTOMLEFT", 15, 48) -- Inside frame, above tabs
+    self.moneyFrame:SetPoint("BOTTOMLEFT", self.mainFrame, "BOTTOMLEFT", 15, 18) -- Closer to bottom with good spacing
     
     -- Gold (leftmost)
     self.goldText = self.moneyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
