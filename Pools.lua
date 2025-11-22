@@ -124,6 +124,10 @@ function NS.Pools:Init()
             btn:RegisterForDrag("LeftButton")
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             
+            -- Disable default OnUpdate to prevent tooltip flickering
+            -- (Default OnUpdate calls OnEnter repeatedly, which fails for offline items)
+            btn:SetScript("OnUpdate", nil)
+            
             -- Custom Tooltip Handler (fixes offline bank items & flickering)
             btn:SetScript("OnEnter", function(self)
                 if not NS.Config:Get("showTooltips") then return end
