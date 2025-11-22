@@ -1,4 +1,4 @@
-local addonName, NS = ..
+local addonName, NS = ...
 
 NS.Config = {}
 
