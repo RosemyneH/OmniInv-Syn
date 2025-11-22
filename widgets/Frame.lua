@@ -22,9 +22,6 @@ function Frames:Init()
     self.mainFrame:SetMovable(true)
     self.mainFrame:SetResizable(true) -- Enable resizing
     self.mainFrame:SetMinResize(300, 300)
-    self.mainFrame:RegisterForDrag("LeftButton")
-    self.mainFrame:SetScript("OnDragStart", self.mainFrame.StartMoving)
-    self.mainFrame:SetScript("OnDragStop", self.mainFrame.StopMovingOrSizing)
     
     -- Resize Handle
     local resizeButton = CreateFrame("Button", nil, self.mainFrame)
@@ -55,6 +52,15 @@ function Frames:Init()
     self.headerBg:SetPoint("TOPLEFT", 12, -12)
     self.headerBg:SetPoint("TOPRIGHT", -12, -12)
     self.headerBg:SetHeight(55)
+    
+    -- Make header draggable (create invisible button for dragging)
+    self.headerDragArea = CreateFrame("Button", nil, self.mainFrame)
+    self.headerDragArea:SetPoint("TOPLEFT", 12, -12)
+    self.headerDragArea:SetPoint("TOPRIGHT", -12, -12)
+    self.headerDragArea:SetHeight(55)
+    self.headerDragArea:RegisterForDrag("LeftButton")
+    self.headerDragArea:SetScript("OnDragStart", function() self.mainFrame:StartMoving() end)
+    self.headerDragArea:SetScript("OnDragStop", function() self.mainFrame:StopMovingOrSizing() end)
     
     -- Header Separator Line
     self.headerSeparator = self.mainFrame:CreateTexture(nil, "OVERLAY")
