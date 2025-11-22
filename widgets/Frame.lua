@@ -63,14 +63,24 @@ function Frames:Init()
     self.spaceCounter:SetPoint("TOPLEFT", self.mainFrame.title, "TOPRIGHT", 10, 0)
     self.spaceCounter:SetText("0/0")
 
-    -- Search Box
-    self.searchBox = CreateFrame("EditBox", nil, self.mainFrame, "SearchBoxTemplate")
+    -- Search Box (custom with icon for Classic compatibility)
+    self.searchBox = CreateFrame("EditBox", nil, self.mainFrame, "InputBoxTemplate")
     self.searchBox:SetSize(150, 20)
     self.searchBox:SetPoint("TOPRIGHT", -30, -35)
     self.searchBox:SetAutoFocus(false)
     self.searchBox:SetScript("OnTextChanged", function(self)
         NS.Frames:Update()
     end)
+    
+    -- Search Icon (magnifying glass)
+    local searchIcon = self.searchBox:CreateTexture(nil, "OVERLAY")
+    searchIcon:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+    searchIcon:SetSize(14, 14)
+    searchIcon:SetPoint("LEFT", self.searchBox, "LEFT", 3, 0)
+    searchIcon:SetVertexColor(0.6, 0.6, 0.6) -- Gray color
+    
+    -- Adjust text inset to make room for icon
+    self.searchBox:SetTextInsets(20, 10, 0, 0)
 
     -- Money Frame
     self.moneyFrame = CreateFrame("Frame", nil, self.mainFrame)
