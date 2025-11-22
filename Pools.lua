@@ -154,6 +154,40 @@ function NS.Pools:Init()
             
             btn.dummyOverlay = dummy
             
+            -- Search Highlighting
+            btn.UpdateSearch = function(self, searchText)
+                if not searchText or searchText == "" then
+                    self:SetAlpha(1)
+                    SetItemButtonDesaturated(self, false)
+                    if self.QualityBorder then
+                        self.QualityBorder:SetVertexColor(self.qualityR or 1, self.qualityG or 1, self.qualityB or 1)
+                    end
+                    return
+                end
+
+                local matches = false
+                if self.itemLink then
+                    local name = GetItemInfo(self.itemLink)
+                    if name and string.find(string.lower(name), string.lower(searchText), 1, true) then
+                        matches = true
+                    end
+                end
+
+                if matches then
+                    self:SetAlpha(1)
+                    SetItemButtonDesaturated(self, false)
+                    if self.QualityBorder then
+                        self.QualityBorder:SetVertexColor(self.qualityR or 1, self.qualityG or 1, self.qualityB or 1)
+                    end
+                else
+                    self:SetAlpha(0.3)
+                    SetItemButtonDesaturated(self, true)
+                    if self.QualityBorder then
+                        self.QualityBorder:SetVertexColor(0.5, 0.5, 0.5) -- Dim border too
+                    end
+                end
+            end
+            
             return btn
         end,
         function(btn)

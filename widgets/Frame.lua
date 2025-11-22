@@ -114,7 +114,13 @@ function Frames:Init()
     self.searchBox:SetHeight(20)
     self.searchBox:SetAutoFocus(false)
     self.searchBox:SetScript("OnTextChanged", function(self)
-        NS.Frames:Update()
+        local text = self:GetText()
+        local pool = NS.Pools:GetPool("ItemButton")
+        if pool then
+            for btn in pairs(pool.active) do
+                btn:UpdateSearch(text)
+            end
+        end
     end)
     
     -- Search Icon (magnifying glass)
@@ -604,24 +610,11 @@ function Frames:Update(fullUpdate)
                     btn.dummyOverlay:Hide()
                 end
                 
+                -- Store data for search highlighting
+                btn.itemLink = itemData.link
+                
                 SetItemButtonTexture(btn, itemData.texture)
                 SetItemButtonCount(btn, itemData.count)
-                
-                -- Search Highlighting
-                local query = self.searchBox:GetText():lower()
-                if query and query ~= "" then
-                    local itemName = itemData.link:match("%[(.-)%]")
-                    if itemName and itemName:lower():find(query, 1, true) then
-                        btn:SetAlpha(1.0)
-                        btn.IconBorder:SetVertexColor(1, 1, 1) -- Reset border color
-                    else
-                        btn:SetAlpha(0.2) -- Dim non-matches
-                        btn.IconBorder:SetVertexColor(0.5, 0.5, 0.5) -- Dim border
-                    end
-                else
-                    btn:SetAlpha(1.0)
-                    btn.IconBorder:SetVertexColor(1, 1, 1) -- Reset
-                end
                 
                 -- Quality/Quest Border
                 local isQuestItem, questId, isActive = GetContainerItemQuestInfo(itemData.bagID, itemData.slotID)
@@ -643,6 +636,8 @@ function Frames:Update(fullUpdate)
                     if btn.QualityBorder then
                         btn.QualityBorder:SetVertexColor(r, g, b)
                         btn.QualityBorder:Show()
+                        -- Store for search restore
+                        btn.qualityR, btn.qualityG, btn.qualityB = r, g, b
                     end
                 end
                 
