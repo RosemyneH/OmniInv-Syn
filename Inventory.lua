@@ -27,7 +27,7 @@ function Inventory:Init()
     self.frame:RegisterEvent("BANKFRAME_OPENED")
     self.frame:RegisterEvent("BANKFRAME_CLOSED")
     self.frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
-    
+
     self.frame:SetScript("OnEvent", function(self, event, arg1)
         if event == "BAG_UPDATE" or event == "PLAYERBANKSLOTS_CHANGED" then
             -- Event Bucketing: Coalesce rapid-fire BAG_UPDATE events
@@ -48,13 +48,13 @@ function Inventory:Init()
         elseif event == "BANKFRAME_OPENED" then
             NS.Data:SetBankOpen(true)
             Inventory:ScanBags()
-            if NS.Frames then 
+            if NS.Frames then
                 NS.Frames:ShowBankTab()
                 NS.Frames:Update(true)
             end
         elseif event == "BANKFRAME_CLOSED" then
             NS.Data:SetBankOpen(false)
-            if NS.Frames then 
+            if NS.Frames then
                 -- Don't hide bank tab or switch view!
                 -- Just update to show offline state
                 NS.Frames:Update(true)
@@ -67,24 +67,28 @@ end
 function Inventory:ScanBags()
     wipe(self.items)
     local newState = {}
-    
+
     -- Helper to scan a list of bags
     local function scanList(bagList, locationType)
+        local addedItems = {}
+        local removedItems = {}
+
         for _, bagID in ipairs(bagList) do
             local numSlots = GetContainerNumSlots(bagID)
             for slotID = 1, numSlots do
                 local texture, count, locked, quality, readable, lootable, link, isFiltered, noValue, itemID = GetContainerItemInfo(bagID, slotID)
-                
+
                 local key = bagID .. ":" .. slotID
-                
+
                 -- Track current state
                 if link then
                     newState[key] = {
                         link = link,
                         count = count,
-                        texture = texture
+                        texture = texture,
+                        itemID = itemID
                     }
-                    
+
                     table.insert(self.items, {
                         bagID = bagID,
                         slotID = slotID,
@@ -97,18 +101,20 @@ function Inventory:ScanBags()
                         category = NS.Categories:GetCategory(link)
                     })
                 end
-                
+
                 -- Compare with previous state to detect changes
                 local prev = self.previousState[key]
                 local curr = newState[key]
-                
+
                 -- Mark dirty if changed
                 if not prev and curr then
-                    -- New item
+                    -- New item (potentially)
                     self:MarkDirty(bagID, slotID)
+                    table.insert(addedItems, {bagID = bagID, slotID = slotID, itemID = itemID})
                 elseif prev and not curr then
                     -- Item removed
                     self:MarkDirty(bagID, slotID)
+                    table.insert(removedItems, {itemID = prev.itemID})
                 elseif prev and curr then
                     -- Check if item changed (different link or count)
                     if prev.link ~= curr.link or prev.count ~= curr.count then
@@ -117,17 +123,42 @@ function Inventory:ScanBags()
                 end
             end
         end
+
+        -- Process New Items (Filter out moves)
+        if not self.firstScan then
+            for _, added in ipairs(addedItems) do
+                local isMove = false
+                -- Check if this itemID was removed elsewhere
+                for i, removed in ipairs(removedItems) do
+                    if removed.itemID == added.itemID then
+                        -- It's a move! Remove from removedItems so we don't match it again
+                        table.remove(removedItems, i)
+                        isMove = true
+                        break
+                    end
+                end
+
+                if not isMove then
+                    self.newItems[added.bagID .. ":" .. added.slotID] = true
+                end
+            end
+        end
     end
 
     scanList(BAGS, "bags")
-    -- scanList({KEYRING}, "keyring") 
+
     if NS.Data:IsBankOpen() then
         scanList(BANK, "bank")
     end
-    
+
+    -- Clear first scan flag after processing bags
+    if self.firstScan then
+        self.firstScan = false
+    end
+
     -- Update previous state for next comparison
     self.previousState = newState
-    
+
     -- Sort
     table.sort(self.items, function(a, b) return NS.Categories:CompareItems(a, b) end)
 
@@ -158,4 +189,30 @@ end
 
 function Inventory:SetFullUpdate(value)
     self.forceFullUpdate = value
+end
+
+-- =============================================================================
+-- New Item Tracking
+-- =============================================================================
+
+Inventory.newItems = {}
+Inventory.firstScan = true
+
+function Inventory:IsNew(bagID, slotID)
+    return self.newItems[bagID .. ":" .. slotID]
+end
+
+function Inventory:ClearNew(bagID, slotID)
+    if self.newItems[bagID .. ":" .. slotID] then
+        self.newItems[bagID .. ":" .. slotID] = nil
+        -- Force update to remove glow
+        if NS.Frames then NS.Frames:Update(true) end
+    end
+end
+
+-- Helper to extract Item ID from link
+local function GetItemID(link)
+    if not link then return nil end
+    local id = link:match("item:(%d+)")
+    return tonumber(id)
 end

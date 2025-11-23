@@ -860,12 +860,64 @@ function Frames:Update(fullUpdate)
                 end
                 if itemData.quality == 0 then btn.junkIcon:Show() else btn.junkIcon:Hide() end
 
+                -- New Item Highlight
+                if NS.Inventory:IsNew(itemData.bagID, itemData.slotID) then
+                    if not btn.newGlow then
+                        btn.newGlow = btn:CreateTexture(nil, "OVERLAY")
+                        btn.newGlow:SetTexture("Interface\\Cooldown\\star4")
+                        btn.newGlow:SetPoint("CENTER")
+                        btn.newGlow:SetSize(ITEM_SIZE * 1.8, ITEM_SIZE * 1.8)
+                        btn.newGlow:SetBlendMode("ADD")
+                        btn.newGlow:SetVertexColor(1, 1, 0, 0.8) -- Yellow glow
+
+                        -- Animation
+                        local ag = btn.newGlow:CreateAnimationGroup()
+                        local spin = ag:CreateAnimation("Rotation")
+                        spin:SetDegrees(360)
+                        spin:SetDuration(10)
+                        ag:SetLooping("REPEAT")
+                        ag:Play()
+                        btn.newGlow.ag = ag
+                    end
+                    btn.newGlow:Show()
+                    btn.newGlow.ag:Play()
+                else
+                    if btn.newGlow then
+                        btn.newGlow:Hide()
+                        btn.newGlow.ag:Stop()
+                    end
+                end
+
                 -- Store item data reference
                 btn.itemData = itemData
 
                 -- Standard Template handles clicks now!
                 -- We only need to ensure the button is shown
                 btn:Show()
+
+                -- Clear New Status on Hover
+                btn:SetScript("OnEnter", function(self)
+                    if self.itemData then
+                        NS.Inventory:ClearNew(self.itemData.bagID, self.itemData.slotID)
+                    end
+
+                    -- Standard Tooltip
+                    if self.itemData.location == "bank" then
+                        -- Bank tooltip logic
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        if self.itemData.link then
+                            GameTooltip:SetHyperlink(self.itemData.link)
+                        end
+                        GameTooltip:Show()
+                    else
+                        -- Standard bag tooltip
+                        ContainerFrameItemButton_OnEnter(self)
+                    end
+                end)
+
+                btn:SetScript("OnLeave", function(self)
+                    GameTooltip:Hide()
+                end)
 
                 btnIdx = btnIdx + 1
             end
