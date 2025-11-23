@@ -143,7 +143,7 @@ ZenBags/
 - [ ] New item glow/tracking
 - [ ] Cross-character inventory viewing
 - [ ] Custom category filters
-- [ ] Item level display on equipment
+- [x] Item level display on equipment
 - [ ] Profession bag integration
 - [ ] Bag slot management UI
 
