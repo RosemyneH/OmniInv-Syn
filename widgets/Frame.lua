@@ -198,11 +198,19 @@ function Frames:Init()
     self.spaceCounter:SetText("0/0")
 
     -- Search Box (sticky, below header, NOT in scroll frame)
-    self.searchBox = CreateFrame("EditBox", nil, self.mainFrame, "InputBoxTemplate")
+    self.searchBox = CreateFrame("EditBox", nil, self.mainFrame)
     self.searchBox:SetPoint("TOPLEFT", 20, -48)
     self.searchBox:SetPoint("TOPRIGHT", -38, -48)
-    self.searchBox:SetHeight(20)
+    self.searchBox:SetHeight(22)
     self.searchBox:SetAutoFocus(false)
+    self.searchBox:SetFont("Fonts\\FRIZQT__.TTF", 12)
+    self.searchBox:SetTextColor(0.9, 0.9, 0.9, 1)
+
+    -- Simple dark background
+    local searchBg = self.searchBox:CreateTexture(nil, "BACKGROUND")
+    searchBg:SetAllPoints()
+    searchBg:SetTexture(0.12, 0.12, 0.12, 1)
+
     self.searchBox:SetScript("OnTextChanged", function(self)
         local text = self:GetText()
         local pool = NS.Pools:GetPool("ItemButton")
