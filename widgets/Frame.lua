@@ -863,7 +863,7 @@ function Frames:Update(fullUpdate)
 
             -- Calculate section height
             local numRows = math.ceil(#catItems / itemCols)
-            local gridHeight = numRows * (ITEM_SIZE + PADDING)
+            local gridHeight = numRows * ITEM_SIZE + (numRows - 1) * PADDING
             currentSectionHeight = currentSectionHeight + gridHeight
         end
 
