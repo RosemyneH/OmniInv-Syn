@@ -105,13 +105,13 @@ function Frames:Init()
     self.headerBg:SetTexture(unpack(COLORS.HEADER))
     self.headerBg:SetPoint("TOPLEFT", 0, 0)
     self.headerBg:SetPoint("TOPRIGHT", 0, 0)
-    self.headerBg:SetHeight(30)
+    self.headerBg:SetHeight(40)
 
     -- Make header draggable (create invisible button for dragging)
     self.headerDragArea = CreateFrame("Button", nil, self.mainFrame)
     self.headerDragArea:SetPoint("TOPLEFT", 0, 0)
     self.headerDragArea:SetPoint("TOPRIGHT", 0, 0)
-    self.headerDragArea:SetHeight(30)
+    self.headerDragArea:SetHeight(40)
     self.headerDragArea:RegisterForDrag("LeftButton")
     self.headerDragArea:SetScript("OnDragStart", function() self.mainFrame:StartMoving() end)
     self.headerDragArea:SetScript("OnDragStop", function() self.mainFrame:StopMovingOrSizing() end)
@@ -119,14 +119,11 @@ function Frames:Init()
     -- Header Separator Line (Thin & Sharp)
     self.headerSeparator = self.mainFrame:CreateTexture(nil, "OVERLAY")
     self.headerSeparator:SetTexture(unpack(COLORS.ACCENT))
-    self.headerSeparator:SetPoint("TOPLEFT", 0, -30)
-    self.headerSeparator:SetPoint("TOPRIGHT", 0, -30)
+    self.headerSeparator:SetPoint("TOPLEFT", 0, -40)
+    self.headerSeparator:SetPoint("TOPRIGHT", 0, -40)
     self.headerSeparator:SetHeight(1)
 
-    -- Title
-    self.mainFrame.title = self.mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    self.mainFrame.title:SetPoint("TOP", 0, -8)
-    self.mainFrame.title:SetText("ZenBags")
+
 
     -- Close Button (raised frame level to be above drag area)
     self.mainFrame.closeBtn = CreateFrame("Button", nil, self.mainFrame, "UIPanelCloseButton")
@@ -152,8 +149,8 @@ function Frames:Init()
 
     -- Character Dropdown Button (Top Left)
     self.charButton = CreateFrame("Button", "ZenBagsCharButton", self.mainFrame)
-    self.charButton:SetSize(100, 18)
-    self.charButton:SetPoint("TOPLEFT", 8, -6) -- Aligned with top-left padding
+    self.charButton:SetSize(120, 20)
+    self.charButton:SetPoint("TOPLEFT", 10, -10)
     self.charButton:SetFrameLevel(self.mainFrame:GetFrameLevel() + 10)
 
     -- Dropdown arrow texture
@@ -263,7 +260,7 @@ function Frames:Init()
 
     -- Scroll Frame (starts below sticky search bar)
     self.scrollFrame = CreateFrame("ScrollFrame", "ZenBagsScrollFrame", self.mainFrame, "UIPanelScrollFrameTemplate")
-    self.scrollFrame:SetPoint("TOPLEFT", 15, -78)
+    self.scrollFrame:SetPoint("TOPLEFT", 15, -88)
     self.scrollFrame:SetPoint("BOTTOMRIGHT", -35, 40) -- Balanced spacing - no overlap, minimal waste
 
     self.content = CreateFrame("Frame", nil, self.scrollFrame)
@@ -475,13 +472,7 @@ function Frames:ShowCharacterDropdown()
                 -- Update button text
                 self.charButton.text:SetText(charData.name)
 
-                -- Update title to show viewing another character
-                if NS.Data:IsViewingOtherCharacter() then
-                    local viewName = self.currentView == "bank" and "Bank" or "Bags"
-                    self.mainFrame.title:SetText("ZenBags - " .. charData.name .. " (" .. viewName .. ")")
-                else
-                    self.mainFrame.title:SetText("ZenBags")
-                end
+                -- Title removed in header redesign
 
                 -- Force full update
                 self:Update(true)
