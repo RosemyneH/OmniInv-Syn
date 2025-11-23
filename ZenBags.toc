@@ -19,5 +19,5 @@ Categories.lua
 Inventory.lua
 
 # UI Widgets
-widgets\Frame.lua
 widgets\Settings.lua
+widgets\Frame.lua

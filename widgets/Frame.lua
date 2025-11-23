@@ -133,6 +133,8 @@ function Frames:Init()
     self.settingsBtn = NS.Utils:CreateFlatButton(self.mainFrame, "", 20, 20, function()
         if NS.Settings then
             NS.Settings:Toggle()
+        else
+            print("|cFFFF0000ZenBags Error:|r Settings module not loaded.")
         end
     end)
     self.settingsBtn:SetPoint("RIGHT", self.mainFrame.closeBtn, "LEFT", -5, 0)
@@ -913,16 +915,11 @@ function Frames:Update(fullUpdate)
                 -- We only need to ensure the button is shown
                 btn:Show()
 
-                -- Clear New Status on Click (not hover!)
-                btn:HookScript("OnClick", function(self, button)
+                -- Clear New Status on Hover
+                btn:SetScript("OnEnter", function(self)
                     if self.itemData then
                         NS.Inventory:ClearNew(self.itemData.bagID, self.itemData.slotID)
                     end
-                end)
-
-                -- Hover shows tooltip WITHOUT clearing new status
-                btn:SetScript("OnEnter", function(self)
-                    -- DO NOT clear new status here - let user inspect first!
 
                     -- Standard Tooltip
                     if self.itemData.location == "bank" then
