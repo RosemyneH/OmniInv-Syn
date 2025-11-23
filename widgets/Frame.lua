@@ -522,6 +522,9 @@ function Frames:ShowCharacterDropdown()
                 -- Update button text
                 self.charButton.text:SetText(charData.name)
 
+                -- Clear search box when switching characters
+                self.searchBox:SetText("")
+
                 -- Title removed in header redesign
 
                 -- Force full update
