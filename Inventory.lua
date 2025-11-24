@@ -27,37 +27,38 @@ function Inventory:Init()
     ZenBagsDB = ZenBagsDB or {}
 
     -- Database Versioning
-    local DB_VERSION = 3  -- Bump version for new timestamp system
+    local DB_VERSION = 4  -- Bump again for per-character timestamps
     if not ZenBagsDB.version or ZenBagsDB.version < DB_VERSION then
         print("ZenBags: Upgrading database to version " .. DB_VERSION .. ". Resetting data.")
         wipe(ZenBagsDB)
         ZenBagsDB.version = DB_VERSION
     end
 
-    -- NEW: Timestamp-based tracking (itemID -> timestamp when it became new)
+    -- Get character key
+    local charKey = NS.Data:GetCurrentCharacterKey()
+
+    -- Initialize per-character data structures
     ZenBagsDB.itemTimestamps = ZenBagsDB.itemTimestamps or {}
     ZenBagsDB.previousItemCounts = ZenBagsDB.previousItemCounts or {}
-
-    -- Track last logout time for this character
-    local charKey = NS.Data:GetCurrentCharacterKey()
     ZenBagsDB.characterData = ZenBagsDB.characterData or {}
+
+    -- Initialize this character's data
+    ZenBagsDB.itemTimestamps[charKey] = ZenBagsDB.itemTimestamps[charKey] or {}
+    ZenBagsDB.previousItemCounts[charKey] = ZenBagsDB.previousItemCounts[charKey] or {}
     ZenBagsDB.characterData[charKey] = ZenBagsDB.characterData[charKey] or {}
 
     -- Advance timestamps by offline time (so only in-game time counts)
     local lastLogout = ZenBagsDB.characterData[charKey].lastLogout
     if lastLogout then
         local offlineTime = time() - lastLogout
-        for itemID, timestamp in pairs(ZenBagsDB.itemTimestamps) do
-            ZenBagsDB.itemTimestamps[itemID] = timestamp + offlineTime
+        for itemID, timestamp in pairs(ZenBagsDB.itemTimestamps[charKey]) do
+            ZenBagsDB.itemTimestamps[charKey][itemID] = timestamp + offlineTime
         end
     end
 
-    -- Load previous item counts for this character
-    ZenBagsDB.previousItemCounts[charKey] = ZenBagsDB.previousItemCounts[charKey] or {}
+    -- Load this character's data
     self.previousItemCounts = ZenBagsDB.previousItemCounts[charKey]
-
-    -- Reference to timestamps table
-    self.itemTimestamps = ZenBagsDB.itemTimestamps
+    self.itemTimestamps = ZenBagsDB.itemTimestamps[charKey]
 
     self.frame = CreateFrame("Frame")
     self.frame:RegisterEvent("BAG_UPDATE")
@@ -247,7 +248,9 @@ function Inventory:ScanBags()
             if count > prevCount then
                 -- Item count increased, mark as new with timestamp
                 self.itemTimestamps[itemID] = currentTime
-                ZenBagsDB.itemTimestamps = self.itemTimestamps
+                -- Save to character-specific table
+                local charKey = NS.Data:GetCurrentCharacterKey()
+                ZenBagsDB.itemTimestamps[charKey] = self.itemTimestamps
             end
         end
     end
@@ -366,7 +369,8 @@ end
 function Inventory:ClearNew(itemID)
     if self.itemTimestamps then
         self.itemTimestamps[itemID] = nil
-        ZenBagsDB.itemTimestamps = self.itemTimestamps
+        local charKey = NS.Data:GetCurrentCharacterKey()
+        ZenBagsDB.itemTimestamps[charKey] = self.itemTimestamps
     end
     -- Force update to remove glow
     if NS.Frames then NS.Frames:Update(true) end
@@ -374,7 +378,8 @@ end
 
 function Inventory:ClearRecentItems()
     wipe(self.itemTimestamps)
-    ZenBagsDB.itemTimestamps = self.itemTimestamps
+    local charKey = NS.Data:GetCurrentCharacterKey()
+    ZenBagsDB.itemTimestamps[charKey] = self.itemTimestamps
     -- Force full update to re-categorize items
     self:ScanBags()
     if NS.Frames then NS.Frames:Update(true) end
