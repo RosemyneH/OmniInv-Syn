@@ -165,6 +165,7 @@ function Inventory:ScanBags()
             local prevCount = self.previousItemCounts[itemID] or 0
             if count > prevCount then
                 -- Item count increased, mark as new
+                print("ZenBags Debug: New Item Detected! ID:", itemID, "Count:", count, "Prev:", prevCount)
                 self.newItems[itemID] = true
                 ZenBagsDB.newItems = self.newItems
             end
