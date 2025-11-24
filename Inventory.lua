@@ -51,6 +51,7 @@ function Inventory:Init()
     -- Always start with a clean slate on login
     print("ZenBags: Clearing recent items (new session)")
     ZenBagsDB.itemTimestamps[charKey] = {}
+    ZenBagsDB.previousItemCounts[charKey] = {}  -- CRITICAL: Clear this too!
 
     -- Load this character's data
     self.previousItemCounts = ZenBagsDB.previousItemCounts[charKey]
