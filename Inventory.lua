@@ -47,34 +47,10 @@ function Inventory:Init()
     ZenBagsDB.previousItemCounts[charKey] = ZenBagsDB.previousItemCounts[charKey] or {}
     ZenBagsDB.characterData[charKey] = ZenBagsDB.characterData[charKey] or {}
 
-    -- CRITICAL: Clean up expired timestamps ON LOGIN
-    local currentTime = time()
-    local RECENT_ITEM_DURATION = 300 -- 5 minutes
-    local lastLogout = ZenBagsDB.characterData[charKey].lastLogout
-
-    if lastLogout then
-        -- Calculate how long we were offline
-        local offlineTime = currentTime - lastLogout
-
-        -- Check each timestamp - it should be from WITHIN the last 5 minutes of GAME time
-        -- Game time = current time - offline time
-        local gameTime = currentTime - offlineTime
-
-        for itemID, timestamp in pairs(ZenBagsDB.itemTimestamps[charKey]) do
-            -- How old is this timestamp in game time?
-            local ageInGameTime = gameTime - timestamp
-
-            if ageInGameTime > RECENT_ITEM_DURATION then
-                -- Too old, remove it
-                ZenBagsDB.itemTimestamps[charKey][itemID] = nil
-                print("ZenBags DEBUG: Removed expired timestamp for itemID " .. itemID .. " (age: " .. ageInGameTime .. "s)")
-            end
-        end
-    else
-        -- First login ever, or no logout data - clear all timestamps
-        print("ZenBags: First login or no logout data. Clearing timestamps.")
-        wipe(ZenBagsDB.itemTimestamps[charKey])
-    end
+    -- SIMPLE APPROACH: Recent Items = THIS SESSION ONLY
+    -- Always start with a clean slate on login
+    print("ZenBags: Clearing recent items (new session)")
+    ZenBagsDB.itemTimestamps[charKey] = {}
 
     -- Load this character's data
     self.previousItemCounts = ZenBagsDB.previousItemCounts[charKey]
@@ -155,16 +131,6 @@ function Inventory:Init()
     -- Don't scan here - bags aren't loaded yet!
     -- Wait for first BAG_UPDATE event instead
 end
-
--- Track logout time for offline time adjustment
-local logoutFrame = CreateFrame("Frame")
-logoutFrame:RegisterEvent("PLAYER_LOGOUT")
-logoutFrame:SetScript("OnEvent", function()
-    local charKey = NS.Data:GetCurrentCharacterKey()
-    ZenBagsDB.characterData = ZenBagsDB.characterData or {}
-    ZenBagsDB.characterData[charKey] = ZenBagsDB.characterData[charKey] or {}
-    ZenBagsDB.characterData[charKey].lastLogout = time()
-end)
 
 -- Helper for debug logging
 function Inventory:CountNewItems()
