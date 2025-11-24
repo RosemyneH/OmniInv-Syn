@@ -208,37 +208,11 @@ function Frames:Init()
             local copper = trashValue % 100
             GameTooltip:AddLine(string.format("Value: %dg %ds %dc", gold, silver, copper), 1, 1, 0.5)
         else
-    GameTooltip:AddLine("No trash items", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("No trash items", 0.5, 0.5, 0.5)
         end
         GameTooltip:Show()
     end)
     self.trashBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-        GameTooltip:Hide()
-    end)
-
-    -- Resort Indicator (shown when items need resorting)
-    self.resortIndicator = NS.Utils:CreateFlatButton(self.mainFrame, "↻ Resort", 70, 20, function()
-        NS.Inventory:ApplyProposedState()
-    end)
-    self.resortIndicator:SetPoint("RIGHT", self.trashBtn, "LEFT", -5, 0)
-    self.resortIndicator:SetFrameLevel(self.mainFrame:GetFrameLevel() + 10)
-    self.resortIndicator:Hide()
-
-    -- Yellow color for resort button
-    self.resortIndicator.text:SetTextColor(1, 0.8, 0, 1)
-
-    self.resortIndicator:SetScript("OnEnter", function(self)
-        NS.Utils:CreateBackdrop(self)
-        self:SetBackdropColor(unpack(NS.Utils.COLORS.HIGHLIGHT or {0.3, 0.3, 0.3, 1}))
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Items have changed", 1, 1, 1)
-        GameTooltip:AddLine("Click to resort", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-
-    self.resortIndicator:SetScript("OnLeave", function(self)
-        NS.Utils:CreateBackdrop(self)
         self:SetBackdropColor(0.15, 0.15, 0.15, 1)
         GameTooltip:Hide()
     end)
@@ -549,19 +523,12 @@ end
 
 function Frames:Show()
     self.mainFrame:Show()
-    NS.Inventory.windowOpen = true
     NS.Inventory:SetFullUpdate(true)  -- Force full update on show
     self:Update(true)
 end
 
 function Frames:Hide()
     self.mainFrame:Hide()
-    NS.Inventory.windowOpen = false
-
-    -- Apply pending changes when window closes
-    if NS.Inventory.proposedState.needsResort then
-        NS.Inventory:ApplyProposedState()
-    end
 end
 
 
@@ -747,13 +714,6 @@ function Frames:Update(fullUpdate)
         self.trashBtn:Show()
     else
         self.trashBtn:Hide()
-    end
-
-    -- Show/hide resort indicator based on proposed state
-    if NS.Inventory.proposedState.needsResort then
-        self.resortIndicator:Show()
-    else
-        self.resortIndicator:Hide()
     end
 
     local allItems = {}

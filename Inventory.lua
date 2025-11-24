@@ -22,19 +22,6 @@ Inventory.dirtySlots = {}
 Inventory.previousState = {}  -- bagID:slotID -> {link, count, texture}
 Inventory.forceFullUpdate = false
 
--- Dry run pattern: parallel state tracking
-Inventory.currentState = {
-    items = {},
-    sortedAt = 0,
-}
-
-Inventory.proposedState = {
-    items = {},
-    needsResort = false,
-}
-
-Inventory.windowOpen = false
-
 function Inventory:Init()
     -- Initialize SavedVariables structure
     ZenBagsDB = ZenBagsDB or {}
@@ -230,29 +217,6 @@ function Inventory:ScanBags()
     -- Sort
     table.sort(self.items, function(a, b) return NS.Categories:CompareItems(a, b) end)
 
-    -- Dry run pattern: decide which state to update
-    if self.windowOpen then
-        -- Window is open - update proposed state and compare
-        wipe(self.proposedState.items)
-        for i, item in ipairs(self.items) do
-            self.proposedState.items[i] = item
-        end
-
-        -- Check if resort is needed
-        self.proposedState.needsResort = not self:StatesEqual(
-            self.currentState.items,
-            self.proposedState.items
-        )
-    else
-        -- Window is closed - update current state immediately
-        wipe(self.currentState.items)
-        for i, item in ipairs(self.items) do
-            self.currentState.items[i] = item
-        end
-        self.currentState.sortedAt = GetTime()
-        self.proposedState.needsResort = false
-    end
-
     -- Update the Data Layer cache
     NS.Data:UpdateCache()
 
@@ -293,41 +257,7 @@ end
 Inventory.firstScan = true
 
 function Inventory:IsNew(itemID)
-    return self.newItems[itemID] == true
-end
-
---- Compare two item states to detect if resort is needed
-function Inventory:StatesEqual(items1, items2)
-    if #items1 ~= #items2 then return false end
-
-    for i = 1, #items1 do
-        local item1, item2 = items1[i], items2[i]
-        if not item1 or not item2 then return false end
-        if item1.itemID ~= item2.itemID or
-           item1.bagID ~= item2.bagID or
-           item1.slotID ~= item2.slotID then
-            return false
-        end
-    end
-
-    return true
-end
-
---- Apply proposed state to current state (called when window closes or user clicks resort)
-function Inventory:ApplyProposedState()
-    -- Deep copy proposed items to current
-    wipe(self.currentState.items)
-    for i, item in ipairs(self.proposedState.items) do
-        self.currentState.items[i] = item
-    end
-
-    self.currentState.sortedAt = GetTime()
-    self.proposedState.needsResort = false
-
-    -- Trigger UI update
-    if NS.Frames then
-        NS.Frames:Update(true)
-    end
+    return self.newItems[itemID]
 end
 
 function Inventory:ClearNew(itemID)
