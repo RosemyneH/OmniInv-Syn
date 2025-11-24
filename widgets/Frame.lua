@@ -652,9 +652,10 @@ function Frames:UpdateDropdownList()
             btn:SetSize(190, BUTTON_HEIGHT)
 
             -- Highlight texture
-            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+            local hl = btn:CreateTexture(nil, "BACKGROUND")
             hl:SetAllPoints()
             hl:SetTexture(1, 1, 1, 0.1)
+            btn:SetHighlightTexture(hl)
 
             -- Text
             btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
