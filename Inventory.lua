@@ -122,6 +122,13 @@ function Inventory:Init()
     -- Wait for first BAG_UPDATE event instead
 end
 
+-- Helper for debug logging
+function Inventory:CountNewItems()
+    local count = 0
+    for _ in pairs(self.newItems) do count = count + 1 end
+    return count
+end
+
 --- Fast path for updating item slot colors without full layout recalculation.
 --- Use this for search highlighting, category color changes, etc.
 --- Much faster than full Update() cycle.
@@ -150,6 +157,7 @@ function Inventory:UpdateItemSlotColors()
 end
 
 function Inventory:ScanBags()
+    print("ZenBags DEBUG: ScanBags() called. Current newItems count: " .. self:CountNewItems())
     wipe(self.items)
 
     local currentCounts = {}
