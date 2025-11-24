@@ -281,11 +281,18 @@ end
 function Inventory:GetTrashItems()
     local trashItems = {}
     for _, item in ipairs(self.items) do
-        if item.quality == 0 and item.location == "bags" then
-            -- Get itemID to check for exclusions
+        if item.location == "bags" then
+            -- Get item info for quality and category checks
+            local _, _, quality, _, _, itemClass, itemSubClass = GetItemInfo(item.link)
             local itemID = select(1, GetItemInfo(item.link))
+
             -- Exclude Hearthstone (6948) - it's grey but should never be sold
-            if itemID and itemID ~= 6948 then
+            if itemID == 6948 then
+                -- Skip Hearthstone
+            -- Check if item is trash:
+            -- 1. Grey/Poor quality (quality == 0)
+            -- 2. OR marked as Junk category/class by Blizzard (even if common quality)
+            elseif quality == 0 or itemClass == "Junk" or itemSubClass == "Junk" then
                 table.insert(trashItems, item)
             end
         end
