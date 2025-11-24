@@ -16,18 +16,15 @@ ZenBags brings zen to your inventory management with blazing-fast performance, i
 
 ### 🎯 Smart Organization
 - **Auto-Categorization**: Items automatically grouped by type (Quest, Trade Goods, Equipment, etc.)
-- **New Items Category**: Recently looted items appear in a special category at the top
 - **Collapsible Sections**: Click section headers to expand/collapse categories
 - **Visual Hierarchy**: Clear section headers with item counts
 - **Quality Borders**: Color-coded borders for item quality at a glance
 - **Quest Item Highlighting**: Never miss a quest item again
-- **Item Level Display**: Equipment shows item level for quick comparisons
 
 ### 🎨 Clean Interface
 - **Single Unified Bag**: All your bags in one convenient window
 - **Bank Integration**: Seamless bank viewing with offline caching
-- **Character Switching**: View any character's inventory from the dropdown
-- **Real-time Search**: Instantly filter items as you type with visual dimming
+- **Real-time Search**: Instantly filter items as you type
 - **Space Counter**: Always know how much space you have left
 - **Money Display**: Gold, silver, copper - clearly visible
 - **In-Game Settings Panel**: Configure everything without editing files
@@ -67,13 +64,7 @@ ZenBags brings zen to your inventory management with blazing-fast performance, i
 
 ### Managing Sections
 - Click section headers to collapse/expand categories
-- Right-click the **"New Items"** header to clear the "new" status from all items
 - Collapsed state persists between sessions
-
-### Character Switching
-- Click the character name in the header to open the dropdown
-- Select any character to view their cached inventory
-- Click the red **X** button to delete a character's cached data
 
 ### Drag & Drop
 - Drag items from anywhere (character panel, other bags)
@@ -85,7 +76,6 @@ ZenBags brings zen to your inventory management with blazing-fast performance, i
 - **Right-Click**: Use / Equip / Consume
 - **Shift-Click**: Link in chat
 - **Ctrl-Click**: Try on equipment
-- **Hover**: Items marked as "new" lose their status when you mouse over them
 
 ---
 
@@ -148,10 +138,10 @@ ZenBags/
 - [x] In-game settings panel
 
 ### Phase 2: Advanced Features 🚧
-- [x] Search highlighting (dim non-matching items)
+- [ ] Search highlighting (dim non-matching items)
 - [ ] Item count badges (show total count across bags)
-- [x] New item glow/tracking with "New Items" category
-- [x] Cross-character inventory viewing with deletion
+- [ ] New item glow/tracking
+- [ ] Cross-character inventory viewing
 - [ ] Custom category filters
 - [x] Item level display on equipment
 - [ ] Profession bag integration

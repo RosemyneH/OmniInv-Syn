@@ -3,19 +3,6 @@ local addonName, NS = ...
 NS.Utils = {}
 local Utils = NS.Utils
 
--- WotLK-compatible timer (C_Timer doesn't exist in WotLK)
-function Utils:After(delay, callback)
-    local frame = CreateFrame("Frame")
-    local elapsed = 0
-    frame:SetScript("OnUpdate", function(self, delta)
-        elapsed = elapsed + delta
-        if elapsed >= delay then
-            self:SetScript("OnUpdate", nil)
-            callback()
-        end
-    end)
-end
-
 function Utils:Init()
     self:SetupSellingProtection()
 end

@@ -1,4 +1,4 @@
-## Interface: 30300
+## Interface: 30403
 ## Title: ZenBags
 ## Notes: A comprehensive "One Bag" inventory management addon.
 ## Author: Antigravity
@@ -19,8 +19,5 @@ Categories.lua
 Inventory.lua
 
 # UI Widgets
-widgets/Settings.lua
-widgets/FrameHelpers.lua
-widgets/FrameHeader.lua
-widgets/FrameContent.lua
-widgets/Frame.lua
+widgets\Settings.lua
+widgets\Frame.lua

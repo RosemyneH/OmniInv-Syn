@@ -43,19 +43,19 @@ function Inventory:Init()
             wipe(Inventory.newItems)
             ZenBagsDB.newItems = Inventory.newItems
         elseif event == "PLAYER_ENTERING_WORLD" then
-            -- Delayed bag scan to ensure everything is loaded
-            NS.Utils:After(1.0, function()
-                Inventory:ScanBags()
-                if NS.Frames then NS.Frames:Update(true) end
-            end)
+            -- Force a scan when entering world to ensure items are loaded
+            -- This fixes the issue where alt characters show empty inventory
+            Inventory:ScanBags()
+            if NS.Frames then NS.Frames:Update(true) end
         elseif event == "BAG_UPDATE" or event == "PLAYERBANKSLOTS_CHANGED" then
             -- Event Bucketing: Coalesce rapid-fire BAG_UPDATE events
+            -- This reduces updates from ~50/sec to ~10/sec during looting
             if not Inventory.updatePending then
                 Inventory.updatePending = true
-                NS.Utils:After(Inventory.bucketDelay, function()
-                    Inventory.updatePending = false
+                C_Timer.After(Inventory.bucketDelay, function()
                     Inventory:ScanBags()
                     if NS.Frames then NS.Frames:Update() end
+                    Inventory.updatePending = false
                 end)
             end
         elseif event == "PLAYER_MONEY" then
@@ -122,7 +122,7 @@ function Inventory:ScanBags()
                         itemID = itemID,
                         iLevel = isEquipment and iLevel or nil, -- Store iLevel
                         location = locationType, -- "bags", "bank", "keyring"
-                        category = NS.Categories:GetCategory(link, bagID, slotID)
+                        category = NS.Categories:GetCategory(link)
                     })
                 end
 
@@ -143,12 +143,6 @@ function Inventory:ScanBags()
                     -- Check if item changed (different link or count)
                     if prev.link ~= curr.link or prev.count ~= curr.count then
                         self:MarkDirty(bagID, slotID)
-
-                        -- If count increased or link changed, treat as potential new item
-                        -- This handles looting items into existing stacks
-                        if prev.count < curr.count or prev.link ~= curr.link then
-                             table.insert(addedItems, {bagID = bagID, slotID = slotID, itemID = itemID})
-                        end
                     end
                 end
             end
@@ -190,13 +184,6 @@ function Inventory:ScanBags()
     -- Clear first scan flag after establishing baseline state
     if self.firstScan then
         self.firstScan = false
-    end
-
-    -- RE-EVALUATE CATEGORIES
-    -- Now that newItems is updated, we must update the category for all items
-    -- otherwise they will be categorized based on the OLD newItems state
-    for _, item in ipairs(self.items) do
-        item.category = NS.Categories:GetCategory(item.link, item.bagID, item.slotID)
     end
 
     -- Sort
@@ -251,23 +238,6 @@ function Inventory:ClearNew(bagID, slotID)
         -- Force update to remove glow
         if NS.Frames then NS.Frames:Update(true) end
     end
-end
-
-function Inventory:ClearAllNewItems()
-    wipe(self.newItems)
-    ZenBagsDB.newItems = self.newItems
-
-    -- Re-evaluate categories for all items
-    -- This is required because the item objects still hold the old "New Items" category
-    for _, item in ipairs(self.items) do
-        item.category = NS.Categories:GetCategory(item.link, item.bagID, item.slotID)
-    end
-
-    -- Re-sort to move items to their correct sections
-    table.sort(self.items, function(a, b) return NS.Categories:CompareItems(a, b) end)
-
-    -- Force full update to re-render
-    if NS.Frames then NS.Frames:Update(true) end
 end
 
 -- Helper to extract Item ID from link
