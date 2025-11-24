@@ -197,7 +197,9 @@ function Inventory:UpdateItemSlotColors()
 end
 
 function Inventory:ScanBags()
-    print("ZenBags DEBUG: ScanBags() called. Current newItems count: " .. self:CountNewItems())
+    -- DEBUG: Track scan calls
+    self.scanCount = (self.scanCount or 0) + 1
+    print("ZenBags DEBUG: ScanBags() called (#" .. self.scanCount .. "). Current newItems count: " .. self:CountNewItems())
     wipe(self.items)
 
     local currentCounts = {}
