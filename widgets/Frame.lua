@@ -177,12 +177,28 @@ function Frames:Init()
             return
         end
 
-        -- Sell all trash items
+        -- Track items being sold
+        local itemsToSell = {}
         for _, item in ipairs(trashItems) do
+            -- Check if merchant will accept this item (has vendor price)
+            local _, _, _, _, _, _, _, _, _, _, vendorPrice = GetItemInfo(item.link)
+            if vendorPrice and vendorPrice > 0 then
+                table.insert(itemsToSell, item)
+            end
+        end
+
+        if #itemsToSell == 0 then
+            print("|cFFFF0000ZenBags:|r Merchant doesn't want any of these items.")
+            return
+        end
+
+        -- Sell all acceptable trash items
+        for _, item in ipairs(itemsToSell) do
             UseContainerItem(item.bagID, item.slotID)
         end
 
-        print("|cFF00FF00ZenBags:|r Sold " .. #trashItems .. " trash items.")
+        -- Show success message with count of items that will be sold
+        print("|cFF00FF00ZenBags:|r Sold " .. #itemsToSell .. " trash items.")
     end)
     self.trashBtn:SetPoint("RIGHT", self.settingsBtn, "LEFT", -5, 0)
     self.trashBtn:SetFrameLevel(self.mainFrame:GetFrameLevel() + 10)
