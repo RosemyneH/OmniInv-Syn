@@ -289,12 +289,15 @@ function Inventory:ScanBags()
                     local _, _, _, iLevel, _, _, _, _, equipSlot = GetItemInfo(link)
                     local isEquipment = (equipSlot and equipSlot ~= "") and (iLevel and iLevel > 1)
 
-                    -- Check if item is new (by timestamp)
-                    local isNew = self.itemTimestamps and self.itemTimestamps[itemID] ~= nil
+                    -- NUCLEAR OPTION: Force isNew=false on first scan
+                    local isNew = false
+                    if not self.firstScan then
+                        isNew = self.itemTimestamps and self.itemTimestamps[itemID] ~= nil
+                    end
 
                     -- DEBUG: Log first few items ALWAYS
                     if #self.items < 3 then
-                        print("ZenBags DEBUG ITEM: itemID=" .. itemID .. " isNew=" .. tostring(isNew) .. " timestamp=" .. tostring(self.itemTimestamps[itemID]))
+                        print("ZenBags DEBUG ITEM: itemID=" .. itemID .. " isNew=" .. tostring(isNew) .. " firstScan=" .. tostring(self.firstScan))
                     end
 
                     table.insert(self.items, {
