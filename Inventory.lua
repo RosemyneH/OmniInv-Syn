@@ -159,20 +159,48 @@ function Inventory:ScanBags()
         countItems(BANK)
     end
 
-    -- 2. Detect New Items (Count Increase)
-    if not self.firstScan then
+    -- 2. Validate Scan (Partial Scan Protection)
+    local totalCurrent = 0
+    for _ in pairs(currentCounts) do totalCurrent = totalCurrent + 1 end
+
+    local totalPrevious = 0
+    for _ in pairs(self.previousItemCounts) do totalPrevious = totalPrevious + 1 end
+
+    -- If we have history, check for partial scans (e.g. only backpack loaded)
+    if self.firstScan and totalPrevious > 0 then
+        -- If we found significantly fewer items than we remember, assume bags are still loading
+        if totalCurrent < (totalPrevious * 0.5) then
+            print("ZenBags: Partial scan detected (" .. totalCurrent .. " < " .. totalPrevious .. "). Waiting for full load...")
+            return -- Abort update
+        end
+    end
+
+    -- 3. Detect New Items
+    -- If it's the first scan and we have no history, skip detection (don't mark everything new)
+    -- If we have history, ALWAYS run detection (even on first scan) to catch offline changes/syncs
+    local shouldDetect = not (self.firstScan and totalPrevious == 0)
+
+    if shouldDetect then
         for itemID, count in pairs(currentCounts) do
             local prevCount = self.previousItemCounts[itemID] or 0
             if count > prevCount then
                 -- Item count increased, mark as new
-                print("ZenBags Debug: New Item Detected! ID:", itemID, "Count:", count, "Prev:", prevCount)
                 self.newItems[itemID] = true
                 ZenBagsDB.newItems = self.newItems
             end
         end
     end
 
-    -- 3. Build Item List
+    -- 4. Update State
+    self.previousItemCounts = currentCounts
+    ZenBagsDB.previousItemCounts = self.previousItemCounts
+
+    if self.firstScan then
+        self.firstScan = false
+        print("ZenBags: Initial scan complete. Persistence synced.")
+    end
+
+    -- 5. Build Item List
     local function scanList(bagList, locationType)
         for _, bagID in ipairs(bagList) do
             local numSlots = GetContainerNumSlots(bagID)
