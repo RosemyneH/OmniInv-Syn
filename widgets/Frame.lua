@@ -9,28 +9,6 @@ local SECTION_PADDING = 20
 local COLORS = {
     BG      = {0.10, 0.10, 0.10, 0.95},
     HEADER  = {0.15, 0.15, 0.15, 1.00},
-    BORDER  = {0.00, 0.00, 0.00, 1.00},
-    ACCENT  = {0.20, 0.20, 0.20, 1.00},
-    TEXT    = {0.90, 0.90, 0.90, 1.00},
-}
-
-function Frames:Init()
-    -- Safety check: Ensure required modules are loaded
-    if not NS.FrameHelpers then
-        error("ZenBags: FrameHelpers module not loaded! Check .toc file order.")
-    end
-    if not NS.FrameHeader then
-        error("ZenBags: FrameHeader module not loaded! Check .toc file order.")
-    end
-    if not NS.FrameContent then
-        error("ZenBags: FrameContent module not loaded! Check .toc file order.")
-    end
-
-    -- Main Frame
-    self.mainFrame = CreateFrame("Frame", "ZenBagsFrame", UIParent)
-    self.mainFrame:SetSize(500, 500)
-    self.mainFrame:SetPoint("CENTER")
-
     -- Flat Dark Background
     self.mainFrame.bg = self.mainFrame:CreateTexture(nil, "BACKGROUND")
     self.mainFrame.bg:SetAllPoints()
