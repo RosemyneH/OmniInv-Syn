@@ -51,9 +51,8 @@ function Inventory:Init()
     -- Always start with a clean slate on login
     print("ZenBags: Clearing recent items (new session)")
 
-    -- Use wipe() to clear existing tables (preserves references for SavedVariables)
+    -- Clear timestamps but KEEP previousItemCounts (needed for detection!)
     wipe(ZenBagsDB.itemTimestamps[charKey])
-    wipe(ZenBagsDB.previousItemCounts[charKey])
 
     -- Load this character's data
     self.previousItemCounts = ZenBagsDB.previousItemCounts[charKey]
