@@ -87,14 +87,23 @@ function Frames:Init()
 
     -- Throttled resize updates
     local resizeThrottle = nil
+    local resizeTimer = CreateFrame("Frame")
+    resizeTimer:Hide()
+    resizeTimer:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 0.1 then
+            resizeThrottle = nil
+            NS.Frames:Update(true)
+            self:Hide()
+            self.elapsed = 0
+        end
+    end)
+
     self.mainFrame:SetScript("OnSizeChanged", function()
         -- Throttle updates to prevent lag (max 10 updates/sec)
         if not resizeThrottle then
             resizeThrottle = true
-            C_Timer.After(0.1, function()
-                resizeThrottle = nil
-                NS.Frames:Update(true)
-            end)
+            resizeTimer:Show()
         end
     end)
 
@@ -298,6 +307,18 @@ function Frames:Init()
     dropButton:EnableMouse(true)
     dropButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
+    -- Timer for delayed sorting
+    local sortTimer = CreateFrame("Frame")
+    sortTimer:Hide()
+    sortTimer:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 0.1 then
+            Frames:Update()
+            self:Hide()
+            self.elapsed = 0
+        end
+    end)
+
     dropButton:SetScript("OnReceiveDrag", function()
         if CursorHasItem() then
             -- Find first empty slot in bags 0-4
@@ -309,9 +330,7 @@ function Frames:Init()
                         -- Empty slot found, place item here
                         PickupContainerItem(bagID, slotID)
                         -- Trigger immediate re-sort
-                        C_Timer.After(0.1, function()
-                            Frames:Update()
-                        end)
+                        sortTimer:Show()
                         return
                     end
                 end
@@ -328,9 +347,7 @@ function Frames:Init()
                     local itemInfo = GetContainerItemInfo(bagID, slotID)
                     if not itemInfo then
                         PickupContainerItem(bagID, slotID)
-                        C_Timer.After(0.1, function()
-                            Frames:Update()
-                        end)
+                        sortTimer:Show()
                         return
                     end
                 end
@@ -594,17 +611,23 @@ function Frames:ShowCharacterDropdown()
     EasyMenu(menu, CreateFrame("Frame", "ZenBagsCharDropdown", UIParent, "UIDropDownMenuTemplate"), "cursor", 0, 0, "MENU")
 
     -- Apply flat dark styling to the dropdown
-    C_Timer.After(0.01, function()
-        local dropdown = _G["DropDownList1"]
-        if dropdown then
-            dropdown:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8X8",
-                edgeFile = "Interface\\Buttons\\WHITE8X8",
-                tile = false,
-                edgeSize = 1,
-            })
-            dropdown:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
-            dropdown:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+    -- Use OnUpdate for WotLK compatibility (C_Timer not available)
+    local timer = CreateFrame("Frame")
+    timer:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 0.01 then
+            local dropdown = _G["DropDownList1"]
+            if dropdown then
+                dropdown:SetBackdrop({
+                    bgFile = "Interface\\Buttons\\WHITE8X8",
+                    edgeFile = "Interface\\Buttons\\WHITE8X8",
+                    tile = false,
+                    edgeSize = 1,
+                })
+                dropdown:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
+                dropdown:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+            end
+            self:SetScript("OnUpdate", nil) -- Stop timer
         end
     end)
 end

@@ -52,11 +52,24 @@ function Inventory:Init()
             -- This reduces updates from ~50/sec to ~10/sec during looting
             if not Inventory.updatePending then
                 Inventory.updatePending = true
-                C_Timer.After(Inventory.bucketDelay, function()
-                    Inventory:ScanBags()
-                    if NS.Frames then NS.Frames:Update() end
-                    Inventory.updatePending = false
-                end)
+
+                -- Use OnUpdate for WotLK compatibility (C_Timer not available)
+                if not self.timerFrame then
+                    self.timerFrame = CreateFrame("Frame")
+                    self.timerFrame:Hide()
+                    self.timerFrame:SetScript("OnUpdate", function(f, elapsed)
+                        f.elapsed = (f.elapsed or 0) + elapsed
+                        if f.elapsed >= Inventory.bucketDelay then
+                            f:Hide()
+                            f.elapsed = 0
+                            Inventory:ScanBags()
+                            if NS.Frames then NS.Frames:Update() end
+                            Inventory.updatePending = false
+                        end
+                    end)
+                end
+
+                self.timerFrame:Show()
             end
         elseif event == "PLAYER_MONEY" then
             -- Update money display
