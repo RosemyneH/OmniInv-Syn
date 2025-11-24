@@ -282,7 +282,12 @@ function Inventory:GetTrashItems()
     local trashItems = {}
     for _, item in ipairs(self.items) do
         if item.quality == 0 and item.location == "bags" then
-            table.insert(trashItems, item)
+            -- Get itemID to check for exclusions
+            local itemID = select(1, GetItemInfo(item.link))
+            -- Exclude Hearthstone (6948) - it's grey but should never be sold
+            if itemID and itemID ~= 6948 then
+                table.insert(trashItems, item)
+            end
         end
     end
     return trashItems
