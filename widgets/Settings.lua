@@ -3,23 +3,50 @@ local addonName, NS = ...
 NS.Settings = {}
 
 function NS.Settings:Init()
-    -- Create Settings Panel for Interface Options
+    -- 1. Create Main Panel (About)
     self.panel = CreateFrame("Frame", "ZenBagsOptionsPanel", UIParent)
     self.panel.name = "ZenBags"
 
     -- Title
     local title = self.panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("ZenBags Settings")
+    title:SetText("ZenBags")
 
-    -- Register with Blizzard's Interface Options
+    -- About Info
+    local version = self.panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    version:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
+    version:SetText("Version: v0.1")
+
+    local author = self.panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    author:SetPoint("TOPLEFT", version, "BOTTOMLEFT", 0, -10)
+    author:SetText("Created by: |cFF00FFFFZendevve|r")
+
+    local desc = self.panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    desc:SetPoint("TOPLEFT", author, "BOTTOMLEFT", 0, -20)
+    desc:SetWidth(380)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("ZenBags is a modern, lightweight bag addon designed to keep your inventory clean and organized.\n\nExpand the menu on the left to access configuration settings.")
+
+    -- Register Main Panel
     InterfaceOptions_AddCategory(self.panel)
 
-    -- Create Controls
-    self:CreateControls()
+    -- 2. Create General Settings Sub-panel
+    self.generalPanel = CreateFrame("Frame", "ZenBagsGeneralOptions", self.panel)
+    self.generalPanel.name = "General"
+    self.generalPanel.parent = "ZenBags"
+
+    local subTitle = self.generalPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    subTitle:SetPoint("TOPLEFT", 16, -16)
+    subTitle:SetText("General Settings")
+
+    -- Register Sub-panel
+    InterfaceOptions_AddCategory(self.generalPanel)
+
+    -- Create Controls on the Sub-panel
+    self:CreateGeneralSettings()
 end
 
-function NS.Settings:CreateControls()
+function NS.Settings:CreateGeneralSettings()
     local yOffset = -50 -- Start below title
 
     -- === Appearance Section ===
@@ -82,7 +109,7 @@ function NS.Settings:CreateControls()
     yOffset = yOffset - 50
 
     -- Reset Button
-    local resetBtn = CreateFrame("Button", nil, self.panel, "UIPanelButtonTemplate")
+    local resetBtn = CreateFrame("Button", nil, self.generalPanel, "UIPanelButtonTemplate")
     resetBtn:SetSize(120, 25)
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", function()
@@ -97,19 +124,19 @@ function NS.Settings:CreateControls()
     self:RefreshControls()
 
     -- Hook into the panel's OnShow to refresh controls
-    self.panel:SetScript("OnShow", function()
+    self.generalPanel:SetScript("OnShow", function()
         self:RefreshControls()
     end)
 end
 
 function NS.Settings:CreateHeader(text, y)
-    local header = self.panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = self.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header:SetPoint("TOPLEFT", 20, y)
     header:SetText(text)
     header:SetTextColor(1, 0.82, 0, 1) -- Standard gold header color
 
     -- Add separator line under header
-    local line = self.panel:CreateTexture(nil, "ARTWORK")
+    local line = self.generalPanel:CreateTexture(nil, "ARTWORK")
     line:SetTexture(0.4, 0.4, 0.4, 0.5)
     line:SetHeight(1)
     line:SetPoint("TOPLEFT", 20, y - 18)
@@ -118,7 +145,7 @@ end
 
 function NS.Settings:CreateSlider(key, label, minVal, maxVal, step, callback, y)
     -- Use standard slider template but parent to our panel
-    local slider = CreateFrame("Slider", "ZenBagsOption_"..key, self.panel, "OptionsSliderTemplate")
+    local slider = CreateFrame("Slider", "ZenBagsOption_"..key, self.generalPanel, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", 30, y)
     slider:SetWidth(200)
 
@@ -141,7 +168,7 @@ function NS.Settings:CreateSlider(key, label, minVal, maxVal, step, callback, y)
 end
 
 function NS.Settings:CreateCheckbox(key, label, callback, y)
-    local cb = CreateFrame("CheckButton", "ZenBagsOption_"..key, self.panel, "InterfaceOptionsCheckButtonTemplate")
+    local cb = CreateFrame("CheckButton", "ZenBagsOption_"..key, self.generalPanel, "InterfaceOptionsCheckButtonTemplate")
     cb:SetPoint("TOPLEFT", 25, y)
     getglobal(cb:GetName() .. 'Text'):SetText(label)
 
@@ -174,7 +201,8 @@ function NS.Settings:RefreshControls()
 end
 
 function NS.Settings:Open()
-    InterfaceOptionsFrame_OpenToCategory(self.panel)
+    -- Open the General sub-panel directly
+    InterfaceOptionsFrame_OpenToCategory(self.generalPanel)
     -- Double call is sometimes needed in 3.3.5a to properly select the category if the frame wasn't shown
-    InterfaceOptionsFrame_OpenToCategory(self.panel)
+    InterfaceOptionsFrame_OpenToCategory(self.generalPanel)
 end
