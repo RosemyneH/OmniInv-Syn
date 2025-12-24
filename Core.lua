@@ -43,6 +43,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if NS.Search then NS.Search:Init() end -- Omni-search
         if NS.RuleEngine then NS.RuleEngine:Init() end -- Rule-based categories
         if NS.JunkLearner then NS.JunkLearner:Init() end -- Smart junk learning
+        if NS.GearUpgrade then NS.GearUpgrade:Init() end -- Gear upgrade detection
 
         -- Close any default bags that might be open
         CloseBackpack()

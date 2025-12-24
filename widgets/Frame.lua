@@ -1028,6 +1028,45 @@ function Frames:Update(fullUpdate)
                     end
                 end
 
+                -- Gear Upgrade Indicator
+                if NS.GearUpgrade and itemData.iLevel then
+                    local status, diff = NS.GearUpgrade:GetStatus(itemData.link, itemData.iLevel)
+
+                    -- Create upgrade arrow if it doesn't exist
+                    if not btn.upgradeArrow then
+                        btn.upgradeArrow = btn:CreateTexture(nil, "OVERLAY")
+                        btn.upgradeArrow:SetTexture("Interface\\Buttons\\UI-MicroStream-Green")
+                        btn.upgradeArrow:SetSize(12, 12)
+                        btn.upgradeArrow:SetPoint("TOPRIGHT", -1, -1)
+                    end
+
+                    if status == "upgrade" then
+                        -- Green arrow for upgrades
+                        btn.upgradeArrow:SetTexture("Interface\\Buttons\\UI-MicroStream-Green")
+                        btn.upgradeArrow:Show()
+                        -- Make item glow slightly green
+                        if btn.icon then
+                            btn.icon:SetVertexColor(0.8, 1.0, 0.8)
+                        end
+                    elseif status == "downgrade" then
+                        -- Hide arrow, dim item
+                        btn.upgradeArrow:Hide()
+                        if btn.icon then
+                            btn.icon:SetVertexColor(0.5, 0.5, 0.5)
+                        end
+                    else
+                        -- Sidegrade or not equipment
+                        btn.upgradeArrow:Hide()
+                        if btn.icon then
+                            btn.icon:SetVertexColor(1, 1, 1)
+                        end
+                    end
+                else
+                    -- Not equipment or no GearUpgrade
+                    if btn.upgradeArrow then btn.upgradeArrow:Hide() end
+                    if btn.icon then btn.icon:SetVertexColor(1, 1, 1) end
+                end
+
                 -- Store item data reference
                 btn.itemData = itemData
 

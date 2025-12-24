@@ -23,6 +23,7 @@ Alts.lua
 Search.lua
 RuleEngine.lua
 JunkLearner.lua
+GearUpgrade.lua
 Categories.lua
 Inventory.lua
 
