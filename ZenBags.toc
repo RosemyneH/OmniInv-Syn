@@ -11,6 +11,7 @@ Config.lua
 Pools.lua
 ItemCache.lua
 Filter.lua
+Sorter.lua
 
 # Utilities
 Utils.lua
