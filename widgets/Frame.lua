@@ -553,6 +553,181 @@ function Frames:Update(fullUpdate)
         end
     end
 
+    -- ==========================================
+    -- GRID MODE: Flat layout without headers
+    -- ==========================================
+    local layoutMode = NS.Config:Get("layoutMode") or "category"
+
+    if layoutMode == "grid" then
+        -- Sort items (by quality, then name)
+        if NS.Sorter and NS.Sorter.Sort then
+            NS.Sorter:Sort(items, "quality")
+        else
+            table.sort(items, function(a, b)
+                local qA = a.quality or 0
+                local qB = b.quality or 0
+                if qA ~= qB then return qA > qB end
+                local nA = a.name or ""
+                local nB = b.name or ""
+                return nA < nB
+            end)
+        end
+
+        -- Object Pooling: Release old buttons
+        local pool = NS.Pools:GetPool("ItemButton")
+        if pool then
+            for i = #self.buttons, 1, -1 do
+                local btn = self.buttons[i]
+                if btn then pool:Release(btn) end
+            end
+        end
+        wipe(self.buttons)
+
+        -- Release headers (not used in grid mode)
+        local headerPool = NS.Pools:GetPool("SectionHeader")
+        if headerPool then
+            for i = #self.headers, 1, -1 do
+                local hdr = self.headers[i]
+                if hdr then headerPool:Release(hdr) end
+            end
+        end
+        wipe(self.headers)
+
+        -- Grid layout calculation
+        local ITEM_SIZE = NS.Config:Get("itemSize")
+        local PADDING = NS.Config:Get("padding")
+        local width = self.mainFrame:GetWidth()
+        local availableWidth = width - 60
+
+        local itemCols = math.floor((availableWidth - PADDING) / (ITEM_SIZE + PADDING))
+        if itemCols < 1 then itemCols = 1 end
+
+        -- Center the grid
+        local gridWidth = itemCols * ITEM_SIZE + (itemCols - 1) * PADDING
+        local xOffset = (availableWidth - gridWidth) / 2
+        if xOffset < 0 then xOffset = 0 end
+
+        -- Render all items in flat grid
+        local btnIdx = 1
+        for i, itemData in ipairs(items) do
+            local row = math.floor((i - 1) / itemCols)
+            local col = (i - 1) % itemCols
+
+            local xPos = xOffset + col * (ITEM_SIZE + PADDING)
+            local yPos = row * (ITEM_SIZE + PADDING)
+
+            local btn = pool:Acquire()
+            table.insert(self.buttons, btn)
+            btn:SetParent(self.content)
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", xPos, -yPos)
+            btn:SetSize(ITEM_SIZE, ITEM_SIZE)
+            btn:SetFrameLevel(self.content:GetFrameLevel() + 2)
+
+            -- Set item data
+            btn.bagID = itemData.bagID
+            btn.slotID = itemData.slotID
+            btn.itemData = itemData
+
+            -- Update visuals
+            SetItemButtonTexture(btn, itemData.texture)
+            SetItemButtonCount(btn, itemData.count)
+
+            -- Quality border
+            local quality = itemData.quality or 0
+            if btn.UpdateQuality then
+                btn:UpdateQuality(quality)
+            end
+
+            -- Junk icon
+            if not btn.junkIcon then
+                btn.junkIcon = btn:CreateTexture(nil, "OVERLAY")
+                btn.junkIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Coin-Up")
+                btn.junkIcon:SetPoint("TOPLEFT", 2, -2)
+                btn.junkIcon:SetSize(12, 12)
+            end
+            if quality == 0 then btn.junkIcon:Show() else btn.junkIcon:Hide() end
+
+            -- Item level
+            if btn.ilvl and itemData.iLevel then
+                btn.ilvl:SetText(itemData.iLevel)
+            elseif btn.ilvl then
+                btn.ilvl:SetText("")
+            end
+
+            -- New item glow
+            local glowEnabled = NS.Config:Get("newItemGlowEnabled")
+            local glowIgnoreJunk = NS.Config:Get("newItemGlowIgnoreJunk")
+            local shouldGlow = glowEnabled and NS.Inventory:IsNew(itemData.itemID) and not (glowIgnoreJunk and quality == 0)
+
+            if shouldGlow and not btn.newGlow then
+                btn.newGlow = btn:CreateTexture(nil, "OVERLAY")
+                btn.newGlow:SetTexture("Interface\\Cooldown\\star4")
+                btn.newGlow:SetPoint("CENTER")
+                btn.newGlow:SetBlendMode("ADD")
+                local ag = btn.newGlow:CreateAnimationGroup()
+                local spin = ag:CreateAnimation("Rotation")
+                spin:SetDegrees(360)
+                spin:SetDuration(10)
+                ag:SetLooping("REPEAT")
+                ag:Play()
+                btn.newGlow.ag = ag
+            end
+
+            if shouldGlow then
+                local glowColor = NS.Config:Get("newItemGlowColor")
+                local glowScale = NS.Config:Get("newItemGlowScale")
+                btn.newGlow:SetSize(ITEM_SIZE * glowScale, ITEM_SIZE * glowScale)
+                btn.newGlow:SetVertexColor(glowColor.r, glowColor.g, glowColor.b, 0.8)
+                btn.newGlow:Show()
+            elseif btn.newGlow then
+                btn.newGlow:Hide()
+            end
+
+            btn:Show()
+
+            -- Apply search filter
+            if self.searchBox then
+                local searchText = self.searchBox:GetText()
+                if searchText and searchText ~= "" and btn.UpdateSearch then
+                    btn:UpdateSearch(searchText)
+                end
+            end
+
+            -- Tooltip handlers
+            btn:SetScript("OnEnter", function(self)
+                if self.itemData and self.itemData.itemID then
+                    NS.Inventory:MarkItemViewed(self.itemData.itemID)
+                end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                if self.itemData.link then
+                    GameTooltip:SetHyperlink(self.itemData.link)
+                end
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            btnIdx = btnIdx + 1
+        end
+
+        -- Set content height
+        local numRows = math.ceil(#items / itemCols)
+        local contentHeight = numRows * (ITEM_SIZE + PADDING)
+        self.content:SetHeight(contentHeight)
+
+        -- Update counters
+        self:UpdateSpaceCounter()
+        self:UpdateMoney()
+        NS.Inventory:ClearDirtySlots()
+        NS.Inventory:SetFullUpdate(false)
+
+        return -- Exit early, skip category rendering
+    end
+
+    -- ==========================================
+    -- CATEGORY MODE: Original grouped layout
+    -- ==========================================
+
     -- Group by Category
     local groups = {}
     for _, item in ipairs(items) do
