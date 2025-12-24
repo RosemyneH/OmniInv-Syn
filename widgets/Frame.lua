@@ -1076,7 +1076,22 @@ function Frames:Update(fullUpdate)
                                 countText = string.format("|cFFFFFFFFTotal:|r %d", totalCount)
                             end
                             GameTooltip:AddLine(countText)
-                            GameTooltip:Show() -- Refresh to include new line
+                            GameTooltip:Show()
+                        end
+
+                        -- Cross-Alt Total (from Alts module)
+                        if NS.Alts then
+                            local altTotal, breakdown = NS.Alts:GetTotalItemCount(self.itemData.itemID)
+                            if altTotal > totalCount and #breakdown > 1 then
+                                -- Show total across all alts
+                                local breakdownText = {}
+                                for _, char in ipairs(breakdown) do
+                                    table.insert(breakdownText, char.name .. ": " .. char.count)
+                                end
+                                GameTooltip:AddLine("|cFF00FF00Across All Alts:|r " .. altTotal, 1, 1, 1)
+                                GameTooltip:AddLine("|cFF888888" .. table.concat(breakdownText, ", ") .. "|r", 0.5, 0.5, 0.5)
+                                GameTooltip:Show()
+                            end
                         end
                     end
                 end)

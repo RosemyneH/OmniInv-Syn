@@ -104,16 +104,48 @@ function Frames:UpdateDropdownList()
         btn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, yOffset)
         btn:Show()
 
-        -- Text & State
-        btn.text:SetText(charData.name)
+        -- Class colors for text
+        local classColors = {
+            WARRIOR = {0.78, 0.61, 0.43},
+            PALADIN = {0.96, 0.55, 0.73},
+            HUNTER = {0.67, 0.83, 0.45},
+            ROGUE = {1.00, 0.96, 0.41},
+            PRIEST = {1.00, 1.00, 1.00},
+            DEATHKNIGHT = {0.77, 0.12, 0.23},
+            SHAMAN = {0.00, 0.44, 0.87},
+            MAGE = {0.25, 0.78, 0.92},
+            WARLOCK = {0.53, 0.53, 0.93},
+            DRUID = {1.00, 0.49, 0.04},
+        }
+
+        -- Get character info from Alts module if available
+        local gold = 0
+        local charClass = nil
+        if NS.Alts and NS.Alts:GetCharacter(charData.key) then
+            local altData = NS.Alts:GetCharacter(charData.key)
+            gold = altData.gold or 0
+            charClass = altData.class
+        end
+
+        -- Format gold display
+        local goldStr = ""
+        if gold > 0 then
+            goldStr = string.format(" |cFFFFD700%dg|r", math.floor(gold / 10000))
+        end
+
+        -- Text with gold
+        btn.text:SetText(charData.name .. goldStr)
+
+        -- Apply class color
+        local color = classColors[charClass] or {0.7, 0.7, 0.7}
 
         if charData.isCurrent then
             btn.dot:Show()
-            btn.text:SetTextColor(1, 1, 1) -- White for current
+            btn.text:SetTextColor(color[1], color[2], color[3])
             btn.delBtn:Hide() -- Can't delete current
         else
             btn.dot:Hide()
-            btn.text:SetTextColor(0.7, 0.7, 0.7) -- Grey for others
+            btn.text:SetTextColor(color[1] * 0.7, color[2] * 0.7, color[3] * 0.7) -- Dimmer for others
             btn.delBtn:Show()
         end
 
