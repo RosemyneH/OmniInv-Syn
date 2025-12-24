@@ -93,8 +93,14 @@ end
 --- Initialize
 function Search:Init()
     -- Build index on login (delayed to allow item cache)
-    C_Timer.After(2, function()
-        self:BuildIndex()
+    local timerFrame = CreateFrame("Frame")
+    timerFrame.elapsed = 0
+    timerFrame:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = self.elapsed + elapsed
+        if self.elapsed >= 2 then
+            Search:BuildIndex()
+            self:SetScript("OnUpdate", nil)
+        end
     end)
 end
 
