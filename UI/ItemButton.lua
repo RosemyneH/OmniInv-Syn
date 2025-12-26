@@ -240,12 +240,13 @@ function ItemButton:SetItem(button, itemInfo)
         button.glow:Hide()
     end
 
-    -- Pawn Upgrade Check
+    -- Pawn Upgrade Check (wrapped in pcall for safety)
     button.upgradeArrow:Hide()
     if PawnIsContainerItemAnUpgrade and itemInfo.bagID and itemInfo.bagID >= 0 then
-         if PawnIsContainerItemAnUpgrade(itemInfo.bagID, itemInfo.slotID) then
-             button.upgradeArrow:Show()
-         end
+        local ok, isUpgrade = pcall(PawnIsContainerItemAnUpgrade, itemInfo.bagID, itemInfo.slotID)
+        if ok and isUpgrade then
+            button.upgradeArrow:Show()
+        end
     end
 
     -- Clear search dim

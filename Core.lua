@@ -55,11 +55,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         -- Override default bag functions
         local function OverrideBags()
-            -- Store original functions for cleanup/edge cases
-            local origToggleAllBags = ToggleAllBags
-            local origOpenBag = OpenBag
-            local origCloseBag = CloseBag
-
             -- Debounce mechanism to prevent double toggles
             local lastToggleTime = 0
             local TOGGLE_DEBOUNCE = 0.1  -- 100ms debounce
