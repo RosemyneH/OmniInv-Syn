@@ -103,28 +103,28 @@ function ItemButton:Create(parent)
     -- Hide the backdrop border texture we created earlier
     button.border:Hide()
 
-    -- New item glow with pulsing animation
+    -- New item glow using AnimationGroup
     button.glow = button:CreateTexture(nil, "OVERLAY")
     button.glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     button.glow:SetBlendMode("ADD")
     button.glow:SetPoint("CENTER")
     button.glow:SetSize(BUTTON_SIZE * 1.5, BUTTON_SIZE * 1.5)
-    button.glow:SetVertexColor(0.0, 1.0, 0.5, 1)  -- Green-ish tint for new items
+    button.glow:SetVertexColor(0.0, 1.0, 0.5, 1)
     button.glow:Hide()
 
-    -- Animation state
-    button.glowAnimTime = 0
-    button.glowAnimating = false
+    local ag = button.glow:CreateAnimationGroup()
+    ag:SetLooping("BOUNCE")
+    local fade = ag:CreateAnimation("Alpha")
+    fade:SetFromAlpha(0.5)
+    fade:SetToAlpha(1.0)
+    fade:SetDuration(0.8)
+    fade:SetSmoothing("IN_OUT")
+    button.glow.anim = ag
 
-    -- OnUpdate for pulsing animation
-    button:SetScript("OnUpdate", function(self, elapsed)
-        if self.glowAnimating and self.glow:IsShown() then
-            self.glowAnimTime = (self.glowAnimTime or 0) + elapsed * 3  -- Speed multiplier
-            -- Pulse alpha between 0.4 and 1.0 using sine wave
-            local alpha = 0.7 + 0.3 * math.sin(self.glowAnimTime)
-            self.glow:SetAlpha(alpha)
-        end
-    end)
+    -- Register with Masque if available
+    if Omni.MasqueGroup then
+        Omni.MasqueGroup:AddButton(button)
+    end
 
     -- Search dim overlay
     button.dimOverlay = button:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -227,11 +227,10 @@ function ItemButton:SetItem(button, itemInfo)
     -- New item glow with animation
     if itemInfo.isNew then
         button.glow:Show()
-        button.glowAnimating = true
-        button.glowAnimTime = 0
+        button.glow.anim:Play()
     else
+        button.glow.anim:Stop()
         button.glow:Hide()
-        button.glowAnimating = false
     end
 
     -- Clear search dim
@@ -377,6 +376,7 @@ function ItemButton:Reset(button)
     if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
     if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
 
+    if button.glow.anim then button.glow.anim:Stop() end
     button.glow:Hide()
     button.dimOverlay:Hide()
     button.icon:SetDesaturated(false)

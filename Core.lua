@@ -24,6 +24,12 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 
+-- Masque Support
+local Masque = LibStub("Masque", true)
+if Masque then
+    Omni.MasqueGroup = Masque:Group("OmniInventory")
+end
+
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         -- Initialize SavedVariables

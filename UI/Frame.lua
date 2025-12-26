@@ -83,11 +83,26 @@ function Frame:CreateMainFrame()
     self:CreateFooter()
     self:CreateResizeHandle()
 
+    -- Fade Animation
+    local ag = mainFrame:CreateAnimationGroup()
+    local fade = ag:CreateAnimation("Alpha")
+    fade:SetFromAlpha(0.0)
+    fade:SetToAlpha(1.0)
+    fade:SetDuration(0.2)
+    fade:SetSmoothing("OUT")
+    mainFrame.fadeAnim = ag
+
     -- Register for updates
     self:RegisterEvents()
 
     -- Start hidden
     mainFrame:Hide()
+
+    mainFrame:SetScript("OnShow", function(self)
+        self:SetAlpha(0)
+        self.fadeAnim:Play()
+        if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
+    end)
 
     return mainFrame
 end
