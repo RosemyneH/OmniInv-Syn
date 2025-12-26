@@ -1,6 +1,6 @@
 <div align="center">
     <a href="https://github.com/Zendevve/OmniInventory" target="_blank">
-        <img src="docs/images/icon-placeholder.png" width="200" height="200" alt="OmniInventory"/>
+        <img src=".assets/Icon.jpg" width="200" height="200" alt="OmniInventory"/>
     </a>
 </div>
 

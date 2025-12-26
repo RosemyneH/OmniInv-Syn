@@ -78,7 +78,27 @@ local OPERATORS = {
         end
         return false
     end,
+    in_list = function(a, b)
+        if type(b) ~= "table" then return false end
+        for _, v in ipairs(b) do
+            if a == v then return true end
+        end
+        return false
+    end,
 }
+
+function Rules:GetRuleTypes()
+    -- Map operators to user-friendly names and input types
+    return {
+        { id = "equals", name = "Equals", type = "text" },
+        { id = "not_equals", name = "Not Equals", type = "text" },
+        { id = "contains", name = "Contains", type = "text" },
+        { id = "starts_with", name = "Starts With", type = "text" },
+        { id = "greater_than", name = "Greater Than", type = "number" },
+        { id = "less_than", name = "Less Than", type = "number" },
+        { id = "in_list", name = "In List (comma sep)", type = "text" },
+    }
+end
 
 -- =============================================================================
 -- Field Extractors
@@ -314,6 +334,7 @@ function Rules:AddRule(rule)
         compiledRules[rule.expression] = nil
     end
 
+    if Omni.Events then Omni.Events:FireEvent("RULES_CHANGED") end
     return true
 end
 
@@ -327,6 +348,7 @@ function Rules:RemoveRule(ruleId)
                 compiledRules[rule.expression] = nil
             end
             table.remove(rules, i)
+            if Omni.Events then Omni.Events:FireEvent("RULES_CHANGED") end
             return true
         end
     end
@@ -346,6 +368,7 @@ function Rules:UpdateRule(ruleId, updates)
             if updates.expression then
                 compiledRules[rule.expression] = nil
             end
+            if Omni.Events then Omni.Events:FireEvent("RULES_CHANGED") end
             return true
         end
     end
@@ -359,6 +382,7 @@ function Rules:ToggleRule(ruleId)
     for _, rule in ipairs(rules) do
         if rule.id == ruleId then
             rule.enabled = not rule.enabled
+            if Omni.Events then Omni.Events:FireEvent("RULES_CHANGED") end
             return true
         end
     end

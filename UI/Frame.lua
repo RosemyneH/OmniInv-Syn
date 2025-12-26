@@ -180,6 +180,26 @@ function Frame:CreateHeader()
         GameTooltip:Hide()
     end)
 
+    -- Options Button
+    local optBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    optBtn:SetSize(24, 24)
+    optBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+    optBtn:SetText("O")
+    optBtn:SetScript("OnClick", function()
+        if Omni.CategoryEditor then
+            Omni.CategoryEditor:Toggle()
+        else
+            print("Category Editor not loaded")
+        end
+    end)
+    optBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Open Category Editor")
+        GameTooltip:Show()
+    end)
+    optBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    header.optBtn = optBtn
+
     -- Bags/Bank toggle tabs
     header.bagsTab = CreateFrame("Button", nil, header)
     header.bagsTab:SetSize(40, 18)

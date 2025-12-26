@@ -30,6 +30,7 @@ UI\FlowView.lua
 UI\ListView.lua
 UI\Frame.lua
 UI\Options.lua
+UI\CategoryEditor.lua
 
 # =============================================================================
 # Main Entry Point
