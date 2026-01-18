@@ -28,8 +28,10 @@ function MinimapButton:Create()
 
     button = CreateFrame("Button", "OmniMinimapButton", Minimap)
     button:SetSize(32, 32)
-    button:SetFrameStrata("MEDIUM")
-    button:SetFrameLevel(8)
+    button:SetFrameStrata("HIGH") -- Ensure it's above the Minimap content
+    button:SetFrameLevel(Minimap:GetFrameLevel() + 10)
+    button:EnableMouse(true)
+    button:SetMovable(true)
 
     -- Icon
     button.icon = button:CreateTexture(nil, "ARTWORK")
@@ -65,7 +67,7 @@ function MinimapButton:Create()
     -- Tooltip
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cFF00FF00Omni|rInventory")
+        GameTooltip:AddLine("|cFF00FF00Zen|rBags")
         GameTooltip:AddLine("Left-click: Toggle Bags", 1, 1, 1)
         GameTooltip:AddLine("Right-click: Settings", 1, 1, 1)
         GameTooltip:AddLine("Drag: Move button", 0.7, 0.7, 0.7)
@@ -78,11 +80,13 @@ function MinimapButton:Create()
 
     -- Dragging
     button:RegisterForDrag("LeftButton")
-    button:SetScript("OnDragStart", function()
+    button:SetScript("OnDragStart", function(self)
+        self:StartMoving() -- Use StartMoving for smoother native handling first, or custom logic
         isDragging = true
     end)
 
-    button:SetScript("OnDragStop", function()
+    button:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
         isDragging = false
         MinimapButton:SavePosition()
     end)
@@ -142,6 +146,13 @@ function MinimapButton:LoadPosition()
     end
 
     self:SetPositionByAngle(angle)
+end
+
+function MinimapButton:ResetPosition()
+    if OmniInventoryDB and OmniInventoryDB.global then
+        OmniInventoryDB.global.minimapAngle = nil
+    end
+    self:LoadPosition()
 end
 
 -- =============================================================================

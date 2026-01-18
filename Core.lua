@@ -146,7 +146,10 @@ SLASH_OMNIINVENTORY1 = "/omniinventory"
 SLASH_OMNIINVENTORY2 = "/omni"
 SLASH_OMNIINVENTORY3 = "/oi"
 
-SlashCmdList["OMNIINVENTORY"] = function(msg)
+SLASH_ZENBAGS1 = "/zb"
+SLASH_ZENBAGS2 = "/zenbags"
+
+local function HandleSlashCommand(msg)
     msg = string.lower(msg or "")
 
     if msg == "config" or msg == "settings" or msg == "options" then
@@ -161,11 +164,20 @@ SlashCmdList["OMNIINVENTORY"] = function(msg)
             Omni.Pool:Debug()
         end
 
+    elseif msg == "reset" then
+        print("|cFF00FF00OmniInventory|r: Resetting...")
+        if Omni.MinimapButton then
+            Omni.MinimapButton:ResetPosition()
+            print("  Minimap button position reset.")
+        end
+        -- Add other resets here if needed
+
     elseif msg == "help" then
         print("|cFF00FF00OmniInventory|r Commands:")
-        print("  |cFFFFFF00/oi|r - Toggle bags")
-        print("  |cFFFFFF00/oi config|r - Open settings")
-        print("  |cFFFFFF00/oi debug|r - Show pool stats")
+        print("  |cFFFFFF00/zb|r or |cFFFFFF00/oi|r - Toggle bags")
+        print("  |cFFFFFF00/zb config|r - Open settings")
+        print("  |cFFFFFF00/zb reset|r - Reset addon data/positions")
+        print("  |cFFFFFF00/zb debug|r - Show pool stats")
 
     else
         -- Default: toggle bags
@@ -176,5 +188,8 @@ SlashCmdList["OMNIINVENTORY"] = function(msg)
         end
     end
 end
+
+SlashCmdList["OMNIINVENTORY"] = HandleSlashCommand
+SlashCmdList["ZENBAGS"] = HandleSlashCommand
 
 print("|cFF00FF00OmniInventory|r: Core module loaded")

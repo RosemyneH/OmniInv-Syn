@@ -806,14 +806,11 @@ function Frame:UpdateLayout(changedBags)
     end
 
     -- Render based on view mode
-    if currentView == "grid" then
-        self:RenderGridView(items)
-    elseif currentView == "flow" then
-        self:RenderFlowView(items)
-    elseif currentView == "list" then
+    if currentView == "list" then
         self:RenderListView(items)
     else
-        self:RenderGridView(items)  -- Fallback
+        -- Combined Grid/Flow rendering
+        self:RenderFlowView(items)
     end
 
     -- Update footer
@@ -827,100 +824,13 @@ function Frame:UpdateLayout(changedBags)
 end
 
 -- =============================================================================
--- Grid View Rendering
--- =============================================================================
-
-function Frame:RenderGridView(items)
-    if not mainFrame or not mainFrame.scrollChild then return end
-
-    local scrollChild = mainFrame.scrollChild
-
-    -- Release existing buttons back to pool
-    if Omni.Pool then
-        for _, btn in ipairs(itemButtons) do
-            Omni.Pool:Release("ItemButton", btn)
-        end
-    end
-    itemButtons = {}
-
-    -- Hide list rows if any (from List view)
-    for _, row in ipairs(listRows) do
-        row:Hide()
-    end
-
-    -- Hide category headers if any (from Flow view)
-    for _, header in ipairs(categoryHeaders) do
-        header:Hide()
-    end
-
-    -- Calculate layout
-    local contentWidth = mainFrame.content:GetWidth() - 20
-    local columns = math.floor(contentWidth / (ITEM_SIZE + ITEM_SPACING))
-    columns = math.max(columns, 1)
-
-    local rows = math.ceil(#items / columns)
-    local contentHeight = rows * (ITEM_SIZE + ITEM_SPACING) + ITEM_SPACING
-    scrollChild:SetSize(contentWidth, contentHeight)
-
-    -- Create/position buttons
-    for i, itemInfo in ipairs(items) do
-        local btn
-
-        if Omni.Pool then
-            btn = Omni.Pool:Acquire("ItemButton")
-        else
-            btn = Omni.ItemButton:Create(scrollChild)
-        end
-
-        if btn then
-            btn:SetParent(scrollChild)
-
-            local col = ((i - 1) % columns)
-            local row = math.floor((i - 1) / columns)
-            local x = ITEM_SPACING + col * (ITEM_SIZE + ITEM_SPACING)
-            local y = -(ITEM_SPACING + row * (ITEM_SIZE + ITEM_SPACING))
-
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-
-            Omni.ItemButton:SetItem(btn, itemInfo)
-            btn:Show()
-
-            table.insert(itemButtons, btn)
-        end
-    end
-end
-
--- =============================================================================
--- Flow View Rendering (Category Sections)
+-- Flow/Grid View Rendering
 -- =============================================================================
 
 function Frame:RenderFlowView(items)
     if not mainFrame or not mainFrame.scrollChild then return end
 
     local scrollChild = mainFrame.scrollChild
-
-    -- Group by category
-    local categories = {}
-    local categoryOrder = {}
-
-    for _, item in ipairs(items) do
-        local cat = item.category or "Miscellaneous"
-        if not categories[cat] then
-            categories[cat] = {}
-            table.insert(categoryOrder, cat)
-        end
-        table.insert(categories[cat], item)
-    end
-
-    -- Sort categories by priority
-    if Omni.Categorizer then
-        table.sort(categoryOrder, function(a, b)
-            local infoA = Omni.Categorizer:GetCategoryInfo(a)
-            local infoB = Omni.Categorizer:GetCategoryInfo(b)
-            return (infoA.priority or 99) < (infoB.priority or 99)
-        end)
-    end
 
     -- Release existing buttons
     if Omni.Pool then
@@ -930,50 +840,79 @@ function Frame:RenderFlowView(items)
     end
     itemButtons = {}
 
-    -- Hide existing category headers (they'll be reused by index)
-    for _, header in ipairs(categoryHeaders) do
-        header:Hide()
-    end
+    -- Hide existing headers and list rows
+    for _, header in ipairs(categoryHeaders) do header:Hide() end
+    for _, row in ipairs(listRows) do row:Hide() end
 
-    -- Hide list rows if any (from List view)
-    for _, row in ipairs(listRows) do
-        row:Hide()
-    end
-
-    -- Layout
+    -- Layout Constants
     local contentWidth = mainFrame.content:GetWidth() - 20
     local columns = math.floor(contentWidth / (ITEM_SIZE + ITEM_SPACING))
     columns = math.max(columns, 1)
 
     local yOffset = -ITEM_SPACING
-    local HEADER_HEIGHT = 20
+    local sectionHeaderHeight = (currentView == "grid") and 0 or 20 -- No headers in grid mode
+    local sectionSpacing = (currentView == "grid") and ITEM_SPACING or 8
+
+    -- Group items
+    local categories = {}
+    local categoryOrder = {}
+
+    if currentView == "grid" then
+        -- GRID MODE: Everything in one bucket, sorted by user's preference (already sorted)
+        categories["All"] = items
+        categoryOrder = { "All" }
+    else
+        -- FLOW MODE: Group by assigned category
+        for _, item in ipairs(items) do
+            local cat = item.category or "Miscellaneous"
+            if not categories[cat] then
+                categories[cat] = {}
+                table.insert(categoryOrder, cat)
+            end
+            table.insert(categories[cat], item)
+        end
+
+        -- Sort categories
+        if Omni.Categorizer then
+            table.sort(categoryOrder, function(a, b)
+                local infoA = Omni.Categorizer:GetCategoryInfo(a)
+                local infoB = Omni.Categorizer:GetCategoryInfo(b)
+                return (infoA.priority or 99) < (infoB.priority or 99)
+            end)
+        end
+    end
+
+    -- Render Sections
     local headerIndex = 0
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         if catItems and #catItems > 0 then
-            -- Get or create category header
-            headerIndex = headerIndex + 1
-            local header = categoryHeaders[headerIndex]
-            if not header then
-                header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                categoryHeaders[headerIndex] = header
+
+            -- Render Header (only if not Grid)
+            if currentView ~= "grid" then
+                headerIndex = headerIndex + 1
+                local header = categoryHeaders[headerIndex]
+                if not header then
+                    header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    categoryHeaders[headerIndex] = header
+                end
+
+                header:ClearAllPoints()
+                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", ITEM_SPACING, yOffset)
+
+                local r, g, b = 1, 1, 1
+                if Omni.Categorizer then
+                    r, g, b = Omni.Categorizer:GetCategoryColor(catName)
+                end
+                header:SetTextColor(r, g, b)
+                header:SetText(catName .. " (" .. #catItems .. ")")
+                header:Show()
+
+                yOffset = yOffset - sectionHeaderHeight
             end
 
-            header:ClearAllPoints()
-            header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", ITEM_SPACING, yOffset)
-
-            local r, g, b = 1, 1, 1
-            if Omni.Categorizer then
-                r, g, b = Omni.Categorizer:GetCategoryColor(catName)
-            end
-            header:SetTextColor(r, g, b)
-            header:SetText(catName .. " (" .. #catItems .. ")")
-            header:Show()
-
-            yOffset = yOffset - HEADER_HEIGHT
-
-            -- Items in this category
+            -- Render Items in this section
             for i, itemInfo in ipairs(catItems) do
                 local btn
                 if Omni.Pool then
@@ -993,15 +932,25 @@ function Frame:RenderFlowView(items)
                     btn:ClearAllPoints()
                     btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
 
-                    Omni.ItemButton:SetItem(btn, itemInfo)
-                    btn:Show()
+                    -- Error boundary: Protect against rendering bad items
+                    local success, err = pcall(function()
+                         btn:SetItem(itemInfo)
+                         btn:Show()
+                    end)
+
+                    if not success then
+                        btn:SetItem(nil)
+                        if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                        btn:Show()
+                    end
 
                     table.insert(itemButtons, btn)
                 end
             end
 
+            -- Update yOffset for next section
             local catRows = math.ceil(#catItems / columns)
-            yOffset = yOffset - (catRows * (ITEM_SIZE + ITEM_SPACING)) - ITEM_SPACING
+            yOffset = yOffset - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
         end
     end
 
@@ -1119,39 +1068,48 @@ function Frame:RenderListView(items)
             row.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
         end
 
-        -- Set icon
-        row.icon:SetTexture(itemInfo.iconFileID or "Interface\\Icons\\INV_Misc_QuestionMark")
+        -- Error boundary
+        local success, err = pcall(function()
+            -- Set icon
+            row.icon:SetTexture(itemInfo.iconFileID or "Interface\\Icons\\INV_Misc_QuestionMark")
 
-        -- Get item info for name and type
-        local itemName, _, quality, _, _, itemType, itemSubType = nil, nil, itemInfo.quality, nil, nil, nil, nil
-        if itemInfo.hyperlink then
-            itemName, _, quality, _, _, itemType, itemSubType = GetItemInfo(itemInfo.hyperlink)
-        end
+            -- Get item info for name and type
+            local itemName, _, quality, _, _, itemType, itemSubType = nil, nil, itemInfo.quality, nil, nil, nil, nil
+            if itemInfo.hyperlink then
+                itemName, _, quality, _, _, itemType, itemSubType = GetItemInfo(itemInfo.hyperlink)
+            end
 
-        -- Set name with quality color
-        local QUALITY_COLORS = {
-            [0] = { 0.62, 0.62, 0.62 },
-            [1] = { 1.00, 1.00, 1.00 },
-            [2] = { 0.12, 1.00, 0.00 },
-            [3] = { 0.00, 0.44, 0.87 },
-            [4] = { 0.64, 0.21, 0.93 },
-            [5] = { 1.00, 0.50, 0.00 },
-            [6] = { 0.90, 0.80, 0.50 },
-            [7] = { 0.00, 0.80, 1.00 },
-        }
-        local qColor = QUALITY_COLORS[quality or 1] or QUALITY_COLORS[1]
-        row.name:SetText(itemName or itemInfo.hyperlink or "Unknown")
-        row.name:SetTextColor(qColor[1], qColor[2], qColor[3])
+            -- Set name with quality color
+            local QUALITY_COLORS = {
+                [0] = { 0.62, 0.62, 0.62 },
+                [1] = { 1.00, 1.00, 1.00 },
+                [2] = { 0.12, 1.00, 0.00 },
+                [3] = { 0.00, 0.44, 0.87 },
+                [4] = { 0.64, 0.21, 0.93 },
+                [5] = { 1.00, 0.50, 0.00 },
+                [6] = { 0.90, 0.80, 0.50 },
+                [7] = { 0.00, 0.80, 1.00 },
+            }
+            local qColor = QUALITY_COLORS[quality or 1] or QUALITY_COLORS[1]
+            row.name:SetText(itemName or itemInfo.hyperlink or "Unknown")
+            row.name:SetTextColor(qColor[1], qColor[2], qColor[3])
 
-        -- Set type
-        row.itemType:SetText(itemSubType or itemType or "")
+            -- Set type
+            row.itemType:SetText(itemSubType or itemType or "")
 
-        -- Set quantity
-        local count = itemInfo.stackCount or 1
-        if count > 1 then
-            row.qty:SetText(count)
-        else
-            row.qty:SetText("")
+            -- Set quantity
+            local count = itemInfo.stackCount or 1
+            if count > 1 then
+                row.qty:SetText(count)
+            else
+                row.qty:SetText("")
+            end
+        end)
+
+        if not success then
+             row.name:SetText("Error loading item")
+             row.name:SetTextColor(1, 0, 0)
+             row.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         end
 
         -- Store item info for click/tooltip

@@ -181,6 +181,23 @@ function Events:Init()
             Omni.Frame:UpdateMoney()
         end
     end)
+
+    -- Item info received (async data load)
+    self:RegisterBucketEvent("GET_ITEM_INFO_RECEIVED", function()
+        if Omni.Frame and Omni.Frame:IsShown() then
+            -- Refresh layout to fix "Miscellaneous" items that now have data
+            Omni.Frame:UpdateLayout()
+        end
+    end)
+
+    -- Player entering world (session start)
+    self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
+        if Omni.Categorizer then
+            -- Note: Snapshot is already called in Categorizer:Init(),
+            -- but re-snapshotting here ensures it catches late-loading items
+            Omni.Categorizer:SnapshotInventory()
+        end
+    end)
 end
 
 print("|cFF00FF00OmniInventory|r: Event Bucketing system loaded")

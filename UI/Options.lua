@@ -122,7 +122,23 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - SPACING - 20
 
-    -- 4. Reset Button
+    -- 4. Category Editor Button
+    local catBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    catBtn:SetSize(160, 24)
+    catBtn:SetPoint("TOP", 0, yOffset)
+    catBtn:SetText("Open Category Editor")
+    catBtn:SetScript("OnClick", function()
+        if Omni.CategoryEditor then
+            Omni.CategoryEditor:Toggle()
+        else
+            print("|cFF00FF00OmniInventory|r: Category Editor not loaded")
+        end
+    end)
+    self.catBtn = catBtn
+
+    yOffset = yOffset - SPACING - 10
+
+    -- 5. Reset Button
     local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     resetBtn:SetSize(160, 24)
     resetBtn:SetPoint("TOP", 0, yOffset)
