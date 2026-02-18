@@ -17,6 +17,13 @@ local ItemButton = Omni.ItemButton
 local BUTTON_SIZE = 37
 local ICON_SIZE = 32
 local BORDER_SIZE = 2
+local ATTUNE_BAR_WIDTH = 6
+local ATTUNE_MIN_HEIGHT_PERCENT = 0.2
+local ATTUNE_MAX_HEIGHT_PERCENT = 0.9
+local RESIST_ICON_TEXTURE = "Interface\\Icons\\Spell_Holy_MagicalSentry"
+
+local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
+local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
 
 local QUALITY_COLORS = {
     [0] = { 0.62, 0.62, 0.62 },  -- Poor (Grey)
@@ -28,6 +35,131 @@ local QUALITY_COLORS = {
     [6] = { 0.90, 0.80, 0.50 },  -- Artifact (Light Gold)
     [7] = { 0.00, 0.80, 1.00 },  -- Heirloom (Light Blue)
 }
+
+local function GetAttuneSettings()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    local attune = global and global.attune
+    if not attune then
+        return nil
+    end
+    return attune
+end
+
+local function GetItemIDFromLink(itemLink)
+    if not itemLink then
+        return nil
+    end
+    local itemIdStr = string.match(itemLink, "item:(%d+)")
+    if itemIdStr then
+        return tonumber(itemIdStr)
+    end
+    return nil
+end
+
+local function GetForgeLevelFromLink(itemLink)
+    if not itemLink or not _G.GetItemLinkTitanforge then
+        return FORGE_LEVEL_MAP.BASE
+    end
+    local value = GetItemLinkTitanforge(itemLink)
+    for _, known in pairs(FORGE_LEVEL_MAP) do
+        if value == known then
+            return value
+        end
+    end
+    return FORGE_LEVEL_MAP.BASE
+end
+
+local function IsAttunableByCharacter(itemID)
+    if not itemID or not _G.CanAttuneItemHelper then
+        return false
+    end
+    return CanAttuneItemHelper(itemID) >= 1
+end
+
+local function IsAttunableByAccount(itemID)
+    if not itemID then
+        return false
+    end
+    if _G.IsAttunableBySomeone then
+        local check = IsAttunableBySomeone(itemID)
+        return check ~= nil and check ~= 0
+    end
+    if _G.GetItemTagsCustom and _G.bit and _G.bit.band then
+        local itemTags = GetItemTagsCustom(itemID)
+        if itemTags then
+            return bit.band(itemTags, 96) == 64
+        end
+    end
+    return false
+end
+
+local function GetAttuneProgress(itemLink)
+    if not itemLink or not _G.GetItemLinkAttuneProgress then
+        return 0
+    end
+    local progress = GetItemLinkAttuneProgress(itemLink)
+    if type(progress) == "number" then
+        return progress
+    end
+    return 0
+end
+
+local function IsItemBountied(itemID)
+    if not itemID or not _G.GetCustomGameData then
+        return false
+    end
+    local bountiedValue = GetCustomGameData(31, itemID)
+    return (bountiedValue or 0) > 0
+end
+
+local function IsItemResistArmor(itemLink, itemID)
+    if not itemLink or not itemID then
+        return false
+    end
+    if select(6, GetItemInfo(itemID)) ~= "Armor" then
+        return false
+    end
+    local itemName = itemLink:match("%[(.-)%]")
+    if not itemName then
+        return false
+    end
+    local resistIndicators = { "Resistance", "Protection" }
+    local resistTypes = { "Arcane", "Fire", "Nature", "Frost", "Shadow" }
+    for _, indicator in ipairs(resistIndicators) do
+        if string.find(itemName, indicator) then
+            for _, resistType in ipairs(resistTypes) do
+                if string.find(itemName, resistType) then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function EnsureAttuneAnimationData(button, progress)
+    button.attuneAnimData = button.attuneAnimData or {
+        currentHeight = 0,
+        targetHeight = 0,
+        isAnimating = false,
+        currentProgress = progress or 0,
+        targetProgress = progress or 0,
+        isTextAnimating = false,
+        textStepTimer = 0,
+        textStepInterval = 0.1,
+    }
+    return button.attuneAnimData
+end
+
+local function HideAttuneDisplay(button)
+    if button.attuneBarBG then button.attuneBarBG:Hide() end
+    if button.attuneBarFill then button.attuneBarFill:Hide() end
+    if button.attuneText then button.attuneText:Hide() end
+    if button.bountyIcon then button.bountyIcon:Hide() end
+    if button.accountIcon then button.accountIcon:Hide() end
+    if button.resistIcon then button.resistIcon:Hide() end
+    button:SetScript("OnUpdate", nil)
+end
 
 -- =============================================================================
 -- Button Creation
@@ -147,6 +279,44 @@ function ItemButton:Create(parent)
     button.pinIcon:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     button.pinIcon:Hide()
 
+    button.attuneBarBG = button:CreateTexture(nil, "OVERLAY")
+    button.attuneBarBG:SetTexture("Interface\\Buttons\\WHITE8X8")
+    button.attuneBarBG:SetVertexColor(0, 0, 0, 1)
+    button.attuneBarBG:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 2, 2)
+    button.attuneBarBG:SetWidth(ATTUNE_BAR_WIDTH + 2)
+    button.attuneBarBG:SetHeight(0)
+    button.attuneBarBG:Hide()
+
+    button.attuneBarFill = button:CreateTexture(nil, "OVERLAY")
+    button.attuneBarFill:SetTexture("Interface\\Buttons\\WHITE8X8")
+    button.attuneBarFill:SetPoint("BOTTOMLEFT", button.attuneBarBG, "BOTTOMLEFT", 1, 1)
+    button.attuneBarFill:SetWidth(ATTUNE_BAR_WIDTH)
+    button.attuneBarFill:SetHeight(0)
+    button.attuneBarFill:Hide()
+
+    button.attuneText = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    button.attuneText:SetPoint("BOTTOM", button, "BOTTOM", 0, 3)
+    button.attuneText:Hide()
+
+    button.bountyIcon = button:CreateTexture(nil, "OVERLAY")
+    button.bountyIcon:SetTexture("Interface/MoneyFrame/UI-GoldIcon")
+    button.bountyIcon:SetSize(16, 16)
+    button.bountyIcon:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, -2)
+    button.bountyIcon:Hide()
+
+    button.accountIcon = button:CreateTexture(nil, "OVERLAY")
+    button.accountIcon:SetTexture("Interface\\Buttons\\WHITE8X8")
+    button.accountIcon:SetVertexColor(0.3, 0.7, 1.0, 0.8)
+    button.accountIcon:SetSize(8, 8)
+    button.accountIcon:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
+    button.accountIcon:Hide()
+
+    button.resistIcon = button:CreateTexture(nil, "OVERLAY")
+    button.resistIcon:SetTexture(RESIST_ICON_TEXTURE)
+    button.resistIcon:SetSize(16, 16)
+    button.resistIcon:SetPoint("TOP", button, "TOP", 0, -2)
+    button.resistIcon:Hide()
+
     -- Store item info reference
     button.itemInfo = nil
 
@@ -179,6 +349,199 @@ end
 -- Button Update
 -- =============================================================================
 
+local function UpdateAttuneDisplay(button, itemInfo)
+    local settings = GetAttuneSettings()
+    if not settings or not settings.enabled then
+        HideAttuneDisplay(button)
+        return
+    end
+
+    local itemLink = itemInfo and itemInfo.hyperlink
+    local itemID = (itemInfo and itemInfo.itemID) or GetItemIDFromLink(itemLink)
+    if not itemLink or not itemID then
+        HideAttuneDisplay(button)
+        return
+    end
+
+    if settings.showBountyIcons and IsItemBountied(itemID) then
+        button.bountyIcon:Show()
+    else
+        button.bountyIcon:Hide()
+    end
+
+    local charOK = IsAttunableByCharacter(itemID)
+    local accountOK = IsAttunableByAccount(itemID)
+    if settings.showAccountIcons and accountOK and not charOK then
+        button.accountIcon:Show()
+    else
+        button.accountIcon:Hide()
+    end
+
+    if settings.showResistIcons and IsItemResistArmor(itemLink, itemID) then
+        button.resistIcon:Show()
+    else
+        button.resistIcon:Hide()
+    end
+
+    local progress = GetAttuneProgress(itemLink) or 0
+    local showBar = false
+    local barColor = nil
+
+    if charOK then
+        if progress < 100 or settings.faeMode then
+            showBar = true
+            if progress >= 100 and settings.faeMode and settings.faeCompleteBarColor then
+                barColor = settings.faeCompleteBarColor
+            else
+                local forge = GetForgeLevelFromLink(itemLink)
+                local key = FORGE_LEVEL_NAMES[forge] or "BASE"
+                barColor = settings.forgeColors and settings.forgeColors[key]
+            end
+        end
+    elseif settings.showRedForNonAttunable and accountOK and progress > 0 then
+        showBar = true
+        barColor = settings.nonAttunableBarColor
+    end
+
+    if not showBar then
+        button.attuneBarBG:Hide()
+        button.attuneBarFill:Hide()
+        button:SetScript("OnUpdate", nil)
+        if settings.showAccountAttuneText and progress < 100 and (not charOK) and accountOK then
+            button.attuneText:SetTextColor(
+                settings.textColor.r,
+                settings.textColor.g,
+                settings.textColor.b,
+                settings.textColor.a
+            )
+            button.attuneText:SetText("Acc")
+            button.attuneText:Show()
+        else
+            button.attuneText:Hide()
+        end
+        return
+    end
+
+    local targetHeight = math.max(
+        BUTTON_SIZE * ATTUNE_MIN_HEIGHT_PERCENT + (progress / 100) * (BUTTON_SIZE * (ATTUNE_MAX_HEIGHT_PERCENT - ATTUNE_MIN_HEIGHT_PERCENT)),
+        BUTTON_SIZE * ATTUNE_MIN_HEIGHT_PERCENT
+    )
+
+    local animData = EnsureAttuneAnimationData(button, progress)
+    if settings.enableAnimations and math.abs(animData.targetHeight - targetHeight) > 1 then
+        animData.targetHeight = targetHeight
+        animData.isAnimating = true
+    else
+        animData.currentHeight = targetHeight
+        animData.targetHeight = targetHeight
+        animData.isAnimating = false
+    end
+
+    if settings.enableTextAnimations and settings.showProgressText and math.abs(animData.targetProgress - progress) > 0.1 then
+        animData.targetProgress = progress
+        animData.isTextAnimating = true
+        animData.textStepTimer = 0
+        animData.textStepInterval = 1 / (math.max(settings.textAnimationSpeed or 0.2, 0.05) * 20)
+    else
+        animData.currentProgress = progress
+        animData.targetProgress = progress
+        animData.isTextAnimating = false
+    end
+
+    if barColor and barColor.r then
+        button.attuneBarFill:SetVertexColor(barColor.r, barColor.g, barColor.b, barColor.a or 1)
+    else
+        button.attuneBarFill:SetVertexColor(0.5, 0.5, 0.5, 1)
+    end
+
+    button.attuneBarBG:Show()
+    button.attuneBarFill:Show()
+
+    if settings.showProgressText and (charOK or (settings.showRedForNonAttunable and accountOK and progress > 0)) then
+        local displayProgress = animData.currentProgress or progress
+        button.attuneText:SetTextColor(
+            settings.textColor.r,
+            settings.textColor.g,
+            settings.textColor.b,
+            settings.textColor.a
+        )
+        button.attuneText:SetText(string.format("%.0f%%", displayProgress))
+        button.attuneText:Show()
+    elseif settings.showAccountAttuneText and progress < 100 and (not charOK) and accountOK then
+        button.attuneText:SetTextColor(
+            settings.textColor.r,
+            settings.textColor.g,
+            settings.textColor.b,
+            settings.textColor.a
+        )
+        button.attuneText:SetText("Acc")
+        button.attuneText:Show()
+    else
+        button.attuneText:Hide()
+    end
+
+    local function ApplyBarHeight(heightValue)
+        button.attuneBarBG:SetHeight(heightValue + 2)
+        button.attuneBarFill:SetHeight(math.max(heightValue, 0))
+    end
+
+    if (animData.isAnimating or animData.isTextAnimating) then
+        button:SetScript("OnUpdate", function(self, elapsed)
+            local data = self.attuneAnimData
+            local attuneSettings = GetAttuneSettings()
+            if not data or not attuneSettings then
+                self:SetScript("OnUpdate", nil)
+                return
+            end
+
+            local stillAnimating = false
+            if data.isAnimating then
+                local diff = data.targetHeight - data.currentHeight
+                if math.abs(diff) < 0.1 then
+                    data.currentHeight = data.targetHeight
+                    data.isAnimating = false
+                else
+                    local speed = attuneSettings.animationSpeed or 0.15
+                    data.currentHeight = data.currentHeight + (diff * speed * (elapsed * 60))
+                    stillAnimating = true
+                end
+                ApplyBarHeight(data.currentHeight)
+            end
+
+            if data.isTextAnimating then
+                data.textStepTimer = data.textStepTimer + elapsed
+                if data.textStepTimer >= data.textStepInterval then
+                    data.textStepTimer = 0
+                    if data.currentProgress < data.targetProgress then
+                        data.currentProgress = math.min(data.currentProgress + 1, data.targetProgress)
+                    elseif data.currentProgress > data.targetProgress then
+                        data.currentProgress = math.max(data.currentProgress - 1, data.targetProgress)
+                    end
+                    if button.attuneText and button.attuneText:IsShown() then
+                        button.attuneText:SetText(string.format("%.0f%%", data.currentProgress))
+                    end
+                    if math.abs(data.currentProgress - data.targetProgress) < 0.1 then
+                        data.currentProgress = data.targetProgress
+                        data.isTextAnimating = false
+                    else
+                        stillAnimating = true
+                    end
+                else
+                    stillAnimating = true
+                end
+            end
+
+            if not stillAnimating then
+                self:SetScript("OnUpdate", nil)
+                ApplyBarHeight(data.currentHeight)
+            end
+        end)
+    else
+        button:SetScript("OnUpdate", nil)
+        ApplyBarHeight(animData.currentHeight)
+    end
+end
+
 function ItemButton:SetItem(button, itemInfo)
     if not button then return end
 
@@ -199,6 +562,7 @@ function ItemButton:SetItem(button, itemInfo)
         -- Clear secure attributes
         button:SetAttribute("type", nil)
         button:SetAttribute("item", nil)
+        HideAttuneDisplay(button)
         return
     end
 
@@ -273,6 +637,8 @@ function ItemButton:SetItem(button, itemInfo)
     else
         button.pinIcon:Hide()
     end
+
+    UpdateAttuneDisplay(button, itemInfo)
 end
 
 -- =============================================================================
@@ -449,6 +815,9 @@ function ItemButton:Reset(button)
     if button.glow.anim then button.glow.anim:Stop() end
     button.glow:Hide()
     button.dimOverlay:Hide()
+    button.pinIcon:Hide()
+    HideAttuneDisplay(button)
+    button.attuneAnimData = nil
     button.icon:SetDesaturated(false)
     button.icon:SetAlpha(1)
     button:Hide()

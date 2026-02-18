@@ -21,6 +21,29 @@ local defaults = {
         itemSize = 37,
         scale = 1.0,
         opacity = 0.95,
+        attune = {
+            enabled = true,
+            showRedForNonAttunable = true,
+            showBountyIcons = true,
+            showAccountIcons = false,
+            showResistIcons = true,
+            showProgressText = true,
+            showAccountAttuneText = false,
+            faeMode = false,
+            enableAnimations = true,
+            animationSpeed = 0.15,
+            enableTextAnimations = true,
+            textAnimationSpeed = 0.2,
+            forgeColors = {
+                BASE = { r = 0.0, g = 1.0, b = 0.0, a = 1.0 },
+                TITANFORGED = { r = 0.468, g = 0.532, b = 1.0, a = 1.0 },
+                WARFORGED = { r = 0.872, g = 0.206, b = 0.145, a = 1.0 },
+                LIGHTFORGED = { r = 0.527, g = 0.527, b = 0.266, a = 1.0 },
+            },
+            faeCompleteBarColor = { r = 0.95, g = 0.8, b = 0.2, a = 1.0 },
+            nonAttunableBarColor = { r = 1.0, g = 0.0, b = 0.0, a = 1.0 },
+            textColor = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },
+        },
     },
     char = {
         position = nil,         -- { point, x, y }
@@ -29,6 +52,31 @@ local defaults = {
     },
     realm = {},  -- Cross-character data stored here
 }
+
+local function CopyTable(src)
+    if type(src) ~= "table" then
+        return src
+    end
+    local dst = {}
+    for key, value in pairs(src) do
+        if type(value) == "table" then
+            dst[key] = CopyTable(value)
+        else
+            dst[key] = value
+        end
+    end
+    return dst
+end
+
+local function MergeDefaults(target, source)
+    for key, value in pairs(source) do
+        if target[key] == nil then
+            target[key] = CopyTable(value)
+        elseif type(value) == "table" and type(target[key]) == "table" then
+            MergeDefaults(target[key], value)
+        end
+    end
+end
 
 -- =============================================================================
 -- Initialization
@@ -42,12 +90,9 @@ function Data:Init()
     OmniInventoryDB.char = OmniInventoryDB.char or {}
     OmniInventoryDB.realm = OmniInventoryDB.realm or {}
 
-    -- Merge defaults
-    for k, v in pairs(defaults.global) do
-        if OmniInventoryDB.global[k] == nil then
-            OmniInventoryDB.global[k] = v
-        end
-    end
+    MergeDefaults(OmniInventoryDB.global, defaults.global)
+    MergeDefaults(OmniInventoryDB.char, defaults.char)
+    MergeDefaults(OmniInventoryDB.realm, defaults.realm)
 
     -- Store current character info
     local realmName = GetRealmName()

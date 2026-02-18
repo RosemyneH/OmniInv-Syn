@@ -20,6 +20,8 @@ local categoryOrder = {}  -- Sorted by priority
 -- Default colors for categories
 local CATEGORY_COLORS = {
     ["Quest Items"]     = { r = 1.0, g = 0.82, b = 0.0 },
+    ["Attunable"]       = { r = 0.0, g = 0.9, b = 0.5 },
+    ["BoE"]             = { r = 0.4, g = 0.9, b = 1.0 },
     ["Equipment"]       = { r = 0.0, g = 0.8, b = 0.0 },
     ["Equipment Sets"]  = { r = 0.4, g = 0.8, b = 1.0 },
     ["Consumables"]     = { r = 1.0, g = 0.5, b = 0.5 },
@@ -79,6 +81,10 @@ function Categorizer:ClearAllNewItems()
     newItems = {}
 end
 
+function Categorizer:SnapshotInventory()
+    SnapshotInventory()
+end
+
 -- =============================================================================
 -- Category Filters
 -- =============================================================================
@@ -117,14 +123,112 @@ local function IsEquipmentSetItem(itemInfo)
     return false
 end
 
--- Get ItemType from GetItemInfo
-local function GetItemTypeInfo(itemInfo)
-    if not itemInfo or not itemInfo.hyperlink then
-        return nil, nil
+local function GetItemID(itemInfo)
+    if not itemInfo then
+        return nil
+    end
+    if itemInfo.itemID then
+        return itemInfo.itemID
+    end
+    if itemInfo.hyperlink then
+        local itemID = tonumber(string.match(itemInfo.hyperlink, "item:(%d+)"))
+        return itemID
+    end
+    return nil
+end
+
+local function IsAttunableItem(itemInfo)
+    local itemID = GetItemID(itemInfo)
+    if not itemID then
+        return false
     end
 
-    local _, _, _, _, _, itemType, itemSubType = GetItemInfo(itemInfo.hyperlink)
-    return itemType, itemSubType
+    -- Must be attunable by THIS character (class/level/proficiency aware)
+    if not _G.CanAttuneItemHelper or CanAttuneItemHelper(itemID) < 1 then
+        return false
+    end
+
+    -- Optional safety: if API says nobody can attune it at all, reject
+    if _G.IsAttunableBySomeone then
+        local accountCheck = IsAttunableBySomeone(itemID)
+        if not accountCheck or accountCheck == 0 then
+            return false
+        end
+    end
+
+    -- Must still need attunement (< 100%)
+    local progress = nil
+
+    -- Prefer explicit itemId API
+    if _G.GetItemAttuneProgress then
+        local titanforged = nil
+        if _G.GetItemLinkTitanforge and itemInfo and itemInfo.hyperlink then
+            local forge = GetItemLinkTitanforge(itemInfo.hyperlink)
+            if type(forge) == "number" and forge > 0 then
+                titanforged = forge
+            end
+        elseif _G.GetItemAttuneForge then
+            local forge = GetItemAttuneForge(itemID)
+            if type(forge) == "number" and forge > 0 then
+                titanforged = forge
+            end
+        end
+        progress = GetItemAttuneProgress(itemID, nil, titanforged)
+    end
+
+    -- Fallback to hyperlink API if available
+    if type(progress) ~= "number" and _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
+        progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
+    end
+
+    -- If no progress API is available, fail closed so category is strict
+    if type(progress) ~= "number" then
+        return false
+    end
+
+    return progress < 100
+end
+
+-- Get item type fields from itemInfo or GetItemInfo fallback
+local function GetItemTypeInfo(itemInfo)
+    if not itemInfo then
+        return nil, nil, nil
+    end
+
+    local itemType = itemInfo.itemType
+    local itemSubType = itemInfo.itemSubType
+    local equipSlot = itemInfo.equipSlot
+
+    if itemType then
+        return itemType, itemSubType, equipSlot
+    end
+
+    if not itemInfo.hyperlink then
+        return nil, nil, nil
+    end
+
+    local _, _, _, _, _, resolvedType, resolvedSubType, _, resolvedEquipSlot = GetItemInfo(itemInfo.hyperlink)
+    return resolvedType, resolvedSubType, resolvedEquipSlot
+end
+
+local function IsEquipmentItem(itemInfo)
+    local itemType, _, equipSlot = GetItemTypeInfo(itemInfo)
+    if equipSlot and equipSlot ~= "" and equipSlot ~= "INVTYPE_BAG" and equipSlot ~= "INVTYPE_QUIVER" then
+        return true
+    end
+
+    -- Fallback for uncached equip slots
+    return itemType == "Armor" or itemType == "Weapon"
+end
+
+local function IsBoEItem(itemInfo)
+    if not itemInfo then
+        return false
+    end
+    if itemInfo.bindType ~= "BoE" then
+        return false
+    end
+    return IsEquipmentItem(itemInfo)
 end
 
 -- =============================================================================
@@ -177,6 +281,20 @@ local function ClassifyByItemType(itemInfo)
         return "Miscellaneous"
     end
 
+    -- Equipment must win over subtype names like "Cloth"/"Leather".
+    if IsEquipmentItem(itemInfo) then
+        return "Equipment"
+    end
+
+    -- These top-level types are unambiguous.
+    if itemType == "Trade Goods" then return "Trade Goods" end
+    if itemType == "Reagent" then return "Reagents" end
+    if itemType == "Container" then return "Bags" end
+    if itemType == "Projectile" then return "Ammo" end
+    if itemType == "Glyph" then return "Glyphs" end
+    if itemType == "Quest" then return "Quest Items" end
+    if itemType == "Key" then return "Keys" end
+
     -- Check subtype first for more specific classification
     if itemSubType then
         local subCategory = TYPE_TO_CATEGORY[itemSubType]
@@ -219,18 +337,28 @@ function Categorizer:GetCategory(itemInfo)
         return "Quest Items"
     end
 
-    -- Priority 3: Equipment Sets
+    -- Priority 3: Attunable
+    if IsAttunableItem(itemInfo) then
+        return "Attunable"
+    end
+
+    -- Priority 4: Equipment Sets
     if IsEquipmentSetItem(itemInfo) then
         return "Equipment Sets"
     end
 
-    -- Priority 4: New Items (session-based)
+    -- Priority 5: BoE equipment
+    if IsBoEItem(itemInfo) then
+        return "BoE"
+    end
+
+    -- Priority 6: New Items (session-based)
     if self:IsNewItem(itemInfo.itemID) then
         -- Don't return here, just mark - new items also belong to a real category
         -- We'll handle "New" as a special overlay, not a category
     end
 
-    -- Priority 5: Check quality for junk
+    -- Priority 7: Check quality for junk
     if itemInfo.quality == 0 then
         return "Junk"
     end
@@ -326,8 +454,10 @@ end
 function Categorizer:Init()
     -- Register default categories
     self:RegisterCategory("Quest Items", 2, nil, CATEGORY_COLORS["Quest Items"])
-    self:RegisterCategory("Equipment Sets", 3, nil, CATEGORY_COLORS["Equipment Sets"])
-    self:RegisterCategory("New Items", 4, nil, CATEGORY_COLORS["New Items"])
+    self:RegisterCategory("Attunable", 3, nil, CATEGORY_COLORS["Attunable"])
+    self:RegisterCategory("Equipment Sets", 4, nil, CATEGORY_COLORS["Equipment Sets"])
+    self:RegisterCategory("BoE", 5, nil, CATEGORY_COLORS["BoE"])
+    self:RegisterCategory("New Items", 6, nil, CATEGORY_COLORS["New Items"])
     self:RegisterCategory("Equipment", 10, nil, CATEGORY_COLORS["Equipment"])
     self:RegisterCategory("Consumables", 11, nil, CATEGORY_COLORS["Consumables"])
     self:RegisterCategory("Trade Goods", 12, nil, CATEGORY_COLORS["Trade Goods"])

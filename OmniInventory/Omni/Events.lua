@@ -192,7 +192,7 @@ function Events:Init()
 
     -- Player entering world (session start)
     self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
-        if Omni.Categorizer then
+        if Omni.Categorizer and Omni.Categorizer.SnapshotInventory then
             -- Note: Snapshot is already called in Categorizer:Init(),
             -- but re-snapshotting here ensures it catches late-loading items
             Omni.Categorizer:SnapshotInventory()

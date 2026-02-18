@@ -40,6 +40,19 @@ local isMerchantOpen = false
 local isSearchActive = false
 local searchText = ""
 
+local function SetButtonItem(btn, itemInfo)
+    if not btn then return end
+
+    if btn.SetItem then
+        btn:SetItem(itemInfo)
+        return
+    end
+
+    if Omni.ItemButton and Omni.ItemButton.SetItem then
+        Omni.ItemButton:SetItem(btn, itemInfo)
+    end
+end
+
 -- =============================================================================
 -- Frame Creation
 -- =============================================================================
@@ -934,12 +947,12 @@ function Frame:RenderFlowView(items)
 
                     -- Error boundary: Protect against rendering bad items
                     local success, err = pcall(function()
-                         btn:SetItem(itemInfo)
+                         SetButtonItem(btn, itemInfo)
                          btn:Show()
                     end)
 
                     if not success then
-                        btn:SetItem(nil)
+                        SetButtonItem(btn, nil)
                         if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
                         btn:Show()
                     end
