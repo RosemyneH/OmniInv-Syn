@@ -37,9 +37,10 @@ function Utils:FormatMoney(copper)
     local gold = math.floor(copper / 10000)
     local silver = math.floor((copper % 10000) / 100)
     local cop = copper % 100
+    local formattedGold = tostring(gold):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 
     if gold > 0 then
-        return string.format("%dg %ds %dc", gold, silver, cop)
+        return string.format("%sg %ds %dc", formattedGold, silver, cop)
     elseif silver > 0 then
         return string.format("%ds %dc", silver, cop)
     else

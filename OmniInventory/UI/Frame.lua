@@ -25,6 +25,8 @@ local PADDING = 8
 local ITEM_SIZE = 37
 local ITEM_SPACING = 4
 local DEFAULT_VIEW_MODE = "flow"
+local BAG_ICON_SIZE = 18
+local BAG_IDS = { 0, 1, 2, 3, 4 }
 
 -- =============================================================================
 -- Frame State
@@ -40,6 +42,12 @@ local isBankOpen = false
 local isMerchantOpen = false
 local isSearchActive = false
 local searchText = ""
+local selectedBagID = nil
+local forceEmptyFrame = nil
+local forceEmptyJob = nil
+local FORCE_EMPTY_STEP_INTERVAL = 0.12
+local FORCE_EMPTY_MAX_LOCK_RETRIES = 20
+local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 
 local function SetButtonItem(btn, itemInfo)
     if not btn then return end
@@ -55,7 +63,7 @@ local function SetButtonItem(btn, itemInfo)
 end
 
 local function NormalizeViewMode(mode)
-    if mode == "grid" or mode == "flow" or mode == "list" then
+    if mode == "grid" or mode == "flow" or mode == "list" or mode == "bag" then
         return mode
     end
     return DEFAULT_VIEW_MODE
@@ -64,6 +72,39 @@ end
 local function GetSavedViewMode()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     return NormalizeViewMode(settings and settings.viewMode)
+end
+
+local function IsValidBagID(bagID)
+    return type(bagID) == "number" and bagID >= 0 and bagID <= 4
+end
+
+local function GetSavedBagFilter()
+    local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
+    local bagID = settings and settings.selectedBagID
+    if IsValidBagID(bagID) then
+        return bagID
+    end
+    return nil
+end
+
+local function GetBagDisplayName(bagID)
+    if bagID == 0 then
+        return "Backpack"
+    end
+    local name = GetBagName and GetBagName(bagID)
+    if name and name ~= "" then
+        return name
+    end
+    return "Bag " .. tostring(bagID)
+end
+
+local function GetBagIconTexture(bagID)
+    if bagID == 0 then
+        return "Interface\\Buttons\\Button-Backpack-Up"
+    end
+    local inventorySlot = ContainerIDToInventoryID and ContainerIDToInventoryID(bagID)
+    local texture = inventorySlot and GetInventoryItemTexture("player", inventorySlot)
+    return texture or "Interface\\Icons\\INV_Misc_Bag_10_Blue"
 end
 
 -- =============================================================================
@@ -243,8 +284,8 @@ function Frame:CreateHeader()
 
     -- Options Button
     local optBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    optBtn:SetSize(24, 24)
-    optBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+    optBtn:SetSize(22, 18)
+    optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -4, 0)
     optBtn:SetText("O")
     optBtn:SetScript("OnClick", function()
         if Omni.CategoryEditor then
@@ -260,6 +301,69 @@ function Frame:CreateHeader()
     end)
     optBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     header.optBtn = optBtn
+
+    -- Bag quick-select icons
+    header.bagButtons = {}
+    header.bagBar = CreateFrame("Frame", nil, header)
+    header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BAG_IDS, BAG_ICON_SIZE)
+    header.bagBar:SetPoint("RIGHT", header.optBtn, "LEFT", -6, 0)
+
+    for index, bagID in ipairs(BAG_IDS) do
+        local bagBtn = CreateFrame("Button", nil, header.bagBar)
+        bagBtn:SetSize(BAG_ICON_SIZE, BAG_ICON_SIZE)
+        bagBtn:SetPoint("LEFT", (index - 1) * (BAG_ICON_SIZE + 2), 0)
+        bagBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        bagBtn.bagID = bagID
+
+        bagBtn.icon = bagBtn:CreateTexture(nil, "ARTWORK")
+        bagBtn.icon:SetAllPoints()
+        bagBtn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        bagBtn.borderTop = bagBtn:CreateTexture(nil, "OVERLAY")
+        bagBtn.borderTop:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bagBtn.borderTop:SetPoint("TOPLEFT", -1, 1)
+        bagBtn.borderTop:SetPoint("TOPRIGHT", 1, 1)
+        bagBtn.borderTop:SetHeight(1)
+
+        bagBtn.borderBottom = bagBtn:CreateTexture(nil, "OVERLAY")
+        bagBtn.borderBottom:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bagBtn.borderBottom:SetPoint("BOTTOMLEFT", -1, -1)
+        bagBtn.borderBottom:SetPoint("BOTTOMRIGHT", 1, -1)
+        bagBtn.borderBottom:SetHeight(1)
+
+        bagBtn.borderLeft = bagBtn:CreateTexture(nil, "OVERLAY")
+        bagBtn.borderLeft:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bagBtn.borderLeft:SetPoint("TOPLEFT", -1, 1)
+        bagBtn.borderLeft:SetPoint("BOTTOMLEFT", -1, -1)
+        bagBtn.borderLeft:SetWidth(1)
+
+        bagBtn.borderRight = bagBtn:CreateTexture(nil, "OVERLAY")
+        bagBtn.borderRight:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bagBtn.borderRight:SetPoint("TOPRIGHT", 1, 1)
+        bagBtn.borderRight:SetPoint("BOTTOMRIGHT", 1, -1)
+        bagBtn.borderRight:SetWidth(1)
+
+        bagBtn:SetScript("OnClick", function(self, mouseButton)
+            if mouseButton == "LeftButton" then
+                Frame:ToggleBagPreview(self.bagID)
+            elseif mouseButton == "RightButton" then
+                Frame:ForceEmptyBag(self.bagID)
+            end
+        end)
+
+        bagBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(GetBagDisplayName(self.bagID), 1, 1, 1)
+            GameTooltip:AddLine("Left-click: Preview this bag", 0.8, 0.8, 0.8)
+            GameTooltip:AddLine("Right-click: Force-empty bag", 0.8, 0.8, 0.8)
+            GameTooltip:Show()
+        end)
+        bagBtn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+
+        header.bagButtons[bagID] = bagBtn
+    end
 
     -- Bags/Bank toggle tabs
     header.bagsTab = CreateFrame("Button", nil, header)
@@ -308,6 +412,45 @@ function Frame:CreateHeader()
     end)
 
     mainFrame.header = header
+end
+
+function Frame:UpdateBagIconTextures()
+    if not mainFrame or not mainFrame.header or not mainFrame.header.bagButtons then return end
+
+    for _, bagID in ipairs(BAG_IDS) do
+        local bagBtn = mainFrame.header.bagButtons[bagID]
+        if bagBtn and bagBtn.icon then
+            bagBtn.icon:SetTexture(GetBagIconTexture(bagID))
+        end
+    end
+end
+
+function Frame:UpdateBagIconVisuals()
+    if not mainFrame or not mainFrame.header or not mainFrame.header.bagButtons then return end
+
+    local isVisible = (currentMode == "bags")
+    if mainFrame.header.bagBar then
+        if isVisible then
+            mainFrame.header.bagBar:Show()
+        else
+            mainFrame.header.bagBar:Hide()
+        end
+    end
+
+    for _, bagID in ipairs(BAG_IDS) do
+        local bagBtn = mainFrame.header.bagButtons[bagID]
+        if bagBtn then
+            local r, g, b = 0.4, 0.4, 0.4
+            if selectedBagID == bagID then
+                r, g, b = 0.2, 0.8, 0.2
+            end
+            if bagBtn.borderTop then bagBtn.borderTop:SetVertexColor(r, g, b, 1) end
+            if bagBtn.borderBottom then bagBtn.borderBottom:SetVertexColor(r, g, b, 1) end
+            if bagBtn.borderLeft then bagBtn.borderLeft:SetVertexColor(r, g, b, 1) end
+            if bagBtn.borderRight then bagBtn.borderRight:SetVertexColor(r, g, b, 1) end
+            bagBtn:SetAlpha(isVisible and 1 or 0.5)
+        end
+    end
 end
 
 -- =============================================================================
@@ -646,7 +789,7 @@ function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
 
     if mainFrame and mainFrame.header and mainFrame.header.viewBtn then
-        local labels = { grid = "Grid", flow = "Flow", list = "List" }
+        local labels = { grid = "Grid", flow = "Flow", list = "List", bag = "Bag" }
         mainFrame.header.viewBtn.text:SetText(labels[currentView] or "Grid")
     end
 
@@ -655,11 +798,12 @@ function Frame:SetView(mode)
     OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
     OmniInventoryDB.char.settings.viewMode = currentView
 
+    self:UpdateBagIconVisuals()
     Frame:UpdateLayout()
 end
 
 function Frame:CycleView()
-    local modes = { "grid", "flow", "list" }
+    local modes = { "grid", "flow", "list", "bag" }
     local nextIdx = 1
 
     for i, mode in ipairs(modes) do
@@ -714,6 +858,7 @@ end
 function Frame:SetMode(mode)
     currentMode = mode or "bags"
     self:UpdateBankTabState()
+    self:UpdateBagIconVisuals()
     self:UpdateLayout()
 end
 
@@ -741,6 +886,8 @@ function Frame:UpdateBankTabState()
     else
         header.bankTab.text:SetText("Bank")
     end
+
+    self:UpdateBagIconVisuals()
 end
 
 -- =============================================================================
@@ -814,6 +961,16 @@ function Frame:UpdateLayout(changedBags)
         end
     end
 
+    if currentMode == "bags" and IsValidBagID(selectedBagID) then
+        local filtered = {}
+        for _, item in ipairs(items) do
+            if item.bagID == selectedBagID then
+                table.insert(filtered, item)
+            end
+        end
+        items = filtered
+    end
+
     -- Apply quick filter (dim non-matching items)
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
@@ -853,6 +1010,8 @@ function Frame:UpdateLayout(changedBags)
     end
 
     -- Update footer
+    self:UpdateBagIconTextures()
+    self:UpdateBagIconVisuals()
     self:UpdateSlotCount()
     self:UpdateMoney()
 
@@ -900,6 +1059,17 @@ function Frame:RenderFlowView(items)
         -- GRID MODE: Everything in one bucket, sorted by user's preference (already sorted)
         categories["All"] = items
         categoryOrder = { "All" }
+    elseif currentView == "bag" then
+        for _, bagID in ipairs(BAG_IDS) do
+            categories[bagID] = {}
+            table.insert(categoryOrder, bagID)
+        end
+
+        for _, item in ipairs(items) do
+            if IsValidBagID(item.bagID) then
+                table.insert(categories[item.bagID], item)
+            end
+        end
     else
         -- FLOW MODE: Group by assigned category
         for _, item in ipairs(items) do
@@ -941,11 +1111,17 @@ function Frame:RenderFlowView(items)
                 header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", ITEM_SPACING, yOffset)
 
                 local r, g, b = 1, 1, 1
-                if Omni.Categorizer then
+                if currentView == "bag" then
+                    r, g, b = 0.9, 0.8, 0.4
+                elseif Omni.Categorizer then
                     r, g, b = Omni.Categorizer:GetCategoryColor(catName)
                 end
                 header:SetTextColor(r, g, b)
-                header:SetText(catName .. " (" .. #catItems .. ")")
+                if currentView == "bag" then
+                    header:SetText(GetBagDisplayName(catName) .. " (" .. #catItems .. ")")
+                else
+                    header:SetText(catName .. " (" .. #catItems .. ")")
+                end
                 header:Show()
 
                 yOffset = yOffset - sectionHeaderHeight
@@ -1024,6 +1200,31 @@ function Frame:RenderListView(items)
         header:Hide()
     end
 
+    local function ConfigureSecureRowUse(row, bagID, slotID)
+        if not row then
+            return
+        end
+        if InCombatLockdown and InCombatLockdown() then
+            row.secureUseConfigured = false
+            return
+        end
+
+        if bagID and slotID and bagID >= 0 and slotID > 0 then
+            local itemRef = string.format("%d %d", bagID, slotID)
+            row:SetAttribute("type1", "item")
+            row:SetAttribute("item1", itemRef)
+            row:SetAttribute("type2", "item")
+            row:SetAttribute("item2", itemRef)
+            row.secureUseConfigured = true
+        else
+            row:SetAttribute("type1", nil)
+            row:SetAttribute("item1", nil)
+            row:SetAttribute("type2", nil)
+            row:SetAttribute("item2", nil)
+            row.secureUseConfigured = false
+        end
+    end
+
     -- Layout constants
     local ROW_HEIGHT = 22
     local ICON_SIZE = 18
@@ -1034,8 +1235,9 @@ function Frame:RenderListView(items)
         -- Get or create row frame
         local row = listRows[i]
         if not row then
-            row = CreateFrame("Button", nil, scrollChild)
+            row = CreateFrame("Button", nil, scrollChild, "SecureActionButtonTemplate")
             row:SetHeight(ROW_HEIGHT)
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
             -- Background (alternating)
             row.bg = row:CreateTexture(nil, "BACKGROUND")
@@ -1090,12 +1292,14 @@ function Frame:RenderListView(items)
             end)
 
             -- Click handler
-            row:SetScript("OnClick", function(self, mouseButton)
+            row:HookScript("OnClick", function(self, mouseButton)
                 if self.itemInfo and self.itemInfo.bagID and self.itemInfo.slotID then
-                    if mouseButton == "LeftButton" then
-                        UseContainerItem(self.itemInfo.bagID, self.itemInfo.slotID)
-                    elseif mouseButton == "RightButton" then
-                        UseContainerItem(self.itemInfo.bagID, self.itemInfo.slotID)
+                    local bagID = self.itemInfo.bagID
+                    local slotID = self.itemInfo.slotID
+                    if (mouseButton == "LeftButton" or mouseButton == "RightButton") and not self.secureUseConfigured then
+                        if not InCombatLockdown or not InCombatLockdown() then
+                            UseContainerItem(bagID, slotID)
+                        end
                     end
                 end
             end)
@@ -1161,6 +1365,7 @@ function Frame:RenderListView(items)
 
         -- Store item info for click/tooltip
         row.itemInfo = itemInfo
+        ConfigureSecureRowUse(row, itemInfo.bagID, itemInfo.slotID)
 
         row:Show()
         yOffset = yOffset - ROW_HEIGHT
@@ -1278,10 +1483,14 @@ function Frame:UpdateMoney()
     if not mainFrame or not mainFrame.footer then return end
 
     local money = GetMoney() or 0
+    if Omni.Utils and Omni.Utils.FormatMoney then
+        mainFrame.footer.money:SetText(Omni.Utils:FormatMoney(money))
+        return
+    end
+
     local gold = math.floor(money / 10000)
     local silver = math.floor((money % 10000) / 100)
     local copper = money % 100
-
     mainFrame.footer.money:SetText(string.format("%dg %ds %dc", gold, silver, copper))
 end
 
@@ -1337,6 +1546,7 @@ end
 function Frame:Show()
     if not mainFrame then
         currentView = GetSavedViewMode()
+        selectedBagID = GetSavedBagFilter()
         self:CreateMainFrame()
         self:SetView(currentView)
         self:LoadPosition()
@@ -1369,6 +1579,196 @@ function Frame:PhysicalSortBags()
     if SortBags then
         SortBags()
     end
+end
+
+function Frame:SetBagFilter(bagID)
+    if bagID ~= nil and not IsValidBagID(bagID) then return end
+
+    selectedBagID = bagID
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.char = OmniInventoryDB.char or {}
+    OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
+    OmniInventoryDB.char.settings.selectedBagID = selectedBagID
+
+    self:UpdateBagIconVisuals()
+    self:UpdateLayout()
+end
+
+function Frame:ToggleBagPreview(bagID)
+    if not IsValidBagID(bagID) then return end
+
+    if currentView ~= "bag" then
+        self:SetView("bag")
+    end
+
+    if selectedBagID == bagID then
+        self:SetBagFilter(nil)
+    else
+        self:SetBagFilter(bagID)
+    end
+end
+
+local function CanBagAcceptItem(bagID, itemFamily)
+    local _, bagFamily = GetContainerNumFreeSlots(bagID)
+    bagFamily = bagFamily or 0
+
+    if bagFamily == 0 then
+        return true
+    end
+    if not itemFamily or itemFamily == 0 then
+        return false
+    end
+    if bit and bit.band then
+        return bit.band(itemFamily, bagFamily) > 0
+    end
+    return true
+end
+
+local function FindFirstOpenSlotExcludingBag(excludedBagID, itemFamily)
+    for _, bagID in ipairs(BAG_IDS) do
+        if bagID ~= excludedBagID and CanBagAcceptItem(bagID, itemFamily) then
+            local slots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, slots do
+                local texture = GetContainerItemInfo(bagID, slotID)
+                if not texture then
+                    return bagID, slotID
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function StopForceEmptyJob()
+    if forceEmptyFrame then
+        forceEmptyFrame:SetScript("OnUpdate", nil)
+    end
+    forceEmptyJob = nil
+end
+
+local function FinishForceEmptyJob()
+    if not forceEmptyJob then
+        return
+    end
+
+    print(string.format("|cFF00FF00OmniInventory|r: Force-empty bag %d moved %d, blocked %d.",
+        forceEmptyJob.sourceBagID, forceEmptyJob.movedCount, forceEmptyJob.blockedCount))
+
+    StopForceEmptyJob()
+    if Frame and Frame.UpdateLayout then
+        Frame:UpdateLayout()
+    end
+end
+
+local function RunForceEmptyStep()
+    if not forceEmptyJob then
+        return
+    end
+
+    if #forceEmptyJob.slots == 0 then
+        FinishForceEmptyJob()
+        return
+    end
+
+    local sourceBagID = forceEmptyJob.sourceBagID
+    local slotEntry = table.remove(forceEmptyJob.slots, 1)
+    local slotID = slotEntry.slotID
+    local attempts = slotEntry.attempts or 0
+
+    local texture, _, isLocked = GetContainerItemInfo(sourceBagID, slotID)
+    if not texture then
+        return
+    end
+    if isLocked then
+        attempts = attempts + 1
+        if attempts >= FORCE_EMPTY_MAX_LOCK_RETRIES then
+            forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+        else
+            slotEntry.attempts = attempts
+            table.insert(forceEmptyJob.slots, slotEntry)
+        end
+        return
+    end
+
+    local itemLink = GetContainerItemLink(sourceBagID, slotID)
+    local itemFamily = (itemLink and GetItemFamily(itemLink)) or 0
+    local targetBagID, targetSlotID = FindFirstOpenSlotExcludingBag(sourceBagID, itemFamily)
+    if not targetBagID or not targetSlotID then
+        forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+        return
+    end
+
+    PickupContainerItem(sourceBagID, slotID)
+    if CursorHasItem and CursorHasItem() then
+        PickupContainerItem(targetBagID, targetSlotID)
+    end
+
+    if CursorHasItem and CursorHasItem() then
+        ClearCursor()
+        attempts = attempts + 1
+        if attempts >= FORCE_EMPTY_MAX_MOVE_RETRIES then
+            forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+        else
+            slotEntry.attempts = attempts
+            table.insert(forceEmptyJob.slots, slotEntry)
+        end
+    else
+        forceEmptyJob.movedCount = forceEmptyJob.movedCount + 1
+    end
+end
+
+function Frame:ForceEmptyBag(sourceBagID)
+    if not IsValidBagID(sourceBagID) then return end
+
+    if CursorHasItem and CursorHasItem() then
+        print("|cFF00FF00OmniInventory|r: Clear cursor item before force-empty.")
+        return
+    end
+
+    local sourceSlots = GetContainerNumSlots(sourceBagID) or 0
+    if sourceSlots <= 0 then
+        print("|cFF00FF00OmniInventory|r: That bag has no slots.")
+        return
+    end
+
+    local slots = {}
+    for slotID = 1, sourceSlots do
+        local texture = GetContainerItemInfo(sourceBagID, slotID)
+        if texture then
+            table.insert(slots, { slotID = slotID, attempts = 0 })
+        end
+    end
+
+    if #slots == 0 then
+        print("|cFF00FF00OmniInventory|r: Bag is already empty.")
+        return
+    end
+
+    if forceEmptyJob then
+        StopForceEmptyJob()
+    end
+
+    forceEmptyJob = {
+        sourceBagID = sourceBagID,
+        slots = slots,
+        movedCount = 0,
+        blockedCount = 0,
+        elapsed = 0,
+    }
+
+    forceEmptyFrame = forceEmptyFrame or CreateFrame("Frame")
+    forceEmptyFrame:SetScript("OnUpdate", function(_, elapsed)
+        if not forceEmptyJob then
+            return
+        end
+        forceEmptyJob.elapsed = forceEmptyJob.elapsed + (elapsed or 0)
+        if forceEmptyJob.elapsed < FORCE_EMPTY_STEP_INTERVAL then
+            return
+        end
+        forceEmptyJob.elapsed = 0
+        RunForceEmptyStep()
+    end)
 end
 
 function Frame:IsShown()

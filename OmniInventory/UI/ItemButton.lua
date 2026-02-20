@@ -24,6 +24,7 @@ local RESIST_ICON_TEXTURE = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
 local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
 local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
+local ConfigureSecureItemUse
 
 local QUALITY_COLORS = {
     [0] = { 0.62, 0.62, 0.62 },  -- Poor (Grey)
@@ -202,11 +203,9 @@ function ItemButton:Create(parent)
     buttonCount = buttonCount + 1
     local name = "OmniItemButton" .. buttonCount
 
-    -- Create secure action button for protected item usage
-    -- This allows WoW's secure action system to handle item use directly
     local button = CreateFrame("Button", name, parent, "SecureActionButtonTemplate")
     button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
-    button:RegisterForClicks("AnyUp")  -- SecureActionButton needs this for both left/right
+    button:RegisterForClicks("AnyUp")
     button:RegisterForDrag("LeftButton")
 
     -- Dark background
@@ -356,8 +355,11 @@ function ItemButton:Create(parent)
     -- Store item info reference
     button.itemInfo = nil
 
-    -- Click handlers - use PostClick so secure action fires first
-    button:SetScript("PostClick", function(self, mouseButton)
+    -- Click handlers
+    button:SetScript("PreClick", function(self, mouseButton)
+        ItemButton:OnPreClick(self, mouseButton)
+    end)
+    button:HookScript("OnClick", function(self, mouseButton)
         ItemButton:OnClick(self, mouseButton)
     end)
 
@@ -622,11 +624,9 @@ function ItemButton:SetItem(button, itemInfo)
         if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
         button.glow:Hide()
         button.dimOverlay:Hide()
-        -- Clear secure attributes
-        button:SetAttribute("type", nil)
-        button:SetAttribute("item", nil)
         HideAttuneDisplay(button)
         HideItemCooldown(button)
+        ConfigureSecureItemUse(button, nil, nil)
         return
     end
 
@@ -659,11 +659,7 @@ function ItemButton:SetItem(button, itemInfo)
     -- Store bag/slot for container operations
     button.bagID = itemInfo.bagID
     button.slotID = itemInfo.slotID
-
-    -- Configure secure action attributes for item usage.
-    -- Format: "bag slot" where bag is container ID (0-4) and slot is slot number.
-    button:SetAttribute("type", "item")
-    button:SetAttribute("item", itemInfo.bagID .. " " .. itemInfo.slotID)
+    ConfigureSecureItemUse(button, itemInfo.bagID, itemInfo.slotID)
 
     -- New item glow with animation
     if itemInfo.isNew then
@@ -735,11 +731,70 @@ end
 -- Event Handlers
 -- =============================================================================
 
+ConfigureSecureItemUse = function(button, bagID, slotID)
+    if not button then
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        button.secureUseConfigured = false
+        return
+    end
+
+    if bagID and slotID and bagID >= 0 and slotID > 0 then
+        local itemRef = string.format("%d %d", bagID, slotID)
+        button.secureItemRef = itemRef
+        button:SetAttribute("type1", "item")
+        button:SetAttribute("item1", itemRef)
+        button:SetAttribute("type2", "item")
+        button:SetAttribute("item2", itemRef)
+        button.secureUseConfigured = true
+    else
+        button.secureItemRef = nil
+        button:SetAttribute("type1", nil)
+        button:SetAttribute("item1", nil)
+        button:SetAttribute("type2", nil)
+        button:SetAttribute("item2", nil)
+        button.secureUseConfigured = false
+    end
+end
+
+function ItemButton:OnPreClick(button, mouseButton)
+    if not button or not button.secureItemRef then
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        return
+    end
+
+    if mouseButton == "LeftButton" then
+        if IsModifiedClick("CHATLINK")
+            or IsModifiedClick("DRESSUP")
+            or IsModifiedClick("PICKUPACTION")
+            or IsModifiedClick("SPLITSTACK")
+        then
+            button:SetAttribute("type1", nil)
+            button:SetAttribute("item1", nil)
+        else
+            button:SetAttribute("type1", "item")
+            button:SetAttribute("item1", button.secureItemRef)
+        end
+    elseif mouseButton == "RightButton" then
+        if IsShiftKeyDown() then
+            button:SetAttribute("type2", nil)
+            button:SetAttribute("item2", nil)
+        else
+            button:SetAttribute("type2", "item")
+            button:SetAttribute("item2", button.secureItemRef)
+        end
+    end
+end
+
 function ItemButton:OnClick(button, mouseButton)
     if not button or not button.itemInfo then return end
 
     local bagID = button.bagID
     local slotID = button.slotID
+    local canUseContainer = bagID and slotID and bagID >= 0 and slotID > 0
 
     if not bagID or not slotID then return end
 
@@ -754,26 +809,28 @@ function ItemButton:OnClick(button, mouseButton)
         end
     end
 
-    -- Handle modifier clicks that the secure button doesn't handle
-    -- Normal left/right clicks are handled by SecureActionButtonTemplate via type="item"
     if mouseButton == "LeftButton" then
-        if IsModifiedClick("CHATLINK") then
+        if IsModifiedClick("CHATLINK") and canUseContainer then
             -- Shift-click to link item in chat
             local itemLink = GetContainerItemLink(bagID, slotID)
             if itemLink then
                 ChatEdit_InsertLink(itemLink)
             end
-        elseif IsModifiedClick("DRESSUP") then
+        elseif IsModifiedClick("DRESSUP") and canUseContainer then
             -- Ctrl-click for dressing room
             DressUpItemLink(GetContainerItemLink(bagID, slotID))
-        elseif IsModifiedClick("PICKUPACTION") then
+        elseif IsModifiedClick("PICKUPACTION") and canUseContainer then
             -- Pickup item (drag)
             PickupContainerItem(bagID, slotID)
-        elseif IsModifiedClick("SPLITSTACK") then
+        elseif IsModifiedClick("SPLITSTACK") and canUseContainer then
             -- Split stack
             local _, count = GetContainerItemInfo(bagID, slotID)
             if count and count > 1 then
                 OpenStackSplitFrame(count, button, "BOTTOMRIGHT", "TOPRIGHT")
+            end
+        elseif canUseContainer and not button.secureUseConfigured then
+            if not InCombatLockdown or not InCombatLockdown() then
+                UseContainerItem(bagID, slotID)
             end
         end
     elseif mouseButton == "RightButton" then
@@ -793,6 +850,10 @@ function ItemButton:OnClick(button, mouseButton)
             -- Refresh layout to re-sort with pinned items first
             if Omni.Frame then
                 Omni.Frame:UpdateLayout()
+            end
+        elseif canUseContainer and not button.secureUseConfigured then
+            if not InCombatLockdown or not InCombatLockdown() then
+                UseContainerItem(bagID, slotID)
             end
         end
     end
@@ -897,6 +958,7 @@ function ItemButton:Reset(button)
     button.attuneAnimData = nil
     button.icon:SetDesaturated(false)
     button.icon:SetAlpha(1)
+    ConfigureSecureItemUse(button, nil, nil)
     button:Hide()
 end
 
