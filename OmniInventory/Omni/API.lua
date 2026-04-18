@@ -22,10 +22,85 @@ API.isWotLK = clientVersion < 40000
 API.isRetail = clientVersion >= 100000
 
 -- =============================================================================
--- Polyfill: Tooltip Scanner (WotLK 3.3.5a)
+-- ʕ •ᴥ•ʔ✿ Native Extended Lua Detection ✿ ʕ •ᴥ•ʔ
 -- =============================================================================
--- Legacy API does not return binding status (Soulbound/BoE/BoP) directly.
--- We must scan the tooltip text to determine this.
+-- Synastria (3.3.5a) ships a C-side extension pack that exposes item helpers
+-- which bypass the slow GameTooltip scraping path entirely. When present we
+-- prefer those over the classic tooltip/GetItemInfo combo.
+
+API.hasCustomSoulbound = type(_G.Custom_IsItemSoulbound)   == "function"
+API.hasCustomEquipMgr  = type(_G.Custom_IsItemEquipMgr)    == "function"
+API.hasCustomGuid      = type(_G.Custom_GetItemGuid)       == "function"
+API.hasCustomLinkSlot  = type(_G.Custom_GetItemLinkBySlot) == "function"
+API.hasCustomIdFromLnk = type(_G.Custom_GetIdFromLink)     == "function"
+API.hasHighestAttune   = type(_G.GetHighestAttunePct)      == "function"
+
+-- =============================================================================
+-- ʕ ◕ᴥ◕ ʔ Server Bag / Slot Translation Table ʕ ◕ᴥ◕ ʔ
+-- =============================================================================
+-- The native Custom_ functions speak the server's raw slot space, not the
+-- Lua containerID space. We translate containerID/slotID pairs into the
+-- (native_bag_id, native_slot_id) tuple the C code expects.
+--
+--   Lua container  | Native bag  | Native slot layout
+--   ---------------+-------------+----------------------------------------
+--    0  Backpack   | 0xFF        | character slot 23..38  (INVENTORY item)
+--    1..4 Bags     | 0x13..0x16  | 0-indexed slot within the bag
+--   -1  Main Bank  | 0xFF        | character slot 39..66  (BANK item)
+--    5..11 Bank bg | 0x43..0x49  | 0-indexed slot within the bank bag
+--   -2  Keyring    | 0xFF        | character slot 86..117 (KEYRING item)
+
+local INVENTORY_SLOT_BAG_0       = 0xFF  -- Character-direct storage
+local INVENTORY_SLOT_ITEM_START  = 23    -- Backpack item slot 1 -> 23
+local BANK_SLOT_ITEM_START       = 39    -- Main bank slot 1 -> 39
+local KEYRING_SLOT_START         = 86    -- Keyring slot 1 -> 86
+
+local SERVER_BAG_MAP = {
+    [0]  = INVENTORY_SLOT_BAG_0,
+    [1]  = 0x13,
+    [2]  = 0x14,
+    [3]  = 0x15,
+    [4]  = 0x16,
+    [-1] = INVENTORY_SLOT_BAG_0,
+    [-2] = INVENTORY_SLOT_BAG_0,
+    [5]  = 0x43,
+    [6]  = 0x44,
+    [7]  = 0x45,
+    [8]  = 0x46,
+    [9]  = 0x47,
+    [10] = 0x48,
+    [11] = 0x49,
+}
+
+--- Translate a Lua (bagID, slotID) pair to the server-side (bag, slot) tuple
+--- used by the Custom_ family of functions.
+---@param bagID number
+---@param slotID number
+---@return number|nil nativeBag
+---@return number|nil nativeSlot
+function API:GetNativeBagSlot(bagID, slotID)
+    local nativeBag = SERVER_BAG_MAP[bagID]
+    if not nativeBag or not slotID then
+        return nil, nil
+    end
+
+    local nativeSlot
+    if bagID == 0 then
+        nativeSlot = INVENTORY_SLOT_ITEM_START + slotID - 1
+    elseif bagID == -1 then
+        nativeSlot = BANK_SLOT_ITEM_START + slotID - 1
+    elseif bagID == -2 then
+        nativeSlot = KEYRING_SLOT_START + slotID - 1
+    else
+        nativeSlot = slotID - 1
+    end
+
+    return nativeBag, nativeSlot
+end
+
+-- =============================================================================
+-- ᵔᴥᵔ Polyfill: Tooltip Scanner (used only when native APIs are absent) ᵔᴥᵔ
+-- =============================================================================
 
 local scanningTooltip = CreateFrame("GameTooltip", "OmniScanningTooltip", nil, "GameTooltipTemplate")
 scanningTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
@@ -35,35 +110,139 @@ local BOE_TEXT = ITEM_BIND_ON_EQUIP or "Binds when equipped"
 local BOP_TEXT = ITEM_BIND_ON_PICKUP or "Binds when picked up"
 local BOA_TEXT = ITEM_BIND_TO_ACCOUNT or "Binds to account"
 
---- Scan tooltip for binding status (Polyfill for WotLK)
----@param bag number
----@param slot number
----@return boolean isBound
----@return string|nil bindType "Soulbound", "BoE", "BoP", "BoA"
+-- ʕ •ᴥ•ʔ✿ Two-state model: soulbound -> BoP, otherwise -> BoE ✿ ʕ •ᴥ•ʔ
 local function ScanTooltipForBinding(bag, slot)
     scanningTooltip:ClearLines()
     scanningTooltip:SetBagItem(bag, slot)
 
-    -- Scan only the first few lines where binding text usually appears
     for i = 2, math.min(5, scanningTooltip:NumLines()) do
         local textFrame = _G["OmniScanningTooltipTextLeft" .. i]
         if textFrame then
             local line = textFrame:GetText()
             if line then
-                if line == SOULBOUND_TEXT then
-                    return true, "Soulbound"
+                if line == SOULBOUND_TEXT or line == BOP_TEXT or line == BOA_TEXT then
+                    return true, "BoP"
                 elseif line == BOE_TEXT then
                     return false, "BoE"
-                elseif line == BOP_TEXT then
-                    return false, "BoP"
-                elseif line == BOA_TEXT then
-                    return true, "BoA"
                 end
             end
         end
     end
 
-    return false, nil
+    return false, "BoE"
+end
+
+-- =============================================================================
+-- ＼ʕ •ᴥ•ʔ／ Native Extended API Wrappers ＼ʕ •ᴥ•ʔ／
+-- =============================================================================
+
+--- Fast soulbound check backed by native C. Falls back to a tooltip scan on
+--- clients that don't ship the extension pack.
+---@param bagID number
+---@param slotID number
+---@return boolean isBound
+function API:IsItemSoulbound(bagID, slotID)
+    if API.hasCustomSoulbound then
+        local nb, ns = API:GetNativeBagSlot(bagID, slotID)
+        if nb and ns then
+            return Custom_IsItemSoulbound(nb, ns) == 1
+        end
+    end
+    local bound = ScanTooltipForBinding(bagID, slotID)
+    return bound
+end
+
+--- Check whether the item in (bagID, slotID) is referenced by any equipment
+--- manager set. Returns nil when the native API is unavailable so the caller
+--- can fall back to the slow GetEquipmentSetItemIDs iteration.
+---@param bagID number
+---@param slotID number
+---@return boolean|nil inSet
+function API:IsItemInEquipmentSet(bagID, slotID)
+    if not API.hasCustomEquipMgr then
+        return nil
+    end
+    local nb, ns = API:GetNativeBagSlot(bagID, slotID)
+    if not nb or not ns then
+        return nil
+    end
+    return Custom_IsItemEquipMgr(nb, ns) == 1
+end
+
+--- Get a stable server-side GUID for an item instance.
+---@param bagID number
+---@param slotID number
+---@return number|nil lowGuid
+---@return number|nil highGuid
+function API:GetItemGuid(bagID, slotID)
+    if not API.hasCustomGuid then
+        return nil
+    end
+    local nb, ns = API:GetNativeBagSlot(bagID, slotID)
+    if not nb or not ns then
+        return nil
+    end
+    return Custom_GetItemGuid(nb, ns)
+end
+
+--- Native-backed replacement for GetContainerItemLink. Falls back to the stock
+--- API when the extension is absent.
+---@param bagID number
+---@param slotID number
+---@return string|nil link
+function API:GetItemLinkBySlot(bagID, slotID)
+    if API.hasCustomLinkSlot then
+        local nb, ns = API:GetNativeBagSlot(bagID, slotID)
+        if nb and ns then
+            local link = Custom_GetItemLinkBySlot(nb, ns)
+            if link then
+                return link
+            end
+        end
+    end
+    return GetContainerItemLink(bagID, slotID)
+end
+
+--- Parse any WoW hyperlink (item, spell, achievement, etc.) into (id, typeID).
+--- Falls back to cheap itemID string matching for item links only.
+---@param link string
+---@return number|nil id
+---@return number|nil typeID  1 = item (when using the fallback path)
+function API:GetIdFromLink(link)
+    if not link then return nil end
+    if API.hasCustomIdFromLnk then
+        return Custom_GetIdFromLink(link)
+    end
+    local itemID = tonumber(string.match(link, "item:(%d+)"))
+    if itemID then
+        return itemID, 1
+    end
+    return nil
+end
+
+--- Highest known attunement % for an itemID. Aware of affix variants and forge
+--- tiers. Pass -1 (or omit forge) for the highest across all forges; pass a
+--- specific forge value (0..3) to pin to that tier.
+---@param itemID number
+---@param forge number|nil  -1 = any (default)
+---@return number pct 0..100
+function API:GetHighestAttunePct(itemID, forge)
+    if not itemID then return 0 end
+    if API.hasHighestAttune then
+        local pct = GetHighestAttunePct(itemID, forge or -1)
+        if type(pct) == "number" then
+            return pct
+        end
+    end
+    -- ʕノ•ᴥ•ʔノ Legacy fallback path ノʕ•ᴥ•ʔ
+    if _G.GetItemAttuneProgress then
+        local titanforged = (forge and forge > 0) and forge or nil
+        local pct = GetItemAttuneProgress(itemID, nil, titanforged)
+        if type(pct) == "number" then
+            return pct
+        end
+    end
+    return 0
 end
 
 -- =============================================================================
@@ -79,24 +258,39 @@ OmniC_Container = {}
 ---@param slotID number
 ---@return table|nil info Item info structure or nil if slot is empty
 function OmniC_Container.GetContainerItemInfo(bagID, slotID)
-    -- Native 3.3.5a call
     local texture, itemCount, locked, quality, readable, lootable, itemLink = GetContainerItemInfo(bagID, slotID)
 
     if not texture then
         return nil
     end
 
-    -- Parse itemID from link (e.g., "item:1234:...")
-    local itemID = nil
-    if itemLink then
-        itemID = tonumber(string.match(itemLink, "item:(%d+)"))
+    -- ʕ •ᴥ•ʔ✿ Prefer native link + id resolution when available ✿ ʕ •ᴥ•ʔ
+    if API.hasCustomLinkSlot and not itemLink then
+        itemLink = API:GetItemLinkBySlot(bagID, slotID)
     end
 
-    -- Polyfill: Get binding status (WotLK needs tooltip scan)
-    local isBound, bindType = ScanTooltipForBinding(bagID, slotID)
+    local itemID
+    if itemLink then
+        itemID = API:GetIdFromLink(itemLink)
+    end
 
-    -- Polyfill: Fix missing quality info in 3.3.5a
-    -- GetContainerItemInfo often returns -1/nil for quality; fetch from GetItemInfo
+    -- ʕ •ᴥ•ʔ✿ Bind state: soulbound -> BoP, otherwise -> BoE ✿ ʕ •ᴥ•ʔ
+    local isBound, bindType
+    if API.hasCustomSoulbound then
+        isBound = API:IsItemSoulbound(bagID, slotID)
+        bindType = isBound and "BoP" or "BoE"
+    else
+        isBound, bindType = ScanTooltipForBinding(bagID, slotID)
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Attunability: true when anyone on the account can attune it ✿ ʕ •ᴥ•ʔ
+    local isAttunable = false
+    if itemID and _G.IsAttunableBySomeone then
+        local check = IsAttunableBySomeone(itemID)
+        isAttunable = check ~= nil and check ~= 0 and check ~= false
+    end
+
+    -- GetContainerItemInfo often returns -1/nil for quality in 3.3.5a
     if (not quality or quality < 0) and itemLink then
         local _, _, itemQuality = GetItemInfo(itemLink)
         quality = itemQuality
@@ -117,7 +311,8 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
         isReadable = readable or false,
         hasLoot = lootable or false,
         isBound = isBound,
-        bindType = bindType,
+        bindType = bindType,         -- "BoP" when soulbound, "BoE" otherwise
+        isAttunable = isAttunable,   -- IsAttunableBySomeone(itemID)
 
         -- Quality (default to 1/Common if still unknown to avoid Lua errors)
         quality = quality or 1,
@@ -239,4 +434,15 @@ end
 -- Initialization
 -- =============================================================================
 
-print("|cFF00FF00OmniInventory|r: API Shim loaded (" .. (API.isWotLK and "WotLK 3.3.5a" or "Retail") .. ")")
+do
+    local nativeFlags = {}
+    if API.hasCustomSoulbound  then table.insert(nativeFlags, "Soulbound") end
+    if API.hasCustomEquipMgr   then table.insert(nativeFlags, "EquipMgr")  end
+    if API.hasCustomGuid       then table.insert(nativeFlags, "GUID")      end
+    if API.hasCustomLinkSlot   then table.insert(nativeFlags, "LinkSlot")  end
+    if API.hasCustomIdFromLnk  then table.insert(nativeFlags, "IdFromLnk") end
+    if API.hasHighestAttune    then table.insert(nativeFlags, "AttunePct") end
+
+    local nativeStr = (#nativeFlags > 0) and (" | native: " .. table.concat(nativeFlags, "+")) or " | native: none"
+    print("|cFF00FF00OmniInventory|r: API Shim loaded (" .. (API.isWotLK and "WotLK 3.3.5a" or "Retail") .. nativeStr .. ")")
+end

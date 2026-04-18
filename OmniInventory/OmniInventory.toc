@@ -32,6 +32,7 @@ UI\GridView.lua
 UI\FlowView.lua
 UI\ListView.lua
 UI\Frame.lua
+UI\BankFrame.lua
 UI\Options.lua
 UI\CategoryEditor.lua
 UI\MinimapButton.lua

@@ -24,6 +24,7 @@ local RESIST_ICON_TEXTURE = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
 local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
 local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
+local FORGE_LETTERS = { [1] = "T", [2] = "W", [3] = "L" }
 local ConfigureSecureItemUse
 
 local QUALITY_COLORS = {
@@ -75,6 +76,12 @@ local function GetItemIDFromLink(itemLink)
     if not itemLink then
         return nil
     end
+    if Omni.API then
+        local id = Omni.API:GetIdFromLink(itemLink)
+        if id then
+            return id
+        end
+    end
     local itemIdStr = string.match(itemLink, "item:(%d+)")
     if itemIdStr then
         return tonumber(itemIdStr)
@@ -119,13 +126,19 @@ local function IsAttunableByAccount(itemID)
     return false
 end
 
-local function GetAttuneProgress(itemLink)
-    if not itemLink or not _G.GetItemLinkAttuneProgress then
-        return 0
+-- ʕ •ᴥ•ʔ✿ Prefer native GetHighestAttunePct (affix + forge aware) ✿ ʕ •ᴥ•ʔ
+local function GetAttuneProgress(itemLink, itemID, forge)
+    if itemID and Omni.API and Omni.API.hasHighestAttune then
+        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
     end
-    local progress = GetItemLinkAttuneProgress(itemLink)
-    if type(progress) == "number" then
-        return progress
+    if itemLink and _G.GetItemLinkAttuneProgress then
+        local progress = GetItemLinkAttuneProgress(itemLink)
+        if type(progress) == "number" then
+            return progress
+        end
+    end
+    if itemID and Omni.API then
+        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
     end
     return 0
 end
@@ -185,6 +198,38 @@ local function HideAttuneDisplay(button)
     if button.accountIcon then button.accountIcon:Hide() end
     if button.resistIcon then button.resistIcon:Hide() end
     button:SetScript("OnUpdate", nil)
+end
+
+-- ʕ •ᴥ•ʔ✿ Forge letter indicator (T/W/L) derived from item link ✿ ʕ •ᴥ•ʔ
+local function UpdateForgeDisplay(button, itemInfo)
+    if not button or not button.forgeText then
+        return
+    end
+
+    local itemLink = itemInfo and itemInfo.hyperlink
+    if not itemLink then
+        button.forgeText:Hide()
+        return
+    end
+
+    local forgeLevel = GetForgeLevelFromLink(itemLink)
+    local letter = FORGE_LETTERS[forgeLevel]
+    if not letter then
+        button.forgeText:Hide()
+        return
+    end
+
+    button.forgeText:SetText(letter)
+
+    local settings = GetAttuneSettings()
+    local color = settings and settings.forgeColors
+        and settings.forgeColors[FORGE_LEVEL_NAMES[forgeLevel]]
+    if color then
+        button.forgeText:SetTextColor(color.r or 1, color.g or 1, color.b or 1, color.a or 1)
+    else
+        button.forgeText:SetTextColor(1, 1, 1, 1)
+    end
+    button.forgeText:Show()
 end
 
 local function HideItemCooldown(button)
@@ -352,6 +397,12 @@ function ItemButton:Create(parent)
     button.resistIcon:SetPoint("TOP", button, "TOP", 0, -2)
     button.resistIcon:Hide()
 
+    -- ʕ •ᴥ•ʔ✿ Forge level letter (T/W/L) in bottom-right ✿ ʕ •ᴥ•ʔ
+    button.forgeText = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    button.forgeText:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
+    button.forgeText:SetJustifyH("RIGHT")
+    button.forgeText:Hide()
+
     -- Store item info reference
     button.itemInfo = nil
 
@@ -448,24 +499,31 @@ local function UpdateAttuneDisplay(button, itemInfo)
         button.resistIcon:Hide()
     end
 
-    local progress = GetAttuneProgress(itemLink) or 0
-    local showBar = false
+    -- ʕ •ᴥ•ʔ✿ Only items attunable by SOMEONE deserve a bar ✿ ʕ •ᴥ•ʔ
+    if not accountOK then
+        button.attuneBarBG:Hide()
+        button.attuneBarFill:Hide()
+        button.attuneText:Hide()
+        button:SetScript("OnUpdate", nil)
+        return
+    end
+
+    local forgeLevel = GetForgeLevelFromLink(itemLink)
+    local progress = GetAttuneProgress(itemLink, itemID, forgeLevel) or 0
+    local showBar = true
     local barColor = nil
 
     if charOK then
-        if progress < 100 or settings.faeMode then
-            showBar = true
-            if progress >= 100 and settings.faeMode and settings.faeCompleteBarColor then
-                barColor = settings.faeCompleteBarColor
-            else
-                local forge = GetForgeLevelFromLink(itemLink)
-                local key = FORGE_LEVEL_NAMES[forge] or "BASE"
-                barColor = settings.forgeColors and settings.forgeColors[key]
-            end
+        if progress >= 100 and settings.faeMode and settings.faeCompleteBarColor then
+            barColor = settings.faeCompleteBarColor
+        else
+            local key = FORGE_LEVEL_NAMES[forgeLevel] or "BASE"
+            barColor = settings.forgeColors and settings.forgeColors[key]
         end
-    elseif settings.showRedForNonAttunable and accountOK and progress > 0 then
-        showBar = true
+    elseif settings.showRedForNonAttunable then
         barColor = settings.nonAttunableBarColor
+    else
+        showBar = false
     end
 
     if not showBar then
@@ -522,7 +580,10 @@ local function UpdateAttuneDisplay(button, itemInfo)
     button.attuneBarBG:Show()
     button.attuneBarFill:Show()
 
-    if settings.showProgressText and (charOK or (settings.showRedForNonAttunable and accountOK and progress > 0)) then
+    -- ʕ •ᴥ•ʔ✿ Keep the bar at 100% but drop the "100%" text ✿ ʕ •ᴥ•ʔ
+    if progress >= 100 then
+        button.attuneText:Hide()
+    elseif settings.showProgressText and (charOK or (settings.showRedForNonAttunable and accountOK)) then
         local displayProgress = animData.currentProgress or progress
         button.attuneText:SetTextColor(
             settings.textColor.r,
@@ -532,7 +593,7 @@ local function UpdateAttuneDisplay(button, itemInfo)
         )
         button.attuneText:SetText(string.format("%.0f%%", displayProgress))
         button.attuneText:Show()
-    elseif settings.showAccountAttuneText and progress < 100 and (not charOK) and accountOK then
+    elseif settings.showAccountAttuneText and (not charOK) and accountOK then
         button.attuneText:SetTextColor(
             settings.textColor.r,
             settings.textColor.g,
@@ -625,6 +686,7 @@ function ItemButton:SetItem(button, itemInfo)
         button.glow:Hide()
         button.dimOverlay:Hide()
         HideAttuneDisplay(button)
+        if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
         ConfigureSecureItemUse(button, nil, nil)
         return
@@ -698,6 +760,7 @@ function ItemButton:SetItem(button, itemInfo)
     end
 
     UpdateAttuneDisplay(button, itemInfo)
+    UpdateForgeDisplay(button, itemInfo)
     self:UpdateCooldown(button)
 end
 
@@ -958,6 +1021,7 @@ function ItemButton:Reset(button)
     button.dimOverlay:Hide()
     button.pinIcon:Hide()
     HideAttuneDisplay(button)
+    if button.forgeText then button.forgeText:Hide() end
     HideItemCooldown(button)
     button.attuneAnimData = nil
     button.icon:SetDesaturated(false)

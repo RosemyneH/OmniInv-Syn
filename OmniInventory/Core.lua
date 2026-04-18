@@ -51,6 +51,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if Omni.Sorter then Omni.Sorter:Init() end
         if Omni.Rules then Omni.Rules:Init() end
         if Omni.Frame then Omni.Frame:Init() end
+        if Omni.BankFrame then Omni.BankFrame:Init() end
         if Omni.Settings then Omni.Settings:Init() end
         if Omni.MinimapButton then Omni.MinimapButton:Init() end
 
@@ -122,6 +123,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                     containerFrame:UnregisterAllEvents()
                     containerFrame:SetScript("OnShow", function(self) self:Hide() end)
                 end
+            end
+
+            -- ʕ •ᴥ•ʔ✿ Suppress the default Blizzard BankFrame; our BankFrame replaces it ✿ ʕ •ᴥ•ʔ
+            if _G.BankFrame then
+                _G.BankFrame:UnregisterAllEvents()
+                _G.BankFrame:Hide()
+                _G.BankFrame:SetScript("OnShow", function(self) self:Hide() end)
+                _G.BankFrame:SetScript("OnEvent", nil)
             end
         end
 

@@ -38,7 +38,6 @@ local categoryHeaders = {}  -- Active category header FontStrings
 local listRows = {}  -- Track list row frames
 local currentView = DEFAULT_VIEW_MODE
 local currentMode = "bags"
-local isBankOpen = false
 local isMerchantOpen = false
 local isSearchActive = false
 local searchText = ""
@@ -365,41 +364,6 @@ function Frame:CreateHeader()
         header.bagButtons[bagID] = bagBtn
     end
 
-    -- Bags/Bank toggle tabs
-    header.bagsTab = CreateFrame("Button", nil, header)
-    header.bagsTab:SetSize(40, 18)
-    header.bagsTab:SetPoint("LEFT", header.title, "RIGHT", 12, 0)
-    header.bagsTab:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    header.bagsTab:SetBackdropColor(0.3, 0.5, 0.3, 1)
-    header.bagsTab:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
-    header.bagsTab.text = header.bagsTab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    header.bagsTab.text:SetPoint("CENTER")
-    header.bagsTab.text:SetText("Bags")
-    header.bagsTab:SetScript("OnClick", function()
-        Frame:SetMode("bags")
-    end)
-
-    header.bankTab = CreateFrame("Button", nil, header)
-    header.bankTab:SetSize(40, 18)
-    header.bankTab:SetPoint("LEFT", header.bagsTab, "RIGHT", 2, 0)
-    header.bankTab:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    header.bankTab:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    header.bankTab:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    header.bankTab.text = header.bankTab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    header.bankTab.text:SetPoint("CENTER")
-    header.bankTab.text:SetText("Bank")
-    header.bankTab:SetScript("OnClick", function()
-        Frame:SetMode("bank")
-    end)
-
     -- Make header draggable
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
@@ -428,13 +392,8 @@ end
 function Frame:UpdateBagIconVisuals()
     if not mainFrame or not mainFrame.header or not mainFrame.header.bagButtons then return end
 
-    local isVisible = (currentMode == "bags")
     if mainFrame.header.bagBar then
-        if isVisible then
-            mainFrame.header.bagBar:Show()
-        else
-            mainFrame.header.bagBar:Hide()
-        end
+        mainFrame.header.bagBar:Show()
     end
 
     for _, bagID in ipairs(BAG_IDS) do
@@ -448,7 +407,7 @@ function Frame:UpdateBagIconVisuals()
             if bagBtn.borderBottom then bagBtn.borderBottom:SetVertexColor(r, g, b, 1) end
             if bagBtn.borderLeft then bagBtn.borderLeft:SetVertexColor(r, g, b, 1) end
             if bagBtn.borderRight then bagBtn.borderRight:SetVertexColor(r, g, b, 1) end
-            bagBtn:SetAlpha(isVisible and 1 or 0.5)
+            bagBtn:SetAlpha(1)
         end
     end
 end
@@ -701,13 +660,13 @@ function Frame:RegisterEvents()
     -- Note: Bank events and PLAYER_MONEY are handled by Omni.Events:Init()
     if Omni.Events then
         Omni.Events:RegisterBucketEvent("BAG_UPDATE", function(changedBags)
-            if mainFrame:IsShown() and currentMode == "bags" then
+            if mainFrame:IsShown() then
                 Frame:UpdateLayout(changedBags)
             end
         end)
 
         Omni.Events:RegisterEvent("BAG_UPDATE_COOLDOWN", function()
-            if not mainFrame:IsShown() or currentMode ~= "bags" then return end
+            if not mainFrame:IsShown() then return end
             if not Omni.ItemButton or not Omni.ItemButton.UpdateCooldown then return end
             for _, btn in ipairs(itemButtons) do
                 Omni.ItemButton:UpdateCooldown(btn)
@@ -845,50 +804,18 @@ function Frame:CycleSort()
 end
 
 -- =============================================================================
--- Bags/Bank Mode
+-- View Mode (bags only; bank lives in Omni.BankFrame)
 -- =============================================================================
 
---- Set bank open/close state (called by Events.lua)
----@param isOpen boolean
-function Frame:SetBankOpen(isOpen)
-    isBankOpen = isOpen
-    self:UpdateBankTabState()
-end
-
 function Frame:SetMode(mode)
-    currentMode = mode or "bags"
-    self:UpdateBankTabState()
+    currentMode = "bags"
     self:UpdateBagIconVisuals()
     self:UpdateLayout()
 end
 
-function Frame:UpdateBankTabState()
-    if not mainFrame or not mainFrame.header then return end
-
-    local header = mainFrame.header
-    if not header.bagsTab or not header.bankTab then return end
-
-    if currentMode == "bags" then
-        header.bagsTab:SetBackdropColor(0.3, 0.5, 0.3, 1)  -- Active (green tint)
-        header.bankTab:SetBackdropColor(0.2, 0.2, 0.2, 1)  -- Inactive
-    else
-        header.bagsTab:SetBackdropColor(0.2, 0.2, 0.2, 1)  -- Inactive
-        if isBankOpen then
-            header.bankTab:SetBackdropColor(0.3, 0.5, 0.3, 1)  -- Active (green tint)
-        else
-            header.bankTab:SetBackdropColor(0.5, 0.3, 0.3, 1)  -- Unavailable (red tint)
-        end
-    end
-
-    -- Show bank unavailable hint
-    if currentMode == "bank" and not isBankOpen then
-        header.bankTab.text:SetText("Bank*")
-    else
-        header.bankTab.text:SetText("Bank")
-    end
-
-    self:UpdateBagIconVisuals()
-end
+-- ʕ •ᴥ•ʔ✿ Backwards-compat stubs: bank now lives in its own frame ✿ ʕ •ᴥ•ʔ
+function Frame:SetBankOpen(_) end
+function Frame:UpdateBankTabState() end
 
 -- =============================================================================
 -- Layout Update
@@ -897,57 +824,9 @@ end
 function Frame:UpdateLayout(changedBags)
     if not mainFrame or not mainFrame:IsShown() then return end
 
-    -- Get items based on current mode
     local items = {}
     if OmniC_Container then
-        if currentMode == "bank" then
-            if isBankOpen then
-                items = OmniC_Container.GetAllBankItems()
-            else
-                -- Offline Bank Access
-                items = {}
-                if OmniInventoryDB and OmniInventoryDB.realm then
-                    local realm = OmniInventoryDB.realm[Omni.Data.realmName]
-                    local char = realm and realm[Omni.Data.playerName]
-
-                    if char and char.bank then
-                        for _, savedItem in ipairs(char.bank) do
-                            -- Use API to get cached info
-                            if Omni.API and savedItem.link then
-                                local info = Omni.API:GetExtendedItemInfo(savedItem.link)
-                                if info then
-                                    -- Construct compatible item table
-                                    local item = {
-                                        iconFileID = info.iconFileID,
-                                        itemID = tonumber(string.match(savedItem.link, "item:(%d+)")),
-                                        hyperlink = savedItem.link,
-                                        stackCount = savedItem.count or 1,
-                                        quality = info.quality,
-                                        isLocked = false,
-                                        isReadable = false,
-                                        hasLoot = false,
-                                        isBound = true, -- Assume bound if in bank
-                                        bindType = nil,
-                                        isFiltered = false,
-                                        bagID = -1, -- Dummy ID indicating bank
-                                        slotID = 0,
-                                        -- Extended fields for safe keeping
-                                        itemType = info.itemType,
-                                        itemSubType = info.itemSubType,
-                                        itemLevel = info.itemLevel,
-                                        equipSlot = info.equipSlot,
-                                        vendorPrice = info.vendorPrice,
-                                    }
-                                    table.insert(items, item)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        else
-            items = OmniC_Container.GetAllBagItems()
-        end
+        items = OmniC_Container.GetAllBagItems()
     end
 
     -- Categorize items and check for new items
@@ -961,7 +840,7 @@ function Frame:UpdateLayout(changedBags)
         end
     end
 
-    if currentMode == "bags" and IsValidBagID(selectedBagID) then
+    if IsValidBagID(selectedBagID) then
         local filtered = {}
         for _, item in ipairs(items) do
             if item.bagID == selectedBagID then
@@ -1475,29 +1354,11 @@ function Frame:UpdateSlotCount()
     if not mainFrame or not mainFrame.footer then return end
 
     local free, total = 0, 0
-
-    if currentMode == "bank" then
-        -- Main bank container (bagID = -1)
-        local mainSlots = GetContainerNumSlots(-1) or 0
-        local mainFree = GetContainerNumFreeSlots(-1) or 0
-        total = total + mainSlots
-        free = free + mainFree
-
-        -- Bank bags (5-11)
-        for bagID = 5, 11 do
-            local numSlots = GetContainerNumSlots(bagID) or 0
-            local numFree = GetContainerNumFreeSlots(bagID) or 0
-            total = total + numSlots
-            free = free + numFree
-        end
-    else
-        -- Regular bags (0-4)
-        for bagID = 0, 4 do
-            local numSlots = GetContainerNumSlots(bagID) or 0
-            local numFree = GetContainerNumFreeSlots(bagID) or 0
-            total = total + numSlots
-            free = free + numFree
-        end
+    for bagID = 0, 4 do
+        local numSlots = GetContainerNumSlots(bagID) or 0
+        local numFree = GetContainerNumFreeSlots(bagID) or 0
+        total = total + numSlots
+        free = free + numFree
     end
 
     local used = total - free

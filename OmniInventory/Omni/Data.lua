@@ -141,6 +141,15 @@ end
 -- Cross-Character Data
 -- =============================================================================
 
+-- ʕ •ᴥ•ʔ✿ Helper: native-first link fetch ✿ ʕ •ᴥ•ʔ
+local function FetchLink(bagID, slot)
+    local API = Omni.API
+    if API then
+        return API:GetItemLinkBySlot(bagID, slot)
+    end
+    return GetContainerItemLink(bagID, slot)
+end
+
 function Data:SaveCharacterInventory()
     local realm = OmniInventoryDB.realm[self.realmName]
     local char = realm and realm[self.playerName]
@@ -149,12 +158,11 @@ function Data:SaveCharacterInventory()
     char.gold = GetMoney()
     char.lastSeen = time()
 
-    -- Save bag item strings (compact format)
     char.bags = {}
     for bagID = 0, 4 do
         local numSlots = GetContainerNumSlots(bagID)
         for slot = 1, numSlots do
-            local link = GetContainerItemLink(bagID, slot)
+            local link = FetchLink(bagID, slot)
             if link then
                 local _, count = GetContainerItemInfo(bagID, slot)
                 table.insert(char.bags, { link = link, count = count or 1 })
@@ -168,24 +176,21 @@ function Data:SaveBankItems()
     local char = realm and realm[self.playerName]
     if not char then return end
 
-    -- Save bank item strings
     char.bank = {}
 
-    -- Main bank (-1)
     local numSlots = GetContainerNumSlots(-1)
     for slot = 1, numSlots do
-        local link = GetContainerItemLink(-1, slot)
+        local link = FetchLink(-1, slot)
         if link then
             local _, count = GetContainerItemInfo(-1, slot)
             table.insert(char.bank, { link = link, count = count or 1 })
         end
     end
 
-    -- Bank bags (5-11)
     for bagID = 5, 11 do
         local numSlots = GetContainerNumSlots(bagID)
         for slot = 1, numSlots do
-            local link = GetContainerItemLink(bagID, slot)
+            local link = FetchLink(bagID, slot)
             if link then
                 local _, count = GetContainerItemInfo(bagID, slot)
                 table.insert(char.bank, { link = link, count = count or 1 })

@@ -19,6 +19,7 @@ local categoryOrder = {}  -- Sorted by priority
 
 -- Default colors for categories
 local CATEGORY_COLORS = {
+    ["Perishable"]      = { r = 1.0, g = 0.3, b = 0.3 },
     ["Quest Items"]     = { r = 1.0, g = 0.82, b = 0.0 },
     ["Attunable"]       = { r = 0.0, g = 0.9, b = 0.5 },
     ["BoE"]             = { r = 0.4, g = 0.9, b = 1.0 },
@@ -45,12 +46,13 @@ local newItems = {}      -- Items acquired this session
 
 local function SnapshotInventory()
     sessionItems = {}
+    local API = Omni.API
     for bagID = 0, 4 do
         local numSlots = GetContainerNumSlots(bagID) or 0
         for slot = 1, numSlots do
-            local link = GetContainerItemLink(bagID, slot)
+            local link = API and API:GetItemLinkBySlot(bagID, slot) or GetContainerItemLink(bagID, slot)
             if link then
-                local itemID = tonumber(string.match(link, "item:(%d+)"))
+                local itemID = API and API:GetIdFromLink(link) or tonumber(string.match(link, "item:(%d+)"))
                 if itemID then
                     sessionItems[itemID] = true
                 end
@@ -86,6 +88,39 @@ function Categorizer:SnapshotInventory()
 end
 
 -- =============================================================================
+-- Perishable Items Registry
+-- =============================================================================
+-- ʕ •ᴥ•ʔ✿ Time-limited items that must be turned in before they expire ✿ ʕ •ᴥ•ʔ
+
+local PERISHABLE_ITEMS = {
+    [50289] = true,  -- Blacktip Shark (1 hour turn-in)
+}
+
+function Categorizer:IsPerishableItem(itemID)
+    if not itemID then return false end
+    if PERISHABLE_ITEMS[itemID] then return true end
+    if OmniInventoryDB and OmniInventoryDB.perishableItems
+        and OmniInventoryDB.perishableItems[itemID] then
+        return true
+    end
+    return false
+end
+
+function Categorizer:AddPerishableItem(itemID)
+    if not itemID then return end
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
+    OmniInventoryDB.perishableItems[itemID] = true
+end
+
+function Categorizer:RemovePerishableItem(itemID)
+    if not itemID then return end
+    if OmniInventoryDB and OmniInventoryDB.perishableItems then
+        OmniInventoryDB.perishableItems[itemID] = nil
+    end
+end
+
+-- =============================================================================
 -- Category Filters
 -- =============================================================================
 
@@ -100,18 +135,29 @@ local function IsQuestItem(itemInfo)
     return isQuestItem or false
 end
 
--- Check if item belongs to an equipment set
+-- ʕ •ᴥ•ʔ✿ Native-first equipment manager membership check ✿ ʕ •ᴥ•ʔ
 local function IsEquipmentSetItem(itemInfo)
-    if not itemInfo or not itemInfo.hyperlink then return false end
+    if not itemInfo then return false end
 
-    -- Check against saved equipment sets
+    -- Preferred path: ask the C extension about this exact slot instance.
+    local API = Omni.API
+    if API and itemInfo.bagID and itemInfo.slotID then
+        local inSet = API:IsItemInEquipmentSet(itemInfo.bagID, itemInfo.slotID)
+        if inSet ~= nil then
+            return inSet
+        end
+    end
+
+    -- Fallback: iterate saved sets by itemID (slower, misses specific instances).
+    if not itemInfo.hyperlink then return false end
+
     local numSets = GetNumEquipmentSets and GetNumEquipmentSets() or 0
     for i = 1, numSets do
         local name = GetEquipmentSetInfo(i)
         if name then
             local itemIDs = GetEquipmentSetItemIDs(name)
             if itemIDs then
-                for slot, itemID in pairs(itemIDs) do
+                for _, itemID in pairs(itemIDs) do
                     if itemID == itemInfo.itemID then
                         return true
                     end
@@ -131,8 +177,10 @@ local function GetItemID(itemInfo)
         return itemInfo.itemID
     end
     if itemInfo.hyperlink then
-        local itemID = tonumber(string.match(itemInfo.hyperlink, "item:(%d+)"))
-        return itemID
+        if Omni.API then
+            return Omni.API:GetIdFromLink(itemInfo.hyperlink)
+        end
+        return tonumber(string.match(itemInfo.hyperlink, "item:(%d+)"))
     end
     return nil
 end
@@ -156,32 +204,37 @@ local function IsAttunableItem(itemInfo)
         end
     end
 
-    -- Must still need attunement (< 100%)
-    local progress = nil
+    -- ʕ •ᴥ•ʔ✿ Highest attune across forges/affixes via native C extension ✿ ʕ •ᴥ•ʔ
+    local API = Omni.API
+    local progress
+    if API then
+        progress = API:GetHighestAttunePct(itemID, -1)
+    end
 
-    -- Prefer explicit itemId API
-    if _G.GetItemAttuneProgress then
-        local titanforged = nil
-        if _G.GetItemLinkTitanforge and itemInfo and itemInfo.hyperlink then
-            local forge = GetItemLinkTitanforge(itemInfo.hyperlink)
-            if type(forge) == "number" and forge > 0 then
-                titanforged = forge
+    -- Legacy fallback when the shim or native API isn't available
+    if type(progress) ~= "number" then
+        if _G.GetItemAttuneProgress then
+            local titanforged
+            if _G.GetItemLinkTitanforge and itemInfo and itemInfo.hyperlink then
+                local forge = GetItemLinkTitanforge(itemInfo.hyperlink)
+                if type(forge) == "number" and forge > 0 then
+                    titanforged = forge
+                end
+            elseif _G.GetItemAttuneForge then
+                local forge = GetItemAttuneForge(itemID)
+                if type(forge) == "number" and forge > 0 then
+                    titanforged = forge
+                end
             end
-        elseif _G.GetItemAttuneForge then
-            local forge = GetItemAttuneForge(itemID)
-            if type(forge) == "number" and forge > 0 then
-                titanforged = forge
-            end
+            progress = GetItemAttuneProgress(itemID, nil, titanforged)
         end
-        progress = GetItemAttuneProgress(itemID, nil, titanforged)
+
+        if type(progress) ~= "number" and _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
+            progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
+        end
     end
 
-    -- Fallback to hyperlink API if available
-    if type(progress) ~= "number" and _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
-        progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
-    end
-
-    -- If no progress API is available, fail closed so category is strict
+    -- If no progress is resolvable at all, fail closed so the category stays strict
     if type(progress) ~= "number" then
         return false
     end
@@ -332,6 +385,11 @@ function Categorizer:GetCategory(itemInfo)
         end
     end
 
+    -- Priority 1.75: Perishable / time-limited turn-in items
+    if self:IsPerishableItem(GetItemID(itemInfo)) then
+        return "Perishable"
+    end
+
     -- Priority 2: Quest Items
     if IsQuestItem(itemInfo) then
         return "Quest Items"
@@ -453,6 +511,7 @@ end
 
 function Categorizer:Init()
     -- Register default categories
+    self:RegisterCategory("Perishable", 1, nil, CATEGORY_COLORS["Perishable"])
     self:RegisterCategory("Quest Items", 2, nil, CATEGORY_COLORS["Quest Items"])
     self:RegisterCategory("Attunable", 3, nil, CATEGORY_COLORS["Attunable"])
     self:RegisterCategory("Equipment Sets", 4, nil, CATEGORY_COLORS["Equipment Sets"])
@@ -472,6 +531,7 @@ function Categorizer:Init()
     -- Initialize manual overrides
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
+    OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
 
     -- Snapshot current inventory for "new items" tracking
     SnapshotInventory()

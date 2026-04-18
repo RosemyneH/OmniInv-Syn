@@ -125,15 +125,17 @@ function Events:Init()
     self:RegisterBucketEvent("BAG_UPDATE", function(modifiedBags)
         -- Detect new items in modified bags
         if Omni.Categorizer then
+            local API = Omni.API
             for bagID in pairs(modifiedBags) do
                 if type(bagID) == "number" and bagID >= 0 and bagID <= 4 then
                     local numSlots = GetContainerNumSlots(bagID) or 0
                     for slot = 1, numSlots do
-                        local link = GetContainerItemLink(bagID, slot)
+                        local link = API and API:GetItemLinkBySlot(bagID, slot)
+                            or GetContainerItemLink(bagID, slot)
                         if link then
-                            local itemID = tonumber(string.match(link, "item:(%d+)"))
+                            local itemID = API and API:GetIdFromLink(link)
+                                or tonumber(string.match(link, "item:(%d+)"))
                             if itemID then
-                                -- Mark as new if not in session snapshot
                                 Omni.Categorizer:MarkAsNew(itemID)
                             end
                         end
@@ -146,32 +148,36 @@ function Events:Init()
         if Omni.Frame then
             Omni.Frame:UpdateLayout(modifiedBags)
         end
+        if Omni.BankFrame and Omni.BankFrame:IsShown() then
+            Omni.BankFrame:UpdateLayout()
+        end
     end)
 
-    -- Bank events
+    -- ʕ •ᴥ•ʔ✿ Bank events drive the standalone BankFrame to the left ✿ ʕ •ᴥ•ʔ
     self:RegisterEvent("BANKFRAME_OPENED", function()
-        if Omni.Data then Omni.Data:SaveBankItems() end
         if Omni.Frame then
-            Omni.Frame:SetBankOpen(true)
-            Omni.Frame:SetMode("bank")
             Omni.Frame:Show()
+        end
+        if Omni.BankFrame then
+            Omni.BankFrame:Show()
         end
     end)
 
     self:RegisterEvent("PLAYERBANKSLOTS_CHANGED", function()
-        if Omni.Data then Omni.Data:SaveBankItems() end
-        if Omni.Frame then Omni.Frame:UpdateLayout() end
+        if Omni.BankFrame and Omni.BankFrame:IsShown() then
+            Omni.BankFrame:UpdateLayout()
+        end
     end)
 
     self:RegisterEvent("PLAYERBANKBAGSLOTS_CHANGED", function()
-        if Omni.Data then Omni.Data:SaveBankItems() end
-         if Omni.Frame then Omni.Frame:UpdateLayout() end
+        if Omni.BankFrame and Omni.BankFrame:IsShown() then
+            Omni.BankFrame:UpdateLayout()
+        end
     end)
 
     self:RegisterEvent("BANKFRAME_CLOSED", function()
-        if Omni.Frame then
-            Omni.Frame:SetBankOpen(false)
-            Omni.Frame:SetMode("bags")
+        if Omni.BankFrame then
+            Omni.BankFrame:Hide()
         end
     end)
 
@@ -187,6 +193,9 @@ function Events:Init()
         if Omni.Frame and Omni.Frame:IsShown() then
             -- Refresh layout to fix "Miscellaneous" items that now have data
             Omni.Frame:UpdateLayout()
+        end
+        if Omni.BankFrame and Omni.BankFrame:IsShown() then
+            Omni.BankFrame:UpdateLayout()
         end
     end)
 
