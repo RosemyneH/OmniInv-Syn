@@ -8,12 +8,12 @@
 
 *Fork of [Zendevve/OmniInventory](https://github.com/Zendevve/OmniInventory).*
 
-[![Release](https://img.shields.io/github/v/release/RosemyneH/OmniInventory-Syn?sort=semver&style=flat-square&label=release)](https://github.com/RosemyneH/OmniInventory-Syn/releases)
-[![License](https://img.shields.io/github/license/RosemyneH/OmniInventory-Syn?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/RosemyneH/OmniInv-Syn?sort=semver&style=flat-square&label=release)](https://github.com/RosemyneH/OmniInv-Syn/releases)
+[![License](https://img.shields.io/github/license/RosemyneH/OmniInv-Syn?style=flat-square)](LICENSE)
 [![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72?style=flat-square&logo=lua)](https://www.lua.org/manual/5.1/)
-[![WoW](https://img.shields.io/badge/client-3.3.5a-C79C6E?style=flat-square)](https://github.com/RosemyneH/OmniInventory-Syn#readme)
+[![WoW](https://img.shields.io/badge/client-3.3.5a-C79C6E?style=flat-square)](https://github.com/RosemyneH/OmniInv-Syn#readme)
 
-[**Download**](https://github.com/RosemyneH/OmniInventory-Syn/releases/latest) · [**Issues**](https://github.com/RosemyneH/OmniInventory-Syn/issues) · [**Contributing**](CONTRIBUTING.md) · [**Changelog**](CHANGELOG.md)
+[**Download**](https://github.com/RosemyneH/OmniInv-Syn/releases/latest) · [**Issues**](https://github.com/RosemyneH/OmniInv-Syn/issues) · [**Contributing**](CONTRIBUTING.md) · [**Changelog**](CHANGELOG.md)
 
 </div>
 
@@ -31,7 +31,7 @@
 
 ## Install
 
-1. Download the [latest release](https://github.com/RosemyneH/OmniInventory-Syn/releases/latest).
+1. Download the [latest release](https://github.com/RosemyneH/OmniInv-Syn/releases/latest).
 2. Extract so this path exists: `Interface/AddOns/OmniInventory/OmniInventory.toc` (folder name must match).
 3. Restart the client or run `/reload`.
 
