@@ -532,9 +532,6 @@ function Categorizer:Init()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
     OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
-
-    -- Snapshot current inventory for "new items" tracking
-    SnapshotInventory()
 end
 
 print("|cFF00FF00OmniInventory|r: Categorizer loaded")

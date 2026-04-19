@@ -29,11 +29,7 @@ local defaults = {
             showResistIcons = true,
             showProgressText = true,
             showAccountAttuneText = false,
-            faeMode = false,
-            enableAnimations = true,
-            animationSpeed = 0.15,
-            enableTextAnimations = true,
-            textAnimationSpeed = 0.2,
+            faeMode = true,
             forgeColors = {
                 BASE = { r = 0.0, g = 1.0, b = 0.0, a = 1.0 },
                 TITANFORGED = { r = 0.468, g = 0.532, b = 1.0, a = 1.0 },
@@ -93,6 +89,22 @@ function Data:Init()
     MergeDefaults(OmniInventoryDB.global, defaults.global)
     MergeDefaults(OmniInventoryDB.char, defaults.char)
     MergeDefaults(OmniInventoryDB.realm, defaults.realm)
+
+    local att = OmniInventoryDB.global.attune
+    if att and defaults.global.attune and defaults.global.attune.forgeColors then
+        att.forgeColors = att.forgeColors or {}
+        for key, col in pairs(defaults.global.attune.forgeColors) do
+            if att.forgeColors[key] == nil then
+                att.forgeColors[key] = CopyTable(col)
+            elseif type(att.forgeColors[key]) == "table" then
+                for ck, cv in pairs(col) do
+                    if att.forgeColors[key][ck] == nil then
+                        att.forgeColors[key][ck] = cv
+                    end
+                end
+            end
+        end
+    end
 
     -- Store current character info
     local realmName = GetRealmName()

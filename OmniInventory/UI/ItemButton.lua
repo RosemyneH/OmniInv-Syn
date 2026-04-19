@@ -27,16 +27,83 @@ local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED"
 local FORGE_LETTERS = { [1] = "T", [2] = "W", [3] = "L" }
 local ConfigureSecureItemUse
 
+local function NormalizeMouseButton(mouseButton)
+    if mouseButton == "LeftButtonUp" or mouseButton == "LeftButtonDown" then
+        return "LeftButton"
+    end
+    if mouseButton == "RightButtonUp" or mouseButton == "RightButtonDown" then
+        return "RightButton"
+    end
+    if mouseButton == "MiddleButtonUp" or mouseButton == "MiddleButtonDown" then
+        return "MiddleButton"
+    end
+    return mouseButton
+end
+
+local function IsSendMailComposeOpen()
+    return SendMailFrame and SendMailFrame:IsShown()
+end
+
+local function PerformBlizzardContainerRightClick(bagID, slotID)
+    if not bagID or not slotID or bagID < 0 or slotID < 1 then
+        return false
+    end
+    local clickFn = _G.ContainerFrameItemButton_OnClick
+    if not clickFn or not Omni.Utils or not Omni.Utils.EnsureBlizzardContainerItemButtons or not Omni.Utils.GetBlizzardBagSlotButton then
+        return false
+    end
+    Omni.Utils:EnsureBlizzardContainerItemButtons()
+    local proxy = Omni.Utils:GetBlizzardBagSlotButton(bagID, slotID)
+    if not proxy then
+        return false
+    end
+    clickFn(proxy, "RightButton")
+    return true
+end
+
+function ItemButton:HandleBagSlotRightClickInventory(bagID, slotID, secureUseConfigured)
+    if not bagID or not slotID or bagID < 0 or slotID < 1 then
+        return false
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        return false
+    end
+    if IsSendMailComposeOpen() then
+        if not PerformBlizzardContainerRightClick(bagID, slotID) then
+            UseContainerItem(bagID, slotID)
+        end
+        return true
+    end
+    if not secureUseConfigured then
+        UseContainerItem(bagID, slotID)
+        return true
+    end
+    return false
+end
+
 local QUALITY_COLORS = {
-    [0] = { 0.62, 0.62, 0.62 },  -- Poor (Grey)
-    [1] = { 1.00, 1.00, 1.00 },  -- Common (White)
-    [2] = { 0.12, 1.00, 0.00 },  -- Uncommon (Green)
-    [3] = { 0.00, 0.44, 0.87 },  -- Rare (Blue)
-    [4] = { 0.64, 0.21, 0.93 },  -- Epic (Purple)
-    [5] = { 1.00, 0.50, 0.00 },  -- Legendary (Orange)
-    [6] = { 0.90, 0.80, 0.50 },  -- Artifact (Light Gold)
-    [7] = { 0.00, 0.80, 1.00 },  -- Heirloom (Light Blue)
+    [0] = { 0.62, 0.62, 0.62 },
+    [1] = { 1.00, 1.00, 1.00 },
+    [2] = { 0.12, 1.00, 0.00 },
+    [3] = { 0.00, 0.44, 0.87 },
+    [4] = { 0.64, 0.21, 0.93 },
+    [5] = { 1.00, 0.50, 0.00 },
+    [6] = { 0.90, 0.80, 0.50 },
+    [7] = { 0.00, 0.80, 1.00 },
 }
+
+-- ʕ •ᴥ•ʔ✿ Hidden, ID-less limbo parent for buttons that are not currently
+-- assigned to any (bag, slot). Buttons must always have a real parent so
+-- their secure OnClick path doesn't dereference nil; we only reparent
+-- to the bag-keyed ItemContainer at acquire time. ✿ ʕ •ᴥ•ʔ
+local buttonLimbo
+local function GetButtonLimbo()
+    if not buttonLimbo then
+        buttonLimbo = CreateFrame("Frame", "OmniItemButtonLimbo", UIParent)
+        buttonLimbo:Hide()
+    end
+    return buttonLimbo
+end
 
 local function UpdateTooltipCompareState()
     if not GameTooltip or not GameTooltip:IsShown() then
@@ -176,20 +243,6 @@ local function IsItemResistArmor(itemLink, itemID)
     return false
 end
 
-local function EnsureAttuneAnimationData(button, progress)
-    button.attuneAnimData = button.attuneAnimData or {
-        currentHeight = 0,
-        targetHeight = 0,
-        isAnimating = false,
-        currentProgress = progress or 0,
-        targetProgress = progress or 0,
-        isTextAnimating = false,
-        textStepTimer = 0,
-        textStepInterval = 0.1,
-    }
-    return button.attuneAnimData
-end
-
 local function HideAttuneDisplay(button)
     if button.attuneBarBG then button.attuneBarBG:Hide() end
     if button.attuneBarFill then button.attuneBarFill:Hide() end
@@ -248,32 +301,60 @@ function ItemButton:Create(parent)
     buttonCount = buttonCount + 1
     local name = "OmniItemButton" .. buttonCount
 
-    local button = CreateFrame("Button", name, parent, "SecureActionButtonTemplate")
+    -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate is THE template AdiBags / Bagnon
+    -- use. It carries Blizzard's own secure OnClick (ContainerFrameItemButton_
+    -- OnClick) which reads bag from self:GetParent():GetID() and slot from
+    -- self:GetID(), and is whitelisted to call PickupContainerItem and
+    -- UseContainerItem in combat. Crucially this template does NOT promote
+    -- its parent to "protected by association" the way SecureActionButton
+    -- Template does, so OmniInventoryFrame stays a plain Frame and Show /
+    -- Hide work in combat. We park the button on the limbo parent here and
+    -- let acquire-time logic reparent it to the bag-keyed ItemContainer. ✿ ʕ •ᴥ•ʔ
+    local button = CreateFrame("Button", name, parent or GetButtonLimbo(), "ContainerFrameItemButtonTemplate")
     button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
-    button:RegisterForClicks("AnyUp")
     button:RegisterForDrag("LeftButton")
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
-    -- Dark background
+    -- ʕ •ᴥ•ʔ✿ Strip the Blizzard normal/pushed/highlight skin -- our quality
+    -- border owns the look. The icon, count, and cooldown frames provided
+    -- by the template are wired up below. ✿ ʕ •ᴥ•ʔ
+    pcall(button.SetNormalTexture, button, nil)
+    pcall(button.SetPushedTexture, button, nil)
+    pcall(button.SetHighlightTexture, button, nil)
+    pcall(button.SetDisabledTexture, button, nil)
+    if button.SetNormalTexture and _G[name .. "NormalTexture"] then
+        _G[name .. "NormalTexture"]:SetAlpha(0)
+    end
+
     button.bg = button:CreateTexture(nil, "BACKGROUND")
     button.bg:SetAllPoints()
     button.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
     button.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
 
-    -- Icon texture
-    button.icon = button:CreateTexture(nil, "ARTWORK")
+    button.icon = _G[name .. "IconTexture"] or button:CreateTexture(nil, "ARTWORK")
+    button.icon:ClearAllPoints()
     button.icon:SetPoint("TOPLEFT", 2, -2)
     button.icon:SetPoint("BOTTOMRIGHT", -2, 2)
-    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)  -- Trim icon edges
+    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    button.cooldown = _G[name .. "Cooldown"]
+    if not button.cooldown then
+        button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    end
+    button.cooldown:ClearAllPoints()
     button.cooldown:SetPoint("TOPLEFT", button.icon, "TOPLEFT", 0, 0)
     button.cooldown:SetPoint("BOTTOMRIGHT", button.icon, "BOTTOMRIGHT", 0, 0)
     button.cooldown:Hide()
 
-    -- Stack count
-    button.count = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    button.count = _G[name .. "Count"] or button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    button.count:ClearAllPoints()
     button.count:SetPoint("BOTTOMRIGHT", -2, 2)
     button.count:SetJustifyH("RIGHT")
+
+    local questIcon = _G[name .. "IconQuestTexture"]
+    if questIcon then questIcon:Hide() end
+    local stockTex = _G[name .. "Stock"]
+    if stockTex then stockTex:Hide() end
 
     -- Quality border (our custom colored border)
     button.border = button:CreateTexture(nil, "OVERLAY")
@@ -374,8 +455,8 @@ function ItemButton:Create(parent)
     button.attuneBarFill:SetHeight(0)
     button.attuneBarFill:Hide()
 
-    button.attuneText = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    button.attuneText:SetPoint("BOTTOM", button, "BOTTOM", 0, 3)
+    button.attuneText = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    button.attuneText:SetPoint("BOTTOM", button, "BOTTOM", 0, 2)
     button.attuneText:Hide()
 
     button.bountyIcon = button:CreateTexture(nil, "OVERLAY")
@@ -397,37 +478,35 @@ function ItemButton:Create(parent)
     button.resistIcon:SetPoint("TOP", button, "TOP", 0, -2)
     button.resistIcon:Hide()
 
-    -- ʕ •ᴥ•ʔ✿ Forge level letter (T/W/L) in bottom-right ✿ ʕ •ᴥ•ʔ
-    button.forgeText = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    button.forgeText:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
+    button.forgeText = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    button.forgeText:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
     button.forgeText:SetJustifyH("RIGHT")
     button.forgeText:Hide()
 
-    -- Store item info reference
     button.itemInfo = nil
 
-    -- Click handlers
-    button:SetScript("PreClick", function(self, mouseButton)
-        ItemButton:OnPreClick(self, mouseButton)
-    end)
+    -- ʕ •ᴥ•ʔ✿ HookScript on OnClick / OnEnter so the template's built-in
+    -- secure ContainerFrameItemButton_OnClick (use / pickup / equip / swap /
+    -- modified-clicks) and standard tooltip handler still run; ours adds
+    -- the OmniInventory pin-toggle on shift+rclick and our richer tooltip
+    -- compare logic on top. The template owns drag in combat too. ✿ ʕ •ᴥ•ʔ
     button:HookScript("OnClick", function(self, mouseButton)
         ItemButton:OnClick(self, mouseButton)
     end)
 
-    button:SetScript("OnEnter", function(self)
+    button:HookScript("OnEnter", function(self)
         ItemButton:OnEnter(self)
     end)
 
-    button:SetScript("OnLeave", function(self)
+    button:HookScript("OnLeave", function(self)
         ItemButton:OnLeave(self)
     end)
 
-    -- Drag handlers
-    button:SetScript("OnDragStart", function(self)
+    button:HookScript("OnDragStart", function(self)
         ItemButton:OnDragStart(self)
     end)
 
-    button:SetScript("OnReceiveDrag", function(self)
+    button:HookScript("OnReceiveDrag", function(self)
         ItemButton:OnReceiveDrag(self)
     end)
 
@@ -550,27 +629,6 @@ local function UpdateAttuneDisplay(button, itemInfo)
         BUTTON_SIZE * ATTUNE_MIN_HEIGHT_PERCENT
     )
 
-    local animData = EnsureAttuneAnimationData(button, progress)
-    if settings.enableAnimations and math.abs(animData.targetHeight - targetHeight) > 1 then
-        animData.targetHeight = targetHeight
-        animData.isAnimating = true
-    else
-        animData.currentHeight = targetHeight
-        animData.targetHeight = targetHeight
-        animData.isAnimating = false
-    end
-
-    if settings.enableTextAnimations and settings.showProgressText and math.abs(animData.targetProgress - progress) > 0.1 then
-        animData.targetProgress = progress
-        animData.isTextAnimating = true
-        animData.textStepTimer = 0
-        animData.textStepInterval = 1 / (math.max(settings.textAnimationSpeed or 0.2, 0.05) * 20)
-    else
-        animData.currentProgress = progress
-        animData.targetProgress = progress
-        animData.isTextAnimating = false
-    end
-
     if barColor and barColor.r then
         button.attuneBarFill:SetVertexColor(barColor.r, barColor.g, barColor.b, barColor.a or 1)
     else
@@ -580,18 +638,16 @@ local function UpdateAttuneDisplay(button, itemInfo)
     button.attuneBarBG:Show()
     button.attuneBarFill:Show()
 
-    -- ʕ •ᴥ•ʔ✿ Keep the bar at 100% but drop the "100%" text ✿ ʕ •ᴥ•ʔ
     if progress >= 100 then
         button.attuneText:Hide()
     elseif settings.showProgressText and (charOK or (settings.showRedForNonAttunable and accountOK)) then
-        local displayProgress = animData.currentProgress or progress
         button.attuneText:SetTextColor(
             settings.textColor.r,
             settings.textColor.g,
             settings.textColor.b,
             settings.textColor.a
         )
-        button.attuneText:SetText(string.format("%.0f%%", displayProgress))
+        button.attuneText:SetText(string.format("%.0f%%", progress))
         button.attuneText:Show()
     elseif settings.showAccountAttuneText and (not charOK) and accountOK then
         button.attuneText:SetTextColor(
@@ -606,66 +662,9 @@ local function UpdateAttuneDisplay(button, itemInfo)
         button.attuneText:Hide()
     end
 
-    local function ApplyBarHeight(heightValue)
-        button.attuneBarBG:SetHeight(heightValue + 2)
-        button.attuneBarFill:SetHeight(math.max(heightValue, 0))
-    end
-
-    if (animData.isAnimating or animData.isTextAnimating) then
-        button:SetScript("OnUpdate", function(self, elapsed)
-            local data = self.attuneAnimData
-            local attuneSettings = GetAttuneSettings()
-            if not data or not attuneSettings then
-                self:SetScript("OnUpdate", nil)
-                return
-            end
-
-            local stillAnimating = false
-            if data.isAnimating then
-                local diff = data.targetHeight - data.currentHeight
-                if math.abs(diff) < 0.1 then
-                    data.currentHeight = data.targetHeight
-                    data.isAnimating = false
-                else
-                    local speed = attuneSettings.animationSpeed or 0.15
-                    data.currentHeight = data.currentHeight + (diff * speed * (elapsed * 60))
-                    stillAnimating = true
-                end
-                ApplyBarHeight(data.currentHeight)
-            end
-
-            if data.isTextAnimating then
-                data.textStepTimer = data.textStepTimer + elapsed
-                if data.textStepTimer >= data.textStepInterval then
-                    data.textStepTimer = 0
-                    if data.currentProgress < data.targetProgress then
-                        data.currentProgress = math.min(data.currentProgress + 1, data.targetProgress)
-                    elseif data.currentProgress > data.targetProgress then
-                        data.currentProgress = math.max(data.currentProgress - 1, data.targetProgress)
-                    end
-                    if button.attuneText and button.attuneText:IsShown() then
-                        button.attuneText:SetText(string.format("%.0f%%", data.currentProgress))
-                    end
-                    if math.abs(data.currentProgress - data.targetProgress) < 0.1 then
-                        data.currentProgress = data.targetProgress
-                        data.isTextAnimating = false
-                    else
-                        stillAnimating = true
-                    end
-                else
-                    stillAnimating = true
-                end
-            end
-
-            if not stillAnimating then
-                self:SetScript("OnUpdate", nil)
-                ApplyBarHeight(data.currentHeight)
-            end
-        end)
-    else
-        button:SetScript("OnUpdate", nil)
-        ApplyBarHeight(animData.currentHeight)
-    end
+    button.attuneBarBG:SetHeight(targetHeight + 2)
+    button.attuneBarFill:SetHeight(math.max(targetHeight, 0))
+    button:SetScript("OnUpdate", nil)
 end
 
 function ItemButton:SetItem(button, itemInfo)
@@ -674,10 +673,8 @@ function ItemButton:SetItem(button, itemInfo)
     button.itemInfo = itemInfo
 
     if not itemInfo then
-        -- Empty slot
         button.icon:SetTexture(nil)
         button.count:SetText("")
-        -- Reset border to dark grey
         local grey = 0.3
         if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
@@ -688,7 +685,6 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
-        ConfigureSecureItemUse(button, nil, nil)
         return
     end
 
@@ -718,10 +714,18 @@ function ItemButton:SetItem(button, itemInfo)
     if button.borderLeft then button.borderLeft:SetVertexColor(r, g, b, 1) end
     if button.borderRight then button.borderRight:SetVertexColor(r, g, b, 1) end
 
-    -- Store bag/slot for container operations
+    -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButton_OnClick reads bag from
+    -- self:GetParent():GetID() and slot from self:GetID(); the parenting
+    -- to the bag-keyed ItemContainer (which carries SetID(bagID)) and the
+    -- SetID below are what wire this button to the secure use / pickup
+    -- pipeline. Both calls are protected on this client and therefore are
+    -- only safe to issue out of combat -- the render path is combat-gated
+    -- in UI/Frame.lua so we never reach SetItem during lockdown. ✿ ʕ •ᴥ•ʔ
     button.bagID = itemInfo.bagID
     button.slotID = itemInfo.slotID
-    ConfigureSecureItemUse(button, itemInfo.bagID, itemInfo.slotID)
+    if itemInfo.slotID and button.SetID then
+        pcall(button.SetID, button, itemInfo.slotID)
+    end
 
     -- New item glow with animation
     if itemInfo.isNew then
@@ -794,134 +798,54 @@ end
 -- Event Handlers
 -- =============================================================================
 
-ConfigureSecureItemUse = function(button, bagID, slotID)
-    if not button then
-        return
-    end
-    if InCombatLockdown and InCombatLockdown() then
-        button.secureUseConfigured = false
-        return
-    end
-
-    if bagID and slotID and bagID >= 0 and slotID > 0 then
-        local itemRef = string.format("%d %d", bagID, slotID)
-        button.secureItemRef = itemRef
-        button:SetAttribute("type1", "item")
-        button:SetAttribute("item1", itemRef)
-        button:SetAttribute("type2", "item")
-        button:SetAttribute("item2", itemRef)
-        button.secureUseConfigured = true
-    else
-        button.secureItemRef = nil
-        button:SetAttribute("type1", nil)
-        button:SetAttribute("item1", nil)
-        button:SetAttribute("type2", nil)
-        button:SetAttribute("item2", nil)
-        button.secureUseConfigured = false
-    end
+-- ʕ •ᴥ•ʔ✿ Kept as a no-op so any leftover callers (eg. saved-variables
+-- migration paths, the bank renderer) don't blow up. The template's
+-- built-in OnClick is the secure path now. ✿ ʕ •ᴥ•ʔ
+ConfigureSecureItemUse = function(button)
+    if not button then return end
+    button.secureUseConfigured = true
 end
 
-function ItemButton:OnPreClick(button, mouseButton)
-    if not button or not button.secureItemRef then
-        return
-    end
-    if InCombatLockdown and InCombatLockdown() then
-        return
-    end
+function ItemButton:OnPreClick() end
 
-    if mouseButton == "LeftButton" then
-        button.forceContainerUse = false
-        if IsModifiedClick("CHATLINK")
-            or IsModifiedClick("DRESSUP")
-            or IsModifiedClick("PICKUPACTION")
-            or IsModifiedClick("SPLITSTACK")
-        then
-            button:SetAttribute("type1", nil)
-            button:SetAttribute("item1", nil)
-        else
-            button:SetAttribute("type1", "item")
-            button:SetAttribute("item1", button.secureItemRef)
-        end
-    elseif mouseButton == "RightButton" then
-        if IsShiftKeyDown() or (MerchantFrame and MerchantFrame:IsShown()) then
-            button:SetAttribute("type2", nil)
-            button:SetAttribute("item2", nil)
-            button.forceContainerUse = true
-        else
-            button:SetAttribute("type2", "item")
-            button:SetAttribute("item2", button.secureItemRef)
-            button.forceContainerUse = false
-        end
-    end
-end
-
+-- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate's XML OnClick already invokes
+-- ContainerFrameItemButton_OnClick which handles use / pickup / equip /
+-- shift-link / ctrl-dressup / split / right-click-use, all on Blizzard's
+-- whitelisted secure path that works in combat. This hook only adds the
+-- OmniInventory-specific extras: shift+rclick to toggle pin and the
+-- isNew bookkeeping. We never PickupContainerItem ourselves so we don't
+-- double-handle and don't trigger combat lockdown from insecure code. ✿ ʕ •ᴥ•ʔ
 function ItemButton:OnClick(button, mouseButton)
-    if not button or not button.itemInfo then return end
+    if not button then return end
 
-    local bagID = button.bagID
-    local slotID = button.slotID
-    local canUseContainer = bagID and slotID and bagID >= 0 and slotID > 0
+    mouseButton = NormalizeMouseButton(mouseButton) or mouseButton
 
-    if not bagID or not slotID then return end
+    if mouseButton == "RightButton" and IsShiftKeyDown()
+            and button.itemInfo and button.itemInfo.itemID then
+        local isPinned = Omni.Data and Omni.Data:TogglePin(button.itemInfo.itemID)
+        if isPinned then
+            if button.pinIcon then button.pinIcon:Show() end
+            print("|cFF00FF00Omni|r: Item pinned!")
+        else
+            if button.pinIcon then button.pinIcon:Hide() end
+            print("|cFF00FF00Omni|r: Item unpinned.")
+        end
+        if Omni.Frame and not (InCombatLockdown and InCombatLockdown()) then
+            Omni.Frame:UpdateLayout()
+        end
+        if Omni.BankFrame and Omni.BankFrame.UpdateLayout
+                and not (InCombatLockdown and InCombatLockdown()) then
+            Omni.BankFrame:UpdateLayout()
+        end
+        return
+    end
 
-    -- Clear new item status on any click
     if button.itemInfo and button.itemInfo.isNew then
         button.itemInfo.isNew = false
-        button.glow:Hide()
+        if button.glow then button.glow:Hide() end
         button.glowAnimating = false
-        -- Also clear in Categorizer's tracking
         if Omni.Categorizer and button.itemInfo.itemID then
             Omni.Categorizer:ClearNewItem(button.itemInfo.itemID)
-        end
-    end
-
-    if mouseButton == "LeftButton" then
-        if IsModifiedClick("CHATLINK") and canUseContainer then
-            -- Shift-click to link item in chat
-            local itemLink = GetContainerItemLink(bagID, slotID)
-            if itemLink then
-                ChatEdit_InsertLink(itemLink)
-            end
-        elseif IsModifiedClick("DRESSUP") and canUseContainer then
-            -- Ctrl-click for dressing room
-            DressUpItemLink(GetContainerItemLink(bagID, slotID))
-        elseif IsModifiedClick("PICKUPACTION") and canUseContainer then
-            -- Pickup item (drag)
-            PickupContainerItem(bagID, slotID)
-        elseif IsModifiedClick("SPLITSTACK") and canUseContainer then
-            -- Split stack
-            local _, count = GetContainerItemInfo(bagID, slotID)
-            if count and count > 1 then
-                OpenStackSplitFrame(count, button, "BOTTOMRIGHT", "TOPRIGHT")
-            end
-        elseif canUseContainer and not button.secureUseConfigured then
-            if not InCombatLockdown or not InCombatLockdown() then
-                UseContainerItem(bagID, slotID)
-            end
-        end
-    elseif mouseButton == "RightButton" then
-        -- Shift+Right-click to toggle pin/favorite
-        if IsShiftKeyDown() and button.itemInfo.itemID then
-            local isPinned = Omni.Data:TogglePin(button.itemInfo.itemID)
-
-            -- Update pin icon immediately
-            if isPinned then
-                button.pinIcon:Show()
-                print("|cFF00FF00Omni|r: Item pinned!")
-            else
-                button.pinIcon:Hide()
-                print("|cFF00FF00Omni|r: Item unpinned.")
-            end
-
-            -- Refresh layout to re-sort with pinned items first
-            if Omni.Frame then
-                Omni.Frame:UpdateLayout()
-            end
-        elseif canUseContainer and (button.forceContainerUse or not button.secureUseConfigured) then
-            if not InCombatLockdown or not InCombatLockdown() then
-                UseContainerItem(bagID, slotID)
-            end
-            button.forceContainerUse = false
         end
     end
 end
@@ -974,27 +898,12 @@ function ItemButton:OnLeave(button)
     end
 end
 
-function ItemButton:OnDragStart(button)
-    if not button then return end
-
-    local bagID = button.bagID
-    local slotID = button.slotID
-
-    if bagID and slotID then
-        PickupContainerItem(bagID, slotID)
-    end
-end
-
-function ItemButton:OnReceiveDrag(button)
-    if not button then return end
-
-    local bagID = button.bagID
-    local slotID = button.slotID
-
-    if bagID and slotID then
-        PickupContainerItem(bagID, slotID)
-    end
-end
+-- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate already handles OnDragStart and
+-- OnReceiveDrag through its built-in scripts (PickupContainerItem on the
+-- template's own bag/slot resolution). Our hooks would double-pickup and
+-- swap the item with whatever the cursor still carries -- so they no-op. ✿ ʕ •ᴥ•ʔ
+function ItemButton:OnDragStart() end
+function ItemButton:OnReceiveDrag() end
 
 -- =============================================================================
 -- Reset (for pool release)
@@ -1006,28 +915,28 @@ function ItemButton:Reset(button)
     button.itemInfo = nil
     button.bagID = nil
     button.slotID = nil
-    button.icon:SetTexture(nil)
-    button.count:SetText("")
+    if button.icon then button.icon:SetTexture(nil) end
+    if button.count then button.count:SetText("") end
 
-    -- Reset border colors to grey
     local grey = 0.3
     if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
     if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
     if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
     if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
 
-    if button.glow.anim then button.glow.anim:Stop() end
-    button.glow:Hide()
-    button.dimOverlay:Hide()
-    button.pinIcon:Hide()
+    if button.glow and button.glow.anim then button.glow.anim:Stop() end
+    if button.glow then button.glow:Hide() end
+    if button.dimOverlay then button.dimOverlay:Hide() end
+    if button.pinIcon then button.pinIcon:Hide() end
     HideAttuneDisplay(button)
     if button.forgeText then button.forgeText:Hide() end
     HideItemCooldown(button)
-    button.attuneAnimData = nil
-    button.icon:SetDesaturated(false)
-    button.icon:SetAlpha(1)
-    ConfigureSecureItemUse(button, nil, nil)
-    button:Hide()
+    if button.icon then
+        button.icon:SetDesaturated(false)
+        button.icon:SetAlpha(1)
+    end
+
+    pcall(button.Hide, button)
 end
 
 print("|cFF00FF00OmniInventory|r: ItemButton loaded")

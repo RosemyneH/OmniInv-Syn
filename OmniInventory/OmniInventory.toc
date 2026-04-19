@@ -35,7 +35,6 @@ UI\Frame.lua
 UI\BankFrame.lua
 UI\Options.lua
 UI\CategoryEditor.lua
-UI\MinimapButton.lua
 
 # =============================================================================
 # Main Entry Point

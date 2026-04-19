@@ -48,6 +48,29 @@ local FORCE_EMPTY_STEP_INTERVAL = 0.12
 local FORCE_EMPTY_MAX_LOCK_RETRIES = 20
 local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 
+-- ʕ •ᴥ•ʔ✿ Combat-safety state ✿ ʕ •ᴥ•ʔ
+--
+-- ContainerFrameItemButtonTemplate (the AdiBags / Bagnon template) does
+-- NOT promote OmniInventoryFrame to "protected by association", so
+-- mainFrame:Show() and mainFrame:Hide() work normally in combat -- no
+-- alpha-toggle / EnableMouse trickery required, and the entire bag UI
+-- can disappear cleanly when closed.
+--
+-- The protected-child operations that ARE still forbidden in combat
+-- are the structural ones on the ItemButtons themselves: SetParent,
+-- SetID, SetPoint, ClearAllPoints. UpdateLayout is therefore combat-
+-- gated end-to-end and PLAYER_REGEN_ENABLED replays the render once
+-- combat ends. While combat is active the buttons keep whatever
+-- (bag, slot, position) they were assigned before combat started, so
+-- the user still sees their last known inventory and the template's
+-- secure OnClick (use / pickup / equip / swap) still routes correctly.
+local hasRenderedOnce = false
+local pendingCombatRender = false
+
+local function InCombat()
+    return InCombatLockdown and InCombatLockdown()
+end
+
 local function SetButtonItem(btn, itemInfo)
     if not btn then return end
 
@@ -139,9 +162,6 @@ function Frame:CreateMainFrame()
     local scale = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings and OmniInventoryDB.char.settings.scale
     mainFrame:SetScale(scale or 1)
 
-    -- Make closable with ESC
-    tinsert(UISpecialFrames, "OmniInventoryFrame")
-
     -- Create components
     self:CreateHeader()
     self:CreateSearchBar()
@@ -150,45 +170,28 @@ function Frame:CreateMainFrame()
     self:CreateFooter()
     self:CreateResizeHandle()
 
-    -- Register for updates
+    -- ʕ •ᴥ•ʔ✿ Combat hint banner: shown when bag is opened during combat
+    -- and the layout cannot be safely (re)built. ✿ ʕ •ᴥ•ʔ
+    mainFrame.combatHint = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    mainFrame.combatHint:SetPoint("TOP", mainFrame, "TOP", 0, -2)
+    mainFrame.combatHint:SetTextColor(1, 0.82, 0, 1)
+    mainFrame.combatHint:SetText("")
+    mainFrame.combatHint:Hide()
+
     self:RegisterEvents()
 
-    -- Start hidden
-    mainFrame:Hide()
-
-    -- Simple fade-in animation (WoTLK 3.3.5a compatible - no AnimationGroups)
-    local FADE_DURATION = 0.15  -- 150ms fade
-    local fadeStartTime = nil
-
-    local function FadeIn()
-        fadeStartTime = GetTime()
-        mainFrame:SetAlpha(0)
-        mainFrame:SetScript("OnUpdate", function(self, elapsed)
-            if not fadeStartTime then return end
-            local progress = (GetTime() - fadeStartTime) / FADE_DURATION
-            if progress >= 1 then
-                self:SetAlpha(1)
-                self:SetScript("OnUpdate", nil)
-                fadeStartTime = nil
-            else
-                self:SetAlpha(progress)
-            end
-        end)
+    -- ʕ •ᴥ•ʔ✿ Make ESC close the bag, like every other inventory addon. ✿ ʕ •ᴥ•ʔ
+    if UISpecialFrames then
+        local already = false
+        for _, n in ipairs(UISpecialFrames) do
+            if n == "OmniInventoryFrame" then already = true break end
+        end
+        if not already then
+            tinsert(UISpecialFrames, "OmniInventoryFrame")
+        end
     end
 
-    -- OnShow handler - trigger fade
-    mainFrame:SetScript("OnShow", function(self)
-        FadeIn()
-        if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
-    end)
-
-    -- OnHide handler - auto-sort bags (physical)
-    mainFrame:SetScript("OnHide", function(self)
-        -- Only auto-sort if enabled (default: off)
-        if OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.autoSortOnClose then
-            Frame:PhysicalSortBags()
-        end
-    end)
+    mainFrame:Hide()
 
     return mainFrame
 end
@@ -281,21 +284,20 @@ function Frame:CreateHeader()
         GameTooltip:Hide()
     end)
 
-    -- Options Button
     local optBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    optBtn:SetSize(22, 18)
+    optBtn:SetSize(56, 18)
     optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -4, 0)
-    optBtn:SetText("O")
+    optBtn:SetText("Settings")
     optBtn:SetScript("OnClick", function()
-        if Omni.CategoryEditor then
-            Omni.CategoryEditor:Toggle()
+        if Omni.Settings then
+            Omni.Settings:Toggle()
         else
-            print("Category Editor not loaded")
+            print("|cFF00FF00OmniInventory|r: Settings not loaded")
         end
     end)
     optBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Open Category Editor")
+        GameTooltip:AddLine("Open Settings")
         GameTooltip:Show()
     end)
     optBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -564,24 +566,78 @@ end
 function Frame:CreateContentArea()
     local content = CreateFrame("ScrollFrame", "OmniContentScroll", mainFrame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", mainFrame.filterBar, "BOTTOMLEFT", 0, -4)
-    content:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -PADDING - 20, PADDING + FOOTER_HEIGHT + 4)
+    content:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -PADDING, PADDING + FOOTER_HEIGHT + 4)
 
     -- Scroll child
     local scrollChild = CreateFrame("Frame", "OmniContentChild", content)
     scrollChild:SetSize(content:GetWidth(), 1)  -- Height set dynamically
     content:SetScrollChild(scrollChild)
 
-    -- Style scrollbar
     local scrollBar = _G["OmniContentScrollScrollBar"]
     if scrollBar then
         scrollBar:ClearAllPoints()
-        scrollBar:SetPoint("TOPRIGHT", content, "TOPRIGHT", 20, -16)
-        scrollBar:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 20, 16)
+        scrollBar:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -16)
+        scrollBar:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 16)
+        scrollBar:SetAlpha(0)
+        scrollBar:SetWidth(1)
+        scrollBar:EnableMouse(false)
+        local up = _G["OmniContentScrollScrollBarScrollUpButton"]
+        local down = _G["OmniContentScrollScrollBarScrollDownButton"]
+        if up then
+            up:SetAlpha(0)
+            up:EnableMouse(false)
+        end
+        if down then
+            down:SetAlpha(0)
+            down:EnableMouse(false)
+        end
+        local thumb = scrollBar:GetThumbTexture()
+        if thumb then thumb:SetAlpha(0) end
     end
+
+    -- ʕ •ᴥ•ʔ✿ Per-bag ItemContainer frames. ContainerFrameItemButton_OnClick
+    -- reads the bag from self:GetParent():GetID(), so every item button
+    -- must live under a parent whose SetID matches its bag. We create
+    -- one zero-size insecure Frame per bag (and a -1 slot for stray
+    -- buttons), pin them at scrollChild origin, and reparent buttons
+    -- into them at acquire time. The bag IDs themselves are insecure so
+    -- SetID here is allowed even in combat, but we only ever hand out
+    -- the table OOC so it doesn't matter. ✿ ʕ •ᴥ•ʔ
+    mainFrame.itemContainers = {}
+    local function MakeItemContainer(bagID)
+        local f = CreateFrame("Frame", nil, scrollChild)
+        f:SetSize(1, 1)
+        f:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
+        f:SetID(bagID)
+        f:Show()
+        mainFrame.itemContainers[bagID] = f
+        return f
+    end
+    for _, bagID in ipairs(BAG_IDS) do
+        MakeItemContainer(bagID)
+    end
+    MakeItemContainer(-1)
+    mainFrame._makeItemContainer = MakeItemContainer
 
     mainFrame.content = content
     mainFrame.scrollChild = scrollChild
 end
+
+-- ʕ •ᴥ•ʔ✿ Lazy-fetch (or create OOC) the per-bag ItemContainer for `bagID`.
+-- Hot path called from RenderFlowView for every item, so cheap. Returns
+-- nil when called in combat for a bag we have not seen before -- callers
+-- treat that as "no container, skip this button". ✿ ʕ •ᴥ•ʔ
+local function GetItemContainer(bagID)
+    if not mainFrame or not mainFrame.itemContainers then return nil end
+    local container = mainFrame.itemContainers[bagID]
+    if container then return container end
+    if InCombat() then return nil end
+    if mainFrame._makeItemContainer then
+        return mainFrame._makeItemContainer(bagID)
+    end
+    return nil
+end
+Frame._GetItemContainer = GetItemContainer
 
 -- =============================================================================
 -- Footer
@@ -660,13 +716,14 @@ function Frame:RegisterEvents()
     -- Note: Bank events and PLAYER_MONEY are handled by Omni.Events:Init()
     if Omni.Events then
         Omni.Events:RegisterBucketEvent("BAG_UPDATE", function(changedBags)
-            if mainFrame:IsShown() then
-                Frame:UpdateLayout(changedBags)
-            end
+            -- ʕ •ᴥ•ʔ✿ UpdateLayout self-defers in combat; PLAYER_REGEN_ENABLED
+            -- replays a full pass once lockdown clears. ✿ ʕ •ᴥ•ʔ
+            Frame:UpdateLayout(changedBags)
         end)
 
         Omni.Events:RegisterEvent("BAG_UPDATE_COOLDOWN", function()
-            if not mainFrame:IsShown() then return end
+            if not mainFrame or not mainFrame:IsShown() then return end
+            if InCombat() then return end
             if not Omni.ItemButton or not Omni.ItemButton.UpdateCooldown then return end
             for _, btn in ipairs(itemButtons) do
                 Omni.ItemButton:UpdateCooldown(btn)
@@ -822,7 +879,37 @@ function Frame:UpdateBankTabState() end
 -- =============================================================================
 
 function Frame:UpdateLayout(changedBags)
-    if not mainFrame or not mainFrame:IsShown() then return end
+    if not mainFrame then return end
+
+    -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
+    -- Touching SecureActionButtonTemplate children (SetParent, SetPoint,
+    -- SetAttribute, Show, Hide) inside a secure-binding callstack during
+    -- combat raises "Interface action failed because of an AddOn." and
+    -- aborts the toggle action mid-stride. So we never re-render in
+    -- combat. The frame itself is insecure and Show/Hide on it works
+    -- fine -- the buttons rendered during the last out-of-combat pass
+    -- stay positioned and shown across Hide/Show cycles, so opening the
+    -- bag in combat shows the last good layout with working tooltips
+    -- (same behavior as AdiBags on this client). Any updates missed
+    -- during combat are replayed by PLAYER_REGEN_ENABLED.
+    if InCombat() then
+        pendingCombatRender = true
+        if mainFrame:IsShown() and mainFrame.combatHint then
+            mainFrame.combatHint:Show()
+            if not hasRenderedOnce then
+                mainFrame.combatHint:SetText(
+                    "|cFFFFCC00Bag contents will appear when combat ends.|r")
+            else
+                mainFrame.combatHint:SetText(
+                    "|cFFFFCC00Combat lockdown: showing last layout. Refresh after combat.|r")
+            end
+        end
+        return
+    end
+
+    if mainFrame.combatHint then
+        mainFrame.combatHint:Hide()
+    end
 
     local items = {}
     if OmniC_Container then
@@ -898,6 +985,9 @@ function Frame:UpdateLayout(changedBags)
     if searchText and searchText ~= "" then
         self:ApplySearch(searchText)
     end
+
+    hasRenderedOnce = true
+    pendingCombatRender = false
 end
 
 -- =============================================================================
@@ -921,14 +1011,23 @@ function Frame:RenderFlowView(items)
     for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
 
-    -- Layout Constants
-    local contentWidth = mainFrame.content:GetWidth() - 20
-    local columns = math.floor(contentWidth / (ITEM_SIZE + ITEM_SPACING))
-    columns = math.max(columns, 1)
-
-    local yOffset = -ITEM_SPACING
+    local hInset = 8
+    local usableWidth = mainFrame.content:GetWidth() - hInset
     local sectionHeaderHeight = (currentView == "grid") and 0 or 20 -- No headers in grid mode
     local sectionSpacing = (currentView == "grid") and ITEM_SPACING or 8
+    local dualCategoryLanes = (currentView ~= "grid")
+    local laneGap = 10
+
+    local function columnsForLaneWidth(laneW)
+        local inner = laneW - ITEM_SPACING
+        local c = math.floor(inner / (ITEM_SIZE + ITEM_SPACING))
+        return math.max(c, 1)
+    end
+
+    local yLeft = -ITEM_SPACING
+    local yRight = -ITEM_SPACING
+    local yOffset = -ITEM_SPACING
+    local renderedSectionCount = 0
 
     -- Group items
     local categories = {}
@@ -970,14 +1069,29 @@ function Frame:RenderFlowView(items)
         end
     end
 
-    -- Render Sections
     local headerIndex = 0
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         if catItems and #catItems > 0 then
+            renderedSectionCount = renderedSectionCount + 1
 
-            -- Render Header (only if not Grid)
+            local laneX, laneY, columns
+            if dualCategoryLanes then
+                local laneW = (usableWidth - laneGap) * 0.5
+                local edgePad = hInset * 0.5
+                local leftX = edgePad + ITEM_SPACING
+                local rightX = edgePad + laneW + laneGap + ITEM_SPACING
+                local useRight = (renderedSectionCount % 2 == 0)
+                laneX = useRight and rightX or leftX
+                laneY = useRight and yRight or yLeft
+                columns = columnsForLaneWidth(laneW)
+            else
+                laneX = ITEM_SPACING
+                laneY = yOffset
+                columns = columnsForLaneWidth(usableWidth)
+            end
+
             if currentView ~= "grid" then
                 headerIndex = headerIndex + 1
                 local header = categoryHeaders[headerIndex]
@@ -987,7 +1101,7 @@ function Frame:RenderFlowView(items)
                 end
 
                 header:ClearAllPoints()
-                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", ITEM_SPACING, yOffset)
+                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
 
                 local r, g, b = 1, 1, 1
                 if currentView == "bag" then
@@ -1003,10 +1117,9 @@ function Frame:RenderFlowView(items)
                 end
                 header:Show()
 
-                yOffset = yOffset - sectionHeaderHeight
+                laneY = laneY - sectionHeaderHeight
             end
 
-            -- Render Items in this section
             for i, itemInfo in ipairs(catItems) do
                 local btn
                 if Omni.Pool then
@@ -1016,39 +1129,61 @@ function Frame:RenderFlowView(items)
                 end
 
                 if btn then
-                    btn:SetParent(scrollChild)
-
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
-                    local x = ITEM_SPACING + col * (ITEM_SIZE + ITEM_SPACING)
-                    local y = yOffset - row * (ITEM_SIZE + ITEM_SPACING)
+                    local x = laneX + col * (ITEM_SIZE + ITEM_SPACING)
+                    local y = laneY - row * (ITEM_SIZE + ITEM_SPACING)
 
-                    btn:ClearAllPoints()
-                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-
-                    -- Error boundary: Protect against rendering bad items
-                    local success, err = pcall(function()
-                         SetButtonItem(btn, itemInfo)
-                         btn:Show()
+                    -- ʕ •ᴥ•ʔ✿ Parent under the ItemContainer that matches this
+                    -- item's bag so ContainerFrameItemButton_OnClick resolves
+                    -- the right bag. SetParent / SetPoint / SetID on the
+                    -- ContainerFrameItemButton are protected; we only get
+                    -- here OOC because UpdateLayout is combat-gated. ✿ ʕ •ᴥ•ʔ
+                    local container = GetItemContainer(itemInfo.bagID or -1) or scrollChild
+                    pcall(function()
+                        if btn:GetParent() ~= container then
+                            btn:SetParent(container)
+                        end
+                        btn:ClearAllPoints()
+                        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
                     end)
 
-                    if not success then
-                        SetButtonItem(btn, nil)
-                        if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                    local success = pcall(function()
+                        SetButtonItem(btn, itemInfo)
                         btn:Show()
+                    end)
+                    if not success then
+                        pcall(SetButtonItem, btn, nil)
+                        if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                        pcall(btn.Show, btn)
                     end
 
                     table.insert(itemButtons, btn)
                 end
             end
 
-            -- Update yOffset for next section
             local catRows = math.ceil(#catItems / columns)
-            yOffset = yOffset - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+            laneY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+
+            if dualCategoryLanes then
+                if (renderedSectionCount % 2 == 0) then
+                    yRight = laneY
+                else
+                    yLeft = laneY
+                end
+            else
+                yOffset = laneY
+            end
         end
     end
 
-    scrollChild:SetHeight(math.abs(yOffset) + ITEM_SPACING)
+    local bottomY
+    if dualCategoryLanes then
+        bottomY = math.min(yLeft, yRight)
+    else
+        bottomY = yOffset
+    end
+    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING)
 end
 
 -- =============================================================================
@@ -1079,44 +1214,31 @@ function Frame:RenderListView(items)
         header:Hide()
     end
 
-    local function ConfigureSecureRowUse(row, bagID, slotID)
-        if not row then
-            return
-        end
-        if InCombatLockdown and InCombatLockdown() then
-            row.secureUseConfigured = false
-            return
-        end
-
-        if bagID and slotID and bagID >= 0 and slotID > 0 then
-            local itemRef = string.format("%d %d", bagID, slotID)
-            row.secureItemRef = itemRef
-            row:SetAttribute("type1", "item")
-            row:SetAttribute("item1", itemRef)
-            row:SetAttribute("type2", "item")
-            row:SetAttribute("item2", itemRef)
-            row.secureUseConfigured = true
-        else
-            row.secureItemRef = nil
-            row:SetAttribute("type1", nil)
-            row:SetAttribute("item1", nil)
-            row:SetAttribute("type2", nil)
-            row:SetAttribute("item2", nil)
-            row.secureUseConfigured = false
-        end
+    -- ʕ •ᴥ•ʔ✿ Rows are now plain Buttons (see CreateFrame above) so there
+    -- is nothing secure to configure. Kept as a no-op to keep the call
+    -- sites below trivially correct. ✿ ʕ •ᴥ•ʔ
+    local function ConfigureSecureRowUse(row)
+        if row then row.secureUseConfigured = false end
     end
 
     -- Layout constants
     local ROW_HEIGHT = 22
     local ICON_SIZE = 18
-    local contentWidth = mainFrame.content:GetWidth() - 20
+    local contentWidth = mainFrame.content:GetWidth() - 8
     local yOffset = -4
 
     for i, itemInfo in ipairs(items) do
         -- Get or create row frame
         local row = listRows[i]
         if not row then
-            row = CreateFrame("Button", nil, scrollChild, "SecureActionButtonTemplate")
+            -- ʕ •ᴥ•ʔ✿ Plain Button (no secure template) so list rows do NOT
+            -- promote OmniInventoryFrame to "protected by association".
+            -- List view's row clicks are insecure-only by design (they
+            -- call PickupContainerItem directly which is forbidden in
+            -- combat anyway); secure use/swap during combat is handled
+            -- by the flow/grid item buttons via ContainerFrameItemButton
+            -- Template. ✿ ʕ •ᴥ•ʔ
+            row = CreateFrame("Button", nil, scrollChild)
             row:SetHeight(ROW_HEIGHT)
             row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
@@ -1172,42 +1294,38 @@ function Frame:RenderListView(items)
                 end
             end)
             row:SetScript("PreClick", function(self, mouseButton)
-                if not self.secureItemRef then
+                if Omni.ItemButton and Omni.ItemButton.OnPreClick then
+                    Omni.ItemButton:OnPreClick(self, mouseButton)
+                end
+            end)
+            row:HookScript("OnClick", function(self, mouseButton)
+                local mb = mouseButton
+                if mb == "RightButtonUp" or mb == "RightButtonDown" then
+                    mb = "RightButton"
+                elseif mb == "LeftButtonUp" or mb == "LeftButtonDown" then
+                    mb = "LeftButton"
+                end
+                if mb == "RightButton" and self.itemInfo then
+                    local bagID, slotID = self.itemInfo.bagID, self.itemInfo.slotID
+                    if bagID and slotID and bagID >= 0 and slotID >= 1 then
+                        if Omni.ItemButton and Omni.ItemButton.HandleBagSlotRightClickInventory then
+                            Omni.ItemButton:HandleBagSlotRightClickInventory(bagID, slotID, self.secureUseConfigured)
+                        end
+                    end
+                    return
+                end
+                if mb ~= "LeftButton" or not self.itemInfo then
+                    return
+                end
+                local bagID, slotID = self.itemInfo.bagID, self.itemInfo.slotID
+                if not bagID or not slotID or bagID < 0 or slotID < 1 then
                     return
                 end
                 if InCombatLockdown and InCombatLockdown() then
                     return
                 end
-                if mouseButton == "RightButton" and MerchantFrame and MerchantFrame:IsShown() then
-                    self:SetAttribute("type2", nil)
-                    self:SetAttribute("item2", nil)
-                    self.forceContainerUse = true
-                else
-                    if mouseButton == "LeftButton" then
-                        self:SetAttribute("type1", "item")
-                        self:SetAttribute("item1", self.secureItemRef)
-                    elseif mouseButton == "RightButton" then
-                        self:SetAttribute("type2", "item")
-                        self:SetAttribute("item2", self.secureItemRef)
-                    end
-                    self.forceContainerUse = false
-                end
+                PickupContainerItem(bagID, slotID)
             end)
-
-            -- Click handler
-            row:HookScript("OnClick", function(self, mouseButton)
-                if self.itemInfo and self.itemInfo.bagID and self.itemInfo.slotID then
-                    local bagID = self.itemInfo.bagID
-                    local slotID = self.itemInfo.slotID
-                    if (mouseButton == "LeftButton" or mouseButton == "RightButton") and (self.forceContainerUse or not self.secureUseConfigured) then
-                        if not InCombatLockdown or not InCombatLockdown() then
-                            UseContainerItem(bagID, slotID)
-                        end
-                        self.forceContainerUse = false
-                    end
-                end
-            end)
-
             listRows[i] = row
         end
 
@@ -1269,6 +1387,7 @@ function Frame:RenderListView(items)
 
         -- Store item info for click/tooltip
         row.itemInfo = itemInfo
+        row:SetScript("PreClick", nil)
         ConfigureSecureRowUse(row, itemInfo.bagID, itemInfo.slotID)
 
         row:Show()
@@ -1438,13 +1557,25 @@ function Frame:Show()
         self:LoadPosition()
     end
 
-    mainFrame:Show()
+    -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate keeps mainFrame insecure, so
+    -- a plain Show() works in combat just like AdiBags. UpdateLayout is
+    -- still combat-gated; the buttons keep their last OOC (bag, slot,
+    -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
+    pcall(mainFrame.Show, mainFrame)
+
+    if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
     self:UpdateLayout()
 end
 
 function Frame:Hide()
-    if mainFrame then
-        mainFrame:Hide()
+    if not mainFrame then return end
+
+    pcall(mainFrame.Hide, mainFrame)
+
+    if not InCombat()
+            and OmniInventoryDB and OmniInventoryDB.global
+            and OmniInventoryDB.global.autoSortOnClose then
+        Frame:PhysicalSortBags()
     end
 end
 
@@ -1454,6 +1585,10 @@ function Frame:Toggle()
     else
         self:Show()
     end
+end
+
+function Frame:IsShown()
+    return mainFrame and mainFrame:IsShown() and true or false
 end
 
 -- =============================================================================
@@ -1657,16 +1792,41 @@ function Frame:ForceEmptyBag(sourceBagID)
     end)
 end
 
-function Frame:IsShown()
-    return mainFrame and mainFrame:IsShown()
-end
-
 -- =============================================================================
 -- Initialization
 -- =============================================================================
 
 function Frame:Init()
-    -- Frame is created on first show
+    currentView = GetSavedViewMode()
+    selectedBagID = GetSavedBagFilter()
+
+    self:CreateMainFrame()
+    self:LoadPosition()
+
+    if Omni.Pool and Omni.Pool.Prewarm then
+        Omni.Pool:Prewarm("ItemButton", 160)
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Park every prewarmed button on the limbo parent OOC so the
+    -- first OOC render can freely SetParent them onto the right bag's
+    -- ItemContainer. SetParent on a ContainerFrameItemButton is still
+    -- protected, so all of this MUST happen out of combat. ✿ ʕ •ᴥ•ʔ
+    if not InCombat() then
+        local pool = Omni.Pool and Omni.Pool:Get("ItemButton")
+        local available = pool and pool.available
+        if available then
+            for _, btn in ipairs(available) do
+                pcall(btn.ClearAllPoints, btn)
+                pcall(btn.Hide, btn)
+            end
+        end
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Eagerly populate the layout while hidden so a first open
+    -- mid-combat already has every item button parented to its bag's
+    -- ItemContainer, positioned, and click-routable through the
+    -- template's secure OnClick. ✿ ʕ •ᴥ•ʔ
+    pcall(function() Frame:SetView(currentView) end)
 end
 
 print("|cFF00FF00OmniInventory|r: Frame loaded")

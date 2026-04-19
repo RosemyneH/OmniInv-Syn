@@ -11,6 +11,15 @@ Omni.Settings = {}
 local Settings = Omni.Settings
 local optionsFrame = nil
 
+local function RefreshAllInventory()
+    if Omni.Frame then
+        Omni.Frame:UpdateLayout()
+    end
+    if Omni.BankFrame and Omni.BankFrame.UpdateLayout then
+        Omni.BankFrame:UpdateLayout()
+    end
+end
+
 local function GetAttuneSettings()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.global = OmniInventoryDB.global or {}
@@ -23,10 +32,7 @@ local function GetAttuneSettings()
     if attune.showAccountIcons == nil then attune.showAccountIcons = false end
     if attune.showResistIcons == nil then attune.showResistIcons = true end
     if attune.showRedForNonAttunable == nil then attune.showRedForNonAttunable = true end
-    if attune.faeMode == nil then attune.faeMode = false end
-    if attune.enableAnimations == nil then attune.enableAnimations = true end
-    if attune.enableTextAnimations == nil then attune.enableTextAnimations = true end
-    if attune.animationSpeed == nil then attune.animationSpeed = 0.15 end
+    if attune.faeMode == nil then attune.faeMode = true end
 
     attune.nonAttunableBarColor = attune.nonAttunableBarColor or { r = 1.0, g = 0.0, b = 0.0, a = 1.0 }
     attune.textColor = attune.textColor or { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
@@ -73,9 +79,11 @@ function Settings:CreateOptionsFrame()
     titleText:SetPoint("TOP", title, "TOP", 0, -14)
     titleText:SetText("OmniInventory Settings")
 
-    -- Close Button
     local closeBtn = CreateFrame("Button", nil, optionsFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    closeBtn:SetScript("OnClick", function()
+        optionsFrame:Hide()
+    end)
 
     -- Content Container
     local content = CreateFrame("Frame", nil, optionsFrame)
@@ -192,7 +200,7 @@ function Settings:CreateControls(parent)
         cb:SetChecked(settings[key] == true)
         cb:SetScript("OnClick", function(self)
             settings[self.key] = self:GetChecked() and true or false
-            if Omni.Frame then Omni.Frame:UpdateLayout() end
+            RefreshAllInventory()
         end)
         return cb
     end
@@ -207,30 +215,7 @@ function Settings:CreateControls(parent)
     self.attuneRed = CreateAttuneCheckbox("showRedForNonAttunable", "Red Bars", 160)
     yOffset = yOffset - 22
     self.attuneFae = CreateAttuneCheckbox("faeMode", "Fae 100%", 14)
-    self.attuneBarAnim = CreateAttuneCheckbox("enableAnimations", "Bar Anim", 160)
     yOffset = yOffset - 22
-    self.attuneTextAnim = CreateAttuneCheckbox("enableTextAnimations", "Text Anim", 14)
-    yOffset = yOffset - 34
-
-    local attuneSpeed = CreateFrame("Slider", "OmniAttuneAnimSpeedSlider", parent, "OptionsSliderTemplate")
-    attuneSpeed:SetPoint("TOP", parent, "TOP", 0, yOffset)
-    attuneSpeed:SetMinMaxValues(0.05, 1.0)
-    attuneSpeed:SetValueStep(0.05)
-    attuneSpeed:SetWidth(180)
-    local attune = GetAttuneSettings()
-    attuneSpeed:SetValue(attune.animationSpeed)
-    _G[attuneSpeed:GetName() .. "Low"]:SetText("0.05")
-    _G[attuneSpeed:GetName() .. "High"]:SetText("1.0")
-    _G[attuneSpeed:GetName() .. "Text"]:SetText("Anim Speed")
-    attuneSpeed:SetScript("OnValueChanged", function(self, value)
-        attune.animationSpeed = value
-        if Omni.Frame then
-            Omni.Frame:UpdateLayout()
-        end
-    end)
-    self.attuneSpeed = attuneSpeed
-
-    yOffset = yOffset - 56
 
     local function CreateColorSwatch(key, title, xOffset)
         local settings = GetAttuneSettings()
@@ -261,7 +246,7 @@ function Settings:CreateControls(parent)
                 local a = OpacitySliderFrame:GetValue()
                 color.r, color.g, color.b, color.a = r, g, b, a
                 self.tex:SetVertexColor(r, g, b, a)
-                if Omni.Frame then Omni.Frame:UpdateLayout() end
+                RefreshAllInventory()
             end
             ColorPickerFrame.hasOpacity = true
             ColorPickerFrame.opacity = color.a or 1
@@ -323,9 +308,6 @@ function Settings:UpdateValues()
     if self.attuneResist then self.attuneResist:SetChecked(attune.showResistIcons ~= false) end
     if self.attuneRed then self.attuneRed:SetChecked(attune.showRedForNonAttunable ~= false) end
     if self.attuneFae then self.attuneFae:SetChecked(attune.faeMode == true) end
-    if self.attuneTextAnim then self.attuneTextAnim:SetChecked(attune.enableTextAnimations ~= false) end
-    if self.attuneBarAnim then self.attuneBarAnim:SetChecked(attune.enableAnimations ~= false) end
-    if self.attuneSpeed then self.attuneSpeed:SetValue(attune.animationSpeed or 0.15) end
     if self.attuneRedColor then
         local c = attune.nonAttunableBarColor
         self.attuneRedColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)

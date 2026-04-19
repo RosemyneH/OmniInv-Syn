@@ -191,8 +191,39 @@ local function CreateContentArea(parent)
         scrollBar:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 20, 16)
     end
 
+    -- ʕ •ᴥ•ʔ✿ Per-bag ItemContainer frames for the bank, mirroring the
+    -- main bag's setup. ContainerFrameItemButton_OnClick reads bag from
+    -- self:GetParent():GetID(), so each button must live under a parent
+    -- whose SetID matches its bag (-1 main bank, 5..11 bank bags). ✿ ʕ •ᴥ•ʔ
+    parent.itemContainers = {}
+    local function MakeItemContainer(bagID)
+        local f = CreateFrame("Frame", nil, scrollChild)
+        f:SetSize(1, 1)
+        f:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
+        f:SetID(bagID)
+        f:Show()
+        parent.itemContainers[bagID] = f
+        return f
+    end
+    MakeItemContainer(-1)
+    for bagID = 5, 11 do
+        MakeItemContainer(bagID)
+    end
+    parent._makeItemContainer = MakeItemContainer
+
     parent.content = content
     parent.scrollChild = scrollChild
+end
+
+local function GetBankItemContainer(bagID)
+    if not bankFrame or not bankFrame.itemContainers then return nil end
+    local container = bankFrame.itemContainers[bagID]
+    if container then return container end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    if bankFrame._makeItemContainer then
+        return bankFrame._makeItemContainer(bagID)
+    end
+    return nil
 end
 
 local function CreateFooter(parent)
@@ -331,12 +362,23 @@ function BankFrame:RenderFlowView(items)
         header:Hide()
     end
 
-    local contentWidth = bankFrame.content:GetWidth() - 20
-    local columns = math.max(math.floor(contentWidth / (ITEM_SIZE + ITEM_SPACING)), 1)
-
-    local yOffset = -ITEM_SPACING
+    local hInset = 8
+    local usableWidth = bankFrame.content:GetWidth() - 20
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
+    local dualCategoryLanes = true
+    local laneGap = 10
+
+    local function columnsForLaneWidth(laneW)
+        local inner = laneW - ITEM_SPACING
+        local c = math.floor(inner / (ITEM_SIZE + ITEM_SPACING))
+        return math.max(c, 1)
+    end
+
+    local yLeft = -ITEM_SPACING
+    local yRight = -ITEM_SPACING
+    local yOffset = -ITEM_SPACING
+    local renderedSectionCount = 0
 
     local categories = {}
     local categoryOrder = {}
@@ -361,6 +403,24 @@ function BankFrame:RenderFlowView(items)
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         if catItems and #catItems > 0 then
+            renderedSectionCount = renderedSectionCount + 1
+
+            local laneX, laneY, columns
+            if dualCategoryLanes then
+                local laneW = (usableWidth - laneGap) * 0.5
+                local edgePad = hInset * 0.5
+                local leftX = edgePad + ITEM_SPACING
+                local rightX = edgePad + laneW + laneGap + ITEM_SPACING
+                local useRight = (renderedSectionCount % 2 == 0)
+                laneX = useRight and rightX or leftX
+                laneY = useRight and yRight or yLeft
+                columns = columnsForLaneWidth(laneW)
+            else
+                laneX = ITEM_SPACING
+                laneY = yOffset
+                columns = columnsForLaneWidth(usableWidth)
+            end
+
             headerIndex = headerIndex + 1
             local header = categoryHeaders[headerIndex]
             if not header then
@@ -369,7 +429,7 @@ function BankFrame:RenderFlowView(items)
             end
 
             header:ClearAllPoints()
-            header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", ITEM_SPACING, yOffset)
+            header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
 
             local r, g, b = 1, 1, 1
             if Omni.Categorizer then
@@ -379,7 +439,7 @@ function BankFrame:RenderFlowView(items)
             header:SetText(catName .. " (" .. #catItems .. ")")
             header:Show()
 
-            yOffset = yOffset - sectionHeaderHeight
+            laneY = laneY - sectionHeaderHeight
 
             for i, itemInfo in ipairs(catItems) do
                 local btn
@@ -390,24 +450,28 @@ function BankFrame:RenderFlowView(items)
                 end
 
                 if btn then
-                    btn:SetParent(scrollChild)
-
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
-                    local x = ITEM_SPACING + col * (ITEM_SIZE + ITEM_SPACING)
-                    local y = yOffset - row * (ITEM_SIZE + ITEM_SPACING)
+                    local x = laneX + col * (ITEM_SIZE + ITEM_SPACING)
+                    local y = laneY - row * (ITEM_SIZE + ITEM_SPACING)
 
-                    btn:ClearAllPoints()
-                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                    local container = GetBankItemContainer(itemInfo.bagID or -1) or scrollChild
+                    pcall(function()
+                        if btn:GetParent() ~= container then
+                            btn:SetParent(container)
+                        end
+                        btn:ClearAllPoints()
+                        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                    end)
 
                     local ok = pcall(function()
                         SetButtonItem(btn, itemInfo)
                         btn:Show()
                     end)
                     if not ok then
-                        SetButtonItem(btn, nil)
+                        pcall(SetButtonItem, btn, nil)
                         if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
-                        btn:Show()
+                        pcall(btn.Show, btn)
                     end
 
                     table.insert(itemButtons, btn)
@@ -415,15 +479,31 @@ function BankFrame:RenderFlowView(items)
             end
 
             local catRows = math.ceil(#catItems / columns)
-            yOffset = yOffset - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+            laneY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+
+            if dualCategoryLanes then
+                if (renderedSectionCount % 2 == 0) then
+                    yRight = laneY
+                else
+                    yLeft = laneY
+                end
+            else
+                yOffset = laneY
+            end
         end
     end
 
-    scrollChild:SetHeight(math.abs(yOffset) + ITEM_SPACING)
+    local bottomY = dualCategoryLanes and math.min(yLeft, yRight) or yOffset
+    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING)
 end
 
 function BankFrame:UpdateLayout()
     if not bankFrame or not bankFrame:IsShown() then return end
+
+    -- ʕ •ᴥ•ʔ✿ Defer secure-button churn to PLAYER_REGEN_ENABLED ✿ ʕ •ᴥ•ʔ
+    if InCombatLockdown and InCombatLockdown() then
+        return
+    end
 
     local items = CollectBankItems()
     self:RenderFlowView(items)
@@ -493,12 +573,12 @@ function BankFrame:Show()
         LoadPosition()
     end
     AnchorToMainFrame()
-    bankFrame:Show()
+    pcall(bankFrame.Show, bankFrame)
 end
 
 function BankFrame:Hide()
     if bankFrame then
-        bankFrame:Hide()
+        pcall(bankFrame.Hide, bankFrame)
     end
 end
 

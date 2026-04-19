@@ -22,6 +22,10 @@ local BUCKET_DELAY = 0.05  -- 50ms window for coalescing events
 
 local buckets = {}  -- { eventName = { timer, callback, payload } }
 local eventFrame = CreateFrame("Frame")
+local inventorySessionBaselineDone = false
+local inventoryNewTrackingReady = false
+local inventoryBaselineScheduled = false
+local inventoryBaselineDeferFrame = nil
 
 -- =============================================================================
 -- Bucket Manager
@@ -119,12 +123,20 @@ end)
 
 --- Initialize with common bag events
 function Events:Init()
+    inventorySessionBaselineDone = false
+    inventoryNewTrackingReady = false
+    inventoryBaselineScheduled = false
+    if inventoryBaselineDeferFrame then
+        inventoryBaselineDeferFrame:SetScript("OnUpdate", nil)
+        inventoryBaselineDeferFrame:Hide()
+        inventoryBaselineDeferFrame = nil
+    end
+
     -- These are the primary events that can cause rapid updates
     -- The callback receives a table of modified bagIDs
 
     self:RegisterBucketEvent("BAG_UPDATE", function(modifiedBags)
-        -- Detect new items in modified bags
-        if Omni.Categorizer then
+        if Omni.Categorizer and inventoryNewTrackingReady then
             local API = Omni.API
             for bagID in pairs(modifiedBags) do
                 if type(bagID) == "number" and bagID >= 0 and bagID <= 4 then
@@ -188,6 +200,19 @@ function Events:Init()
         end
     end)
 
+    self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
+        -- ʕ •ᴥ•ʔ✿ Always re-render so secure attributes / positions / new
+        -- items missed during combat are restored. UpdateLayout no longer
+        -- requires IsShown(), so this is safe even when bags are hidden. ✿ ʕ •ᴥ•ʔ
+        if Omni.Frame and Omni.Frame.UpdateLayout then
+            pcall(Omni.Frame.UpdateLayout, Omni.Frame)
+        end
+        if Omni.BankFrame and Omni.BankFrame.UpdateLayout
+                and Omni.BankFrame:IsShown() then
+            pcall(Omni.BankFrame.UpdateLayout, Omni.BankFrame)
+        end
+    end)
+
     -- Item info received (async data load)
     self:RegisterBucketEvent("GET_ITEM_INFO_RECEIVED", function()
         if Omni.Frame and Omni.Frame:IsShown() then
@@ -199,13 +224,39 @@ function Events:Init()
         end
     end)
 
-    -- Player entering world (session start)
     self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
-        if Omni.Categorizer and Omni.Categorizer.SnapshotInventory then
-            -- Note: Snapshot is already called in Categorizer:Init(),
-            -- but re-snapshotting here ensures it catches late-loading items
-            Omni.Categorizer:SnapshotInventory()
+        if inventorySessionBaselineDone or inventoryBaselineScheduled then
+            return
         end
+        inventoryBaselineScheduled = true
+
+        local acc = 0
+        inventoryBaselineDeferFrame = CreateFrame("Frame")
+        local defer = inventoryBaselineDeferFrame
+        defer:SetScript("OnUpdate", function(self, elapsed)
+            acc = acc + (elapsed or 0)
+            if acc < 0.4 then
+                return
+            end
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+            inventoryBaselineDeferFrame = nil
+            inventorySessionBaselineDone = true
+            inventoryNewTrackingReady = true
+            if Omni.Categorizer then
+                Omni.Categorizer:ClearAllNewItems()
+                if Omni.Categorizer.SnapshotInventory then
+                    Omni.Categorizer:SnapshotInventory()
+                end
+            end
+            if Omni.Frame and Omni.Frame.UpdateLayout then
+                Omni.Frame:UpdateLayout()
+            end
+            if Omni.BankFrame and Omni.BankFrame.UpdateLayout and Omni.BankFrame:IsShown() then
+                Omni.BankFrame:UpdateLayout()
+            end
+        end)
+        defer:Show()
     end)
 end
 

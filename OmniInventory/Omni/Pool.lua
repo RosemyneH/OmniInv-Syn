@@ -154,6 +154,27 @@ function Pool:Release(name, obj)
     end
 end
 
+-- ʕ •ᴥ•ʔ✿ Acquire `count` distinct objects up front, then release them all
+-- back to the pool. The previous implementation acquired-then-released in a
+-- tight loop, so the same single object was reused on every iteration and
+-- only one button was ever actually created. ✿ ʕ •ᴥ•ʔ
+function Pool:Prewarm(name, count)
+    count = tonumber(count) or 0
+    if count < 1 then return end
+    local pool = pools[name]
+    if not pool then return end
+
+    local batch = {}
+    for i = 1, count do
+        local obj = pool:Acquire()
+        if not obj then break end
+        batch[i] = obj
+    end
+    for i = 1, #batch do
+        pool:Release(batch[i])
+    end
+end
+
 --- Print pool debug info
 function Pool:Debug()
     print("|cFF00FF00OmniInventory|r: Pool Statistics")
@@ -170,32 +191,30 @@ end
 
 --- Initialize common pools
 function Pool:Init()
-    -- Item Button Pool
+    -- ʕ •ᴥ•ʔ✿ ItemButton pool ✿ ʕ •ᴥ•ʔ
+    -- Buttons are ContainerFrameItemButtonTemplate children. Their
+    -- SetParent / SetID / SetPoint are protected, so all reparenting
+    -- happens at acquire time inside RenderFlowView (which is gated
+    -- behind InCombatLockdown). The pool itself just creates the
+    -- widget and hides it on release.
     self:Create("ItemButton",
         function()
-            -- Delegate to ItemButton factory
             if Omni.ItemButton and Omni.ItemButton.Create then
-                local btn = Omni.ItemButton:Create(UIParent)
-                btn:Hide()
-                -- Add custom pool data if not present (though Create checks for it)
+                local btn = Omni.ItemButton:Create(nil)
+                pcall(btn.Hide, btn)
                 if not btn.omniData then btn.omniData = {} end
                 return btn
             end
 
-            -- Fallback (should not happen if loaded correctly)
             local btn = CreateFrame("Button", nil, UIParent, "ItemButtonTemplate")
+            pcall(btn.Hide, btn)
             return btn
         end,
         function(btn)
-            -- Delegate to ItemButton reset
             if Omni.ItemButton and Omni.ItemButton.Reset then
-                Omni.ItemButton:Reset(btn)
+                pcall(Omni.ItemButton.Reset, Omni.ItemButton, btn)
             end
-
-            -- Ensure it's hidden and re-parented to global
-            btn:Hide()
-            btn:ClearAllPoints()
-            btn:SetParent(UIParent)
+            pcall(btn.Hide, btn)
         end
     )
 

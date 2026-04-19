@@ -156,4 +156,105 @@ function Utils:MergeTables(t1, t2)
     return result
 end
 
+local NUM_CONTAINER_FRAMES_GLOBAL = _G.NUM_CONTAINER_FRAMES or 13
+
+local function FindContainerFrameForBag(bagID)
+    for i = 1, NUM_CONTAINER_FRAMES_GLOBAL do
+        local cf = _G["ContainerFrame" .. i]
+        if cf and cf.GetID and cf:GetID() == bagID and cf.size then
+            return cf
+        end
+    end
+    return nil
+end
+
+function Utils:GetBlizzardBagSlotButton(bagID, slotID)
+    if type(bagID) ~= "number" or type(slotID) ~= "number" or bagID < 0 or slotID < 1 then
+        return nil
+    end
+    for i = 1, NUM_CONTAINER_FRAMES_GLOBAL do
+        local cf = _G["ContainerFrame" .. i]
+        if cf and cf.GetID and cf:GetID() == bagID and cf.size then
+            for j = 1, cf.size do
+                local btn = _G[cf:GetName() .. "Item" .. j]
+                if btn and btn.GetID and btn:GetID() == slotID then
+                    return btn
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function Utils:EnsureBlizzardContainerItemButtons()
+    if InCombatLockdown and InCombatLockdown() then
+        return
+    end
+    if not _G.ContainerFrame_GenerateFrame or not _G.ContainerFrame_GetOpenFrame then
+        return
+    end
+    for bagID = 0, 4 do
+        local n = GetContainerNumSlots(bagID) or 0
+        if n > 0 and not FindContainerFrameForBag(bagID) then
+            local cf = ContainerFrame_GetOpenFrame()
+            if cf then
+                ContainerFrame_GenerateFrame(cf, n, bagID)
+                cf:Hide()
+            end
+        end
+    end
+    for i = 1, NUM_CONTAINER_FRAMES_GLOBAL do
+        local cf = _G["ContainerFrame" .. i]
+        if cf then
+            -- ʕ •ᴥ•ʔ✿ Skip the suppression Hide while combat-locked or
+            -- this OnShow becomes the source of the popup we're trying
+            -- to avoid. Blizzard will run its OnShow path normally; we
+            -- catch up the moment combat ends. ✿ ʕ •ᴥ•ʔ
+            cf:SetScript("OnShow", function(self)
+                if InCombatLockdown and InCombatLockdown() then return end
+                pcall(self.Hide, self)
+            end)
+        end
+    end
+end
+
+function Utils:ConfigureSecureActionForBagSlot(frame, bagID, slotID)
+    if not frame or not frame.SetAttribute then
+        return false
+    end
+
+    local ok = pcall(function()
+        frame:SetAttribute("type", nil)
+        frame:SetAttribute("item", nil)
+        frame:SetAttribute("macrotext", nil)
+        frame:SetAttribute("type1", nil)
+        frame:SetAttribute("item1", nil)
+        frame:SetAttribute("macrotext1", nil)
+        frame:SetAttribute("type2", nil)
+        frame:SetAttribute("item2", nil)
+        frame:SetAttribute("macrotext2", nil)
+
+        if not bagID or not slotID or bagID < 0 or slotID < 1 then
+            return
+        end
+
+        if not (InCombatLockdown and InCombatLockdown()) then
+            self:EnsureBlizzardContainerItemButtons()
+        end
+        local proxy = self:GetBlizzardBagSlotButton(bagID, slotID)
+        if proxy then
+            local nm = proxy:GetName()
+            frame:SetAttribute("type2", "macro")
+            frame:SetAttribute("macrotext2", "/click " .. nm .. " RightButton")
+            return
+        end
+
+        local itemRef = string.format("%d %d", bagID, slotID)
+        frame:SetAttribute("type2", "item")
+        frame:SetAttribute("item2", itemRef)
+    end)
+
+    return ok and true or false
+end
+
 print("|cFF00FF00OmniInventory|r: Utilities loaded")
