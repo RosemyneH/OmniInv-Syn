@@ -14,7 +14,7 @@ local addonName, Omni = ...
 _G.OmniInventory = Omni
 
 Omni.version = "2.0-alpha"
-Omni.author = "Zendevve"
+Omni.author = "Synastria"
 
 -- =============================================================================
 -- Event Handler

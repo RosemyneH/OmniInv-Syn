@@ -8,9 +8,9 @@
 
 ## Installation
 
-1. Clone the repository:
+1. Clone the repository (use folder name `OmniInventory` so paths match the manifest):
 ```bash
-git clone https://github.com/Zendevve/OmniInventory.git
+git clone https://github.com/synastria/OmniInventory-Syn.git OmniInventory
 ```
 
 2. Symlink or copy to WoW addons folder:

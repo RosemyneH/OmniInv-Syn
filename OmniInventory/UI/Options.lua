@@ -20,6 +20,19 @@ local function RefreshAllInventory()
     end
 end
 
+local colorPickerCloseRefreshPending = false
+
+local function RegisterColorPickerCloseRefresh()
+    if not ColorPickerFrame or ColorPickerFrame.__OmniInvColorPickerHide then return end
+    ColorPickerFrame.__OmniInvColorPickerHide = true
+    ColorPickerFrame:HookScript("OnHide", function()
+        if colorPickerCloseRefreshPending then
+            colorPickerCloseRefreshPending = false
+            RefreshAllInventory()
+        end
+    end)
+end
+
 local function GetAttuneSettings()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.global = OmniInventoryDB.global or {}
@@ -209,13 +222,13 @@ function Settings:CreateControls(parent)
     self.attuneProgressText = CreateAttuneCheckbox("showProgressText", "Show %", 160)
     yOffset = yOffset - 22
     self.attuneBounty = CreateAttuneCheckbox("showBountyIcons", "Bounty", 14)
-    self.attuneAccount = CreateAttuneCheckbox("showAccountIcons", "Account", 160)
-    yOffset = yOffset - 22
-    self.attuneResist = CreateAttuneCheckbox("showResistIcons", "Resist", 14)
     self.attuneRed = CreateAttuneCheckbox("showRedForNonAttunable", "Red Bars", 160)
     yOffset = yOffset - 22
-    self.attuneFae = CreateAttuneCheckbox("faeMode", "Fae 100%", 14)
+    self.attuneResist = CreateAttuneCheckbox("showResistIcons", "Resist", 14)
+    self.attuneFae = CreateAttuneCheckbox("faeMode", "Fae 100%", 160)
     yOffset = yOffset - 22
+
+    yOffset = yOffset - 32
 
     local function CreateColorSwatch(key, title, xOffset)
         local settings = GetAttuneSettings()
@@ -240,18 +253,24 @@ function Settings:CreateControls(parent)
         swatch.label = lbl
 
         swatch:SetScript("OnClick", function(self)
+            RegisterColorPickerCloseRefresh()
             local color = settings[self.key]
-            local function ApplyColor()
+            local oldR, oldG, oldB, oldA = color.r, color.g, color.b, color.a or 1
+            local function SyncFromPicker()
                 local r, g, b = ColorPickerFrame:GetColorRGB()
                 local a = OpacitySliderFrame:GetValue()
                 color.r, color.g, color.b, color.a = r, g, b, a
                 self.tex:SetVertexColor(r, g, b, a)
-                RefreshAllInventory()
             end
+            colorPickerCloseRefreshPending = true
             ColorPickerFrame.hasOpacity = true
             ColorPickerFrame.opacity = color.a or 1
-            ColorPickerFrame.func = ApplyColor
-            ColorPickerFrame.opacityFunc = ApplyColor
+            ColorPickerFrame.func = SyncFromPicker
+            ColorPickerFrame.opacityFunc = SyncFromPicker
+            ColorPickerFrame.cancelFunc = function()
+                color.r, color.g, color.b, color.a = oldR, oldG, oldB, oldA
+                self.tex:SetVertexColor(oldR, oldG, oldB, oldA)
+            end
             ColorPickerFrame:SetColorRGB(color.r, color.g, color.b)
             OpacitySliderFrame:SetValue(color.a or 1)
             ColorPickerFrame:Show()
@@ -304,7 +323,6 @@ function Settings:UpdateValues()
     if self.attuneEnabled then self.attuneEnabled:SetChecked(attune.enabled == true) end
     if self.attuneProgressText then self.attuneProgressText:SetChecked(attune.showProgressText == true) end
     if self.attuneBounty then self.attuneBounty:SetChecked(attune.showBountyIcons == true) end
-    if self.attuneAccount then self.attuneAccount:SetChecked(attune.showAccountIcons == true) end
     if self.attuneResist then self.attuneResist:SetChecked(attune.showResistIcons ~= false) end
     if self.attuneRed then self.attuneRed:SetChecked(attune.showRedForNonAttunable ~= false) end
     if self.attuneFae then self.attuneFae:SetChecked(attune.faeMode == true) end

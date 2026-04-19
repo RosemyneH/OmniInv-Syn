@@ -304,7 +304,7 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
         hyperlink = itemLink,
 
         -- Stack Info
-        stackCount = itemCount or 1,
+        stackCount = math.max(1, tonumber(itemCount) or 1),
 
         -- State Flags
         isLocked = locked or false,

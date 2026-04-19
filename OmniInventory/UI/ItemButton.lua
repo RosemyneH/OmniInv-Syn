@@ -346,11 +346,6 @@ function ItemButton:Create(parent)
     button.cooldown:SetPoint("BOTTOMRIGHT", button.icon, "BOTTOMRIGHT", 0, 0)
     button.cooldown:Hide()
 
-    button.count = _G[name .. "Count"] or button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    button.count:ClearAllPoints()
-    button.count:SetPoint("BOTTOMRIGHT", -2, 2)
-    button.count:SetJustifyH("RIGHT")
-
     local questIcon = _G[name .. "IconQuestTexture"]
     if questIcon then questIcon:Hide() end
     local stockTex = _G[name .. "Stock"]
@@ -482,6 +477,17 @@ function ItemButton:Create(parent)
     button.forgeText:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
     button.forgeText:SetJustifyH("RIGHT")
     button.forgeText:Hide()
+
+    -- ʕ •ᴥ•ʔ✿ Template Count sits under our OVERLAY adornments; own string last ✿ ʕ •ᴥ•ʔ
+    local templateCount = _G[name .. "Count"]
+    if templateCount then
+        templateCount:SetText("")
+        templateCount:Hide()
+    end
+    button.count = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    button.count:SetPoint("BOTTOMRIGHT", -2, 2)
+    button.count:SetJustifyH("RIGHT")
+    pcall(button.count.SetDrawLayer, button.count, "OVERLAY", 127)
 
     button.itemInfo = nil
 
@@ -675,6 +681,7 @@ function ItemButton:SetItem(button, itemInfo)
     if not itemInfo then
         button.icon:SetTexture(nil)
         button.count:SetText("")
+        button.count:Hide()
         local grey = 0.3
         if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
@@ -696,12 +703,13 @@ function ItemButton:SetItem(button, itemInfo)
         button.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
     end
 
-    -- Set count
-    local count = itemInfo.stackCount or 1
+    local count = math.max(1, tonumber(itemInfo.stackCount) or 1)
     if count > 1 then
-        button.count:SetText(count)
+        button.count:SetText(tostring(count))
+        button.count:Show()
     else
         button.count:SetText("")
+        button.count:Hide()
     end
 
     -- Set quality border color
@@ -916,7 +924,10 @@ function ItemButton:Reset(button)
     button.bagID = nil
     button.slotID = nil
     if button.icon then button.icon:SetTexture(nil) end
-    if button.count then button.count:SetText("") end
+    if button.count then
+        button.count:SetText("")
+        button.count:Hide()
+    end
 
     local grey = 0.3
     if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end

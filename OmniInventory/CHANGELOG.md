@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0-alpha] - 2025-12-26
 
 ### Added
+
 - **Bank Support**: Added "Bank" tab to main window. Toggle between Bags and Bank views.
 - **Sell Junk**: Added button to footer (visible at vendors) to automatically sell all grey items.
 - **Options Panel**: New configuration UI (`/oi config`) for Frame Scale, View Mode, and Sort Mode.
@@ -21,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Event Handling**: Robust event system including Bank and Merchant events.
 
 ### Changed
+
 - Refactored `UI/Frame.lua` to support multiple view modes (Grid, Flow, List).
 - Updated API shim (`Omni/API.lua`) to support bank bag enumeration.
 - Improved `UpdateLayout` performance with differential updates.
 
 ### Fixed
+
 - Fixed issue where clicking items would not use them (caused by non-secure frames).
 - Fixed bag slot counting to correctly include bank bags when in bank mode.
