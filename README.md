@@ -60,6 +60,12 @@ OmniInventory/
 
 ---
 
+
+## Ingame
+
+<img width="837" height="844" alt="image" src="https://github.com/user-attachments/assets/1e56337b-e5f6-48e6-a264-76c57135b77a" />
+
+
 ## License
 
 [MIT](LICENSE) · [Synastria](https://github.com/synastria) · upstream by [Zendevve](https://github.com/Zendevve)
