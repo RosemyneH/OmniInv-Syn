@@ -170,10 +170,15 @@ function Frame:CreateMainFrame()
     self:CreateFooter()
     self:CreateResizeHandle()
 
-    -- ʕ •ᴥ•ʔ✿ Combat hint banner: shown when bag is opened during combat
-    -- and the layout cannot be safely (re)built. ✿ ʕ •ᴥ•ʔ
+    -- ʕ •ᴥ•ʔ✿ Combat hint: only surfaces on the rare "opened during combat
+    -- with no prior render" path. Width-constrained + word-wrapped so the
+    -- message can never punch out of the frame like the old banner did. ✿ ʕ •ᴥ•ʔ
     mainFrame.combatHint = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    mainFrame.combatHint:SetPoint("TOP", mainFrame, "TOP", 0, -2)
+    mainFrame.combatHint:ClearAllPoints()
+    mainFrame.combatHint:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, FOOTER_HEIGHT + PADDING + 6)
+    mainFrame.combatHint:SetWidth(220)
+    mainFrame.combatHint:SetJustifyH("CENTER")
+    mainFrame.combatHint:SetJustifyV("MIDDLE")
     mainFrame.combatHint:SetTextColor(1, 0.82, 0, 1)
     mainFrame.combatHint:SetText("")
     mainFrame.combatHint:Hide()
@@ -197,8 +202,98 @@ function Frame:CreateMainFrame()
 end
 
 -- =============================================================================
--- Header
+-- Header (power ribbon)
 -- =============================================================================
+
+local RIBBON_BTN_HEIGHT = 20
+local RIBBON_ICON_BTN_SIZE = 20
+local RIBBON_TEXT_BTN_WIDTH = 46
+local RIBBON_GAP = 3
+local RIBBON_SEP_GAP = 5
+local KEYRING_BAG_ID = -2
+local SETTINGS_ICON = "Interface\\Icons\\Trade_Engineering"
+local KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03"
+
+local function StyleRibbonButton(btn)
+    btn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    btn:SetBackdropColor(0.12, 0.12, 0.12, 1)
+    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+
+    btn:HookScript("OnEnter", function(self)
+        self:SetBackdropColor(0.22, 0.22, 0.22, 1)
+        self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        if self._tooltipTitle then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(self._tooltipTitle, 1, 1, 1)
+            if self._tooltipSub then
+                GameTooltip:AddLine(self._tooltipSub, 0.8, 0.8, 0.8)
+            end
+            GameTooltip:Show()
+        end
+    end)
+    btn:HookScript("OnLeave", function(self)
+        self:SetBackdropColor(0.12, 0.12, 0.12, 1)
+        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+        GameTooltip:Hide()
+    end)
+end
+
+local function CreateRibbonTextButton(parent, label, tooltipTitle, tooltipSub, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(RIBBON_TEXT_BTN_WIDTH, RIBBON_BTN_HEIGHT)
+    StyleRibbonButton(btn)
+
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.text:SetPoint("CENTER")
+    btn.text:SetText(label)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+    return btn
+end
+
+local function CreateRibbonIconButton(parent, iconTexture, tooltipTitle, tooltipSub, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(RIBBON_ICON_BTN_SIZE, RIBBON_ICON_BTN_SIZE)
+    StyleRibbonButton(btn)
+
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetPoint("TOPLEFT", 2, -2)
+    btn.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    btn.icon:SetTexture(iconTexture)
+    btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+    return btn
+end
+
+-- ʕノ•ᴥ•ʔノ Drag-drop landing zone for bag-slot icons in the ribbon ノʕ•ᴥ•ʔ
+function Frame:EquipBagFromCursor(bagID)
+    if not IsValidBagID(bagID) then return end
+    if bagID == 0 then
+        print("|cFF00FF00OmniInventory|r: Backpack slot cannot be swapped.")
+        if ClearCursor then ClearCursor() end
+        return
+    end
+    if InCombat() then
+        print("|cFF00FF00OmniInventory|r: Cannot change bags during combat.")
+        return
+    end
+    if not (CursorHasItem and CursorHasItem()) then return end
+
+    local inventoryID = ContainerIDToInventoryID and ContainerIDToInventoryID(bagID)
+    if not inventoryID then return end
+    if PutItemInBag then
+        PutItemInBag(inventoryID)
+    end
+end
 
 function Frame:CreateHeader()
     local header = CreateFrame("Frame", nil, mainFrame)
@@ -206,114 +301,70 @@ function Frame:CreateHeader()
     header:SetPoint("TOPLEFT", PADDING, -PADDING)
     header:SetPoint("TOPRIGHT", -PADDING, -PADDING)
 
-    -- Background
     header.bg = header:CreateTexture(nil, "BACKGROUND")
     header.bg:SetAllPoints()
     header.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
     header.bg:SetVertexColor(0.15, 0.15, 0.15, 1)
 
-    -- Title
     header.title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header.title:SetPoint("LEFT", 6, 0)
     header.title:SetText("|cFF00FF00Omni|r Inventory")
 
-    -- Close button
     header.closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
     header.closeBtn:SetSize(20, 20)
     header.closeBtn:SetPoint("RIGHT", -2, 0)
-    header.closeBtn:SetScript("OnClick", function()
-        Frame:Hide()
-    end)
+    header.closeBtn:SetScript("OnClick", function() Frame:Hide() end)
 
-    -- View toggle button
-    header.viewBtn = CreateFrame("Button", nil, header)
-    header.viewBtn:SetSize(50, 18)
-    header.viewBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -4, 0)
-    header.viewBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    header.viewBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    header.viewBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    -- ʕ ● ᴥ ●ʔ Ribbon: rightmost wins, everything else chains leftward
+    header.viewBtn = CreateRibbonTextButton(header, "Flow",
+        "View Mode", "Click to cycle Grid / Flow / List / Bag",
+        function() Frame:CycleView() end)
+    header.viewBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -RIBBON_GAP, 0)
 
-    header.viewBtn.text = header.viewBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    header.viewBtn.text:SetPoint("CENTER")
-    header.viewBtn.text:SetText("Flow")
+    header.sortBtn = CreateRibbonTextButton(header, "Sort",
+        "Sort Mode", "Click to cycle the active sort",
+        function() Frame:CycleSort() end)
+    header.sortBtn:SetPoint("RIGHT", header.viewBtn, "LEFT", -RIBBON_GAP, 0)
 
-    header.viewBtn:SetScript("OnClick", function()
-        Frame:CycleView()
-    end)
-
-    header.viewBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.3, 0.3, 1)
-    end)
-    header.viewBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    end)
-
-    -- Sort mode button
-    header.sortBtn = CreateFrame("Button", nil, header)
-    header.sortBtn:SetSize(50, 18)
-    header.sortBtn:SetPoint("RIGHT", header.viewBtn, "LEFT", -4, 0)
-    header.sortBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    header.sortBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    header.sortBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    header.sortBtn.text = header.sortBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    header.sortBtn.text:SetPoint("CENTER")
-    header.sortBtn.text:SetText("Sort")
-
-    header.sortBtn:SetScript("OnClick", function()
-        Frame:CycleSort()
-    end)
-
-    header.sortBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.3, 0.3, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    header.sortBtn:HookScript("OnEnter", function(self)
         local mode = Omni.Sorter and Omni.Sorter:GetDefaultMode() or "category"
-        GameTooltip:SetText("Sort Mode: " .. mode)
-        GameTooltip:Show()
-    end)
-    header.sortBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.2, 0.2, 0.2, 1)
-        GameTooltip:Hide()
+        self._tooltipSub = "Current: " .. mode
     end)
 
-    local optBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    optBtn:SetSize(56, 18)
-    optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -4, 0)
-    optBtn:SetText("Settings")
-    optBtn:SetScript("OnClick", function()
-        if Omni.Settings then
-            Omni.Settings:Toggle()
-        else
-            print("|cFF00FF00OmniInventory|r: Settings not loaded")
-        end
-    end)
-    optBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Open Settings")
-        GameTooltip:Show()
-    end)
-    optBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    header.optBtn = optBtn
+    header.optBtn = CreateRibbonIconButton(header, SETTINGS_ICON,
+        "Settings", "Open the OmniInventory settings panel",
+        function()
+            if Omni.Settings then
+                Omni.Settings:Toggle()
+            else
+                print("|cFF00FF00OmniInventory|r: Settings not loaded")
+            end
+        end)
+    header.optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -RIBBON_GAP, 0)
 
-    -- Bag quick-select icons
+    header.keyBtn = CreateRibbonIconButton(header, KEYRING_ICON,
+        "Keyring", "Open keyring popup",
+        function() Frame:ToggleKeyring() end)
+    header.keyBtn:SetPoint("RIGHT", header.optBtn, "LEFT", -RIBBON_GAP, 0)
+
+    -- Separator line between ribbon actions and bag slot icons
+    header.ribbonSep = header:CreateTexture(nil, "OVERLAY")
+    header.ribbonSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header.ribbonSep:SetVertexColor(0.35, 0.35, 0.35, 1)
+    header.ribbonSep:SetSize(1, 14)
+    header.ribbonSep:SetPoint("RIGHT", header.keyBtn, "LEFT", -RIBBON_SEP_GAP, 0)
+
     header.bagButtons = {}
     header.bagBar = CreateFrame("Frame", nil, header)
     header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BAG_IDS, BAG_ICON_SIZE)
-    header.bagBar:SetPoint("RIGHT", header.optBtn, "LEFT", -6, 0)
+    header.bagBar:SetPoint("RIGHT", header.ribbonSep, "LEFT", -RIBBON_SEP_GAP, 0)
 
     for index, bagID in ipairs(BAG_IDS) do
         local bagBtn = CreateFrame("Button", nil, header.bagBar)
         bagBtn:SetSize(BAG_ICON_SIZE, BAG_ICON_SIZE)
         bagBtn:SetPoint("LEFT", (index - 1) * (BAG_ICON_SIZE + 2), 0)
         bagBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        bagBtn:RegisterForDrag("LeftButton")
         bagBtn.bagID = bagID
 
         bagBtn.icon = bagBtn:CreateTexture(nil, "ARTWORK")
@@ -346,10 +397,19 @@ function Frame:CreateHeader()
 
         bagBtn:SetScript("OnClick", function(self, mouseButton)
             if mouseButton == "LeftButton" then
+                -- ᵔᴥᵔ Cursor holds a bag → swap; otherwise preview filter.
+                if CursorHasItem and CursorHasItem() then
+                    Frame:EquipBagFromCursor(self.bagID)
+                    return
+                end
                 Frame:ToggleBagPreview(self.bagID)
             elseif mouseButton == "RightButton" then
                 Frame:ForceEmptyBag(self.bagID)
             end
+        end)
+
+        bagBtn:SetScript("OnReceiveDrag", function(self)
+            Frame:EquipBagFromCursor(self.bagID)
         end)
 
         bagBtn:SetScript("OnEnter", function(self)
@@ -357,6 +417,9 @@ function Frame:CreateHeader()
             GameTooltip:AddLine(GetBagDisplayName(self.bagID), 1, 1, 1)
             GameTooltip:AddLine("Left-click: Preview this bag", 0.8, 0.8, 0.8)
             GameTooltip:AddLine("Right-click: Force-empty bag", 0.8, 0.8, 0.8)
+            if self.bagID ~= 0 then
+                GameTooltip:AddLine("Drag a bag here to equip it", 0.6, 0.9, 0.6)
+            end
             GameTooltip:Show()
         end)
         bagBtn:SetScript("OnLeave", function()
@@ -366,7 +429,6 @@ function Frame:CreateHeader()
         header.bagButtons[bagID] = bagBtn
     end
 
-    -- Make header draggable
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart", function()
@@ -411,6 +473,171 @@ function Frame:UpdateBagIconVisuals()
             if bagBtn.borderRight then bagBtn.borderRight:SetVertexColor(r, g, b, 1) end
             bagBtn:SetAlpha(1)
         end
+    end
+end
+
+-- =============================================================================
+-- Keyring Popup (bagID -2)
+-- =============================================================================
+
+local KEYRING_COLS = 8
+local KEYRING_CELL = 30
+local KEYRING_CELL_GAP = 2
+local KEYRING_PAD = 10
+local KEYRING_HEADER = 22
+
+local function UpdateKeyringButtonForge(btn)
+    -- ʕ ● ᴥ ●ʔ Keyring items have no forge/attune data; simplify styling ʕ ● ᴥ ●ʔ
+    if btn.forgeText then btn.forgeText:Hide() end
+    if btn.attuneBarBG then btn.attuneBarBG:Hide() end
+    if btn.attuneBarFill then btn.attuneBarFill:Hide() end
+    if btn.attuneText then btn.attuneText:Hide() end
+    if btn.bountyIcon then btn.bountyIcon:Hide() end
+    if btn.accountIcon then btn.accountIcon:Hide() end
+    if btn.resistIcon then btn.resistIcon:Hide() end
+end
+
+function Frame:CreateKeyringPopup()
+    if not mainFrame then return nil end
+    if mainFrame.keyringPopup then return mainFrame.keyringPopup end
+
+    local popup = CreateFrame("Frame", "OmniKeyringPopup", mainFrame)
+    popup:SetFrameStrata("DIALOG")
+    popup:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
+    -- ʕ •ᴥ•ʔ✿ Anchor above the main frame so the popup is always on-screen
+    -- even when the bag is docked near the bottom of the display. ✿ ʕ •ᴥ•ʔ
+    popup:SetPoint("BOTTOMLEFT", mainFrame, "TOPLEFT", 0, 4)
+    popup:SetSize(
+        KEYRING_PAD * 2 + KEYRING_COLS * (KEYRING_CELL + KEYRING_CELL_GAP) - KEYRING_CELL_GAP,
+        KEYRING_HEADER + KEYRING_PAD + KEYRING_CELL + KEYRING_CELL_GAP
+    )
+    popup:SetClampedToScreen(true)
+    popup:EnableMouse(true)
+    popup:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    popup:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+    popup:SetBackdropBorderColor(0.45, 0.38, 0.15, 1)
+
+    popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    popup.title:SetPoint("TOPLEFT", KEYRING_PAD, -6)
+    popup.title:SetText("|cFFFFCC00Keyring|r")
+
+    popup.empty = popup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    popup.empty:SetPoint("CENTER", 0, -4)
+    popup.empty:SetText("Keyring is empty.")
+    popup.empty:Hide()
+
+    popup.closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    popup.closeBtn:SetSize(18, 18)
+    popup.closeBtn:SetPoint("TOPRIGHT", -2, -2)
+    popup.closeBtn:SetScript("OnClick", function() popup:Hide() end)
+
+    -- ʕ •ᴥ•ʔ✿ Container carries SetID(-2) so the secure template resolves
+    -- to the keyring bag when a key is clicked. An explicit size keeps the
+    -- child item buttons inside a non-zero hit region. ✿ ʕ •ᴥ•ʔ
+    popup.container = CreateFrame("Frame", nil, popup)
+    popup.container:SetPoint("TOPLEFT", KEYRING_PAD, -(KEYRING_HEADER + 2))
+    popup.container:SetPoint("BOTTOMRIGHT", -KEYRING_PAD, KEYRING_PAD)
+    popup.container:SetID(KEYRING_BAG_ID)
+
+    popup.buttons = {}
+    popup:Hide()
+    mainFrame.keyringPopup = popup
+
+    popup:SetScript("OnShow", function() Frame:UpdateKeyring() end)
+
+    tinsert(UISpecialFrames, "OmniKeyringPopup")
+
+    if Omni.Events then
+        Omni.Events:RegisterEvent("BAG_UPDATE_KEYRING", function()
+            if popup:IsShown() then Frame:UpdateKeyring() end
+        end)
+    end
+
+    return popup
+end
+
+function Frame:UpdateKeyring()
+    if not mainFrame or not mainFrame.keyringPopup then return end
+    local popup = mainFrame.keyringPopup
+    if InCombat() then
+        popup.empty:SetText("Keyring update deferred during combat.")
+        popup.empty:Show()
+        return
+    end
+
+    local slots = GetContainerNumSlots(KEYRING_BAG_ID) or 0
+
+    if slots <= 0 then
+        popup.empty:SetText("You have no keyring.")
+        popup.empty:Show()
+        for _, btn in ipairs(popup.buttons) do pcall(btn.Hide, btn) end
+        popup:SetSize(240, KEYRING_HEADER + KEYRING_PAD * 2 + 40)
+        return
+    end
+
+    popup.empty:Hide()
+
+    for slotID = 1, slots do
+        local btn = popup.buttons[slotID]
+        if not btn then
+            btn = Omni.ItemButton and Omni.ItemButton:Create(popup.container)
+                or CreateFrame("Button", nil, popup.container, "ContainerFrameItemButtonTemplate")
+            btn:SetSize(KEYRING_CELL, KEYRING_CELL)
+            if btn.SetID then pcall(btn.SetID, btn, slotID) end
+            popup.buttons[slotID] = btn
+        end
+
+        local col = (slotID - 1) % KEYRING_COLS
+        local row = math.floor((slotID - 1) / KEYRING_COLS)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", popup.container, "TOPLEFT",
+            col * (KEYRING_CELL + KEYRING_CELL_GAP),
+            -row * (KEYRING_CELL + KEYRING_CELL_GAP))
+
+        local info
+        if OmniC_Container then
+            info = OmniC_Container.GetContainerItemInfo(KEYRING_BAG_ID, slotID)
+        end
+        if info then
+            if Omni.Categorizer then
+                info.category = info.category or Omni.Categorizer:GetCategory(info)
+            end
+            SetButtonItem(btn, info)
+        else
+            SetButtonItem(btn, nil)
+        end
+        UpdateKeyringButtonForge(btn)
+        pcall(btn.Show, btn)
+    end
+
+    -- Hide any stale buttons left over from a previous larger keyring
+    for slotID = slots + 1, #popup.buttons do
+        local btn = popup.buttons[slotID]
+        if btn then pcall(btn.Hide, btn) end
+    end
+
+    local rows = math.ceil(slots / KEYRING_COLS)
+    local width = KEYRING_PAD * 2 + KEYRING_COLS * (KEYRING_CELL + KEYRING_CELL_GAP) - KEYRING_CELL_GAP
+    local height = KEYRING_HEADER + KEYRING_PAD + rows * (KEYRING_CELL + KEYRING_CELL_GAP)
+    popup:SetSize(width, height)
+end
+
+function Frame:ToggleKeyring()
+    if InCombat() then
+        print("|cFF00FF00OmniInventory|r: Keyring unavailable during combat.")
+        return
+    end
+    local popup = mainFrame and mainFrame.keyringPopup or self:CreateKeyringPopup()
+    if not popup then return end
+    if popup:IsShown() then
+        popup:Hide()
+    else
+        popup:Show()
     end
 end
 
@@ -875,6 +1102,52 @@ function Frame:SetBankOpen(_) end
 function Frame:UpdateBankTabState() end
 
 -- =============================================================================
+-- Combat-safe in-place content refresh
+-- =============================================================================
+
+-- ʕ ◕ᴥ◕ ʔ Re-read live container data for every button already parented and
+-- positioned by the previous OOC render, and re-apply SetItem. Only touches
+-- textures / font strings / insecure Lua properties, so this is safe to call
+-- inside a protected-frame lockdown. Items sold in combat visually clear,
+-- stack counts tick down, and GameTooltip:SetBagItem picks up the new
+-- contents of any slot whose button survived the last render.
+function Frame:RefreshCombatContent(changedBags)
+    if not mainFrame or not OmniC_Container then return end
+
+    local affected
+    if type(changedBags) == "table" then
+        local hasEntries = false
+        for _ in pairs(changedBags) do hasEntries = true break end
+        if hasEntries and not changedBags._trigger then
+            affected = changedBags
+        end
+    end
+
+    for _, btn in ipairs(itemButtons) do
+        local bagID = btn.bagID
+        local slotID = btn.slotID
+        if bagID and slotID and (affected == nil or affected[bagID]) then
+            local info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
+            if info then
+                if Omni.Categorizer then
+                    info.category = info.category or Omni.Categorizer:GetCategory(info)
+                    if info.itemID and Omni.Categorizer.IsNewItem then
+                        info.isNew = Omni.Categorizer:IsNewItem(info.itemID)
+                    end
+                end
+                info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
+                SetButtonItem(btn, info)
+            else
+                SetButtonItem(btn, nil)
+            end
+        end
+    end
+
+    self:UpdateSlotCount()
+    self:UpdateMoney()
+end
+
+-- =============================================================================
 -- Layout Update
 -- =============================================================================
 
@@ -882,27 +1155,23 @@ function Frame:UpdateLayout(changedBags)
     if not mainFrame then return end
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
-    -- Touching SecureActionButtonTemplate children (SetParent, SetPoint,
-    -- SetAttribute, Show, Hide) inside a secure-binding callstack during
-    -- combat raises "Interface action failed because of an AddOn." and
-    -- aborts the toggle action mid-stride. So we never re-render in
-    -- combat. The frame itself is insecure and Show/Hide on it works
-    -- fine -- the buttons rendered during the last out-of-combat pass
-    -- stay positioned and shown across Hide/Show cycles, so opening the
-    -- bag in combat shows the last good layout with working tooltips
-    -- (same behavior as AdiBags on this client). Any updates missed
-    -- during combat are replayed by PLAYER_REGEN_ENABLED.
+    -- Structural ops on ContainerFrameItemButton children (SetParent,
+    -- SetID, SetPoint, ClearAllPoints) are protected during combat, so
+    -- we cannot re-run the flow/grid layout. Content updates (icon,
+    -- count, border color, tooltip-resolving bagID/slotID pair) ARE
+    -- insecure, so we mirror AdiBags: refresh contents of existing
+    -- slot buttons in place. Items sold during combat clear visually
+    -- and items that change in a known slot update their tooltip
+    -- instantly. Any fresh slots that had no button at the last OOC
+    -- render are still deferred to PLAYER_REGEN_ENABLED.
     if InCombat() then
         pendingCombatRender = true
-        if mainFrame:IsShown() and mainFrame.combatHint then
+        if hasRenderedOnce then
+            if mainFrame.combatHint then mainFrame.combatHint:Hide() end
+            self:RefreshCombatContent(changedBags)
+        elseif mainFrame:IsShown() and mainFrame.combatHint then
             mainFrame.combatHint:Show()
-            if not hasRenderedOnce then
-                mainFrame.combatHint:SetText(
-                    "|cFFFFCC00Bag contents will appear when combat ends.|r")
-            else
-                mainFrame.combatHint:SetText(
-                    "|cFFFFCC00Combat lockdown: showing last layout. Refresh after combat.|r")
-            end
+            mainFrame.combatHint:SetText("Bag contents will appear after combat.")
         end
         return
     end

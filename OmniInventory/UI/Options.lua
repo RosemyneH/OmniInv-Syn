@@ -62,7 +62,7 @@ function Settings:CreateOptionsFrame()
     if optionsFrame then return optionsFrame end
 
     optionsFrame = CreateFrame("Frame", "OmniOptionsFrame", UIParent)
-    optionsFrame:SetSize(320, 560)
+    optionsFrame:SetSize(320, 600)
     optionsFrame:SetPoint("CENTER")
     optionsFrame:SetFrameStrata("DIALOG")
     optionsFrame:EnableMouse(true)
@@ -181,7 +181,23 @@ function Settings:CreateControls(parent)
     end)
     self.catBtn = catBtn
 
-    yOffset = yOffset - SPACING - 10
+    yOffset = yOffset - SPACING - 6
+
+    local highlightCb = CreateFrame("CheckButton", "OmniHighlightNewItems", parent, "UICheckButtonTemplate")
+    highlightCb:SetSize(24, 24)
+    highlightCb:SetPoint("TOP", 0, yOffset)
+    local highlightLabel = highlightCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    highlightLabel:SetPoint("LEFT", highlightCb, "RIGHT", 2, 1)
+    highlightLabel:SetText("Highlight New Items")
+    highlightCb:SetScript("OnClick", function(self)
+        if Omni.Data then
+            Omni.Data:Set("highlightNewItems", self:GetChecked() and true or false)
+            RefreshAllInventory()
+        end
+    end)
+    self.highlightNewItemsCb = highlightCb
+
+    yOffset = yOffset - SPACING - 4
 
     -- 5. Reset Button
     local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -312,6 +328,10 @@ end
 
 function Settings:UpdateValues()
     if not optionsFrame then return end
+
+    if self.highlightNewItemsCb and Omni.Data then
+        self.highlightNewItemsCb:SetChecked(Omni.Data:Get("highlightNewItems") == true)
+    end
 
     -- Sync slider with current scale
     if OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings then

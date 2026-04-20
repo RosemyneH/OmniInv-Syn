@@ -207,11 +207,17 @@ local function IsAttunableItem(itemInfo)
     -- ʕ •ᴥ•ʔ✿ Highest attune across forges/affixes via native C extension ✿ ʕ •ᴥ•ʔ
     local API = Omni.API
     local progress
-    if API then
-        progress = API:GetHighestAttunePct(itemID, -1)
+    if _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
+        progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
     end
 
     -- Legacy fallback when the shim or native API isn't available
+    if type(progress) ~= "number" then
+        if API then
+            progress = API:GetHighestAttunePct(itemID, -1)
+        end
+    end
+
     if type(progress) ~= "number" then
         if _G.GetItemAttuneProgress then
             local titanforged
@@ -227,10 +233,6 @@ local function IsAttunableItem(itemInfo)
                 end
             end
             progress = GetItemAttuneProgress(itemID, nil, titanforged)
-        end
-
-        if type(progress) ~= "number" and _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
-            progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
         end
     end
 

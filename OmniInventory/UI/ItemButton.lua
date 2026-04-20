@@ -195,14 +195,14 @@ end
 
 -- ʕ •ᴥ•ʔ✿ Prefer native GetHighestAttunePct (affix + forge aware) ✿ ʕ •ᴥ•ʔ
 local function GetAttuneProgress(itemLink, itemID, forge)
-    if itemID and Omni.API and Omni.API.hasHighestAttune then
-        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
-    end
     if itemLink and _G.GetItemLinkAttuneProgress then
         local progress = GetItemLinkAttuneProgress(itemLink)
         if type(progress) == "number" then
             return progress
         end
+    end
+    if itemID and Omni.API and Omni.API.hasHighestAttune then
+        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
     end
     if itemID and Omni.API then
         return Omni.API:GetHighestAttunePct(itemID, forge or -1)
@@ -729,14 +729,19 @@ function ItemButton:SetItem(button, itemInfo)
     -- pipeline. Both calls are protected on this client and therefore are
     -- only safe to issue out of combat -- the render path is combat-gated
     -- in UI/Frame.lua so we never reach SetItem during lockdown. ✿ ʕ •ᴥ•ʔ
+    local prevSlotID = button.slotID
     button.bagID = itemInfo.bagID
     button.slotID = itemInfo.slotID
-    if itemInfo.slotID and button.SetID then
+    -- ʕ •ᴥ•ʔ✿ Skip redundant SetID in combat: the call is protected on
+    -- this client, and during a combat content-refresh the slot index
+    -- has not changed (we only rebind the slotID on structural renders,
+    -- which are combat-gated). pcall absorbs the error regardless. ✿ ʕ •ᴥ•ʔ
+    if itemInfo.slotID and button.SetID and prevSlotID ~= itemInfo.slotID then
         pcall(button.SetID, button, itemInfo.slotID)
     end
 
-    -- New item glow with animation
-    if itemInfo.isNew then
+    local highlightNewItems = Omni.Data and Omni.Data:Get("highlightNewItems") == true
+    if itemInfo.isNew and highlightNewItems then
         button.glow:Show()
         button.glow.anim:Play()
     else

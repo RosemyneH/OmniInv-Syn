@@ -281,3 +281,4 @@ If no new rule is detected → do not update the file.
 - User mandated PRG compliance — all documentation must follow PRG guidelines
 - User prefers comprehensive documentation before coding
 - User wants forward-compatible architecture (3.3.5a → Retail)
+- Prefer `GetItemLinkAttuneProgress(itemlink)` over item ID-based attune APIs so affix variants resolve correctly

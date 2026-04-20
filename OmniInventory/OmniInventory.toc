@@ -1,15 +1,13 @@
 ## Interface: 30300
-## Title: |cFF00FF00Omni|r Inventory
+## Title: |cFF00FF00Omni|r Inventory - Synastria
 ## Notes: The definitive inventory management addon for WoW 3.3.5a
-## Author: Synastria
-## Version: 2.0-alpha
+## Author: Qt, Zendevve
+## Version: 1.0.0
 ## SavedVariables: OmniInventoryDB
 
-## X-Website: https://github.com/synastria/OmniInventory-Syn
+## X-Website: https://github.com/RosemyneH/OmniInv-Syn
 ## X-Category: Inventory
 ## X-License: MIT
-## X-Curse-Project-ID: 123456
-## X-WoWI-ID: 12345
 ## Tags: Inventory, Bags, Bank, Sorting, Categorization
 
 # =============================================================================

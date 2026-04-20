@@ -21,6 +21,7 @@ local defaults = {
         itemSize = 37,
         scale = 1.0,
         opacity = 0.95,
+        highlightNewItems = false,
         attune = {
             enabled = true,
             showRedForNonAttunable = true,
