@@ -6,7 +6,7 @@
 
 **Inventory addon for World of Warcraft 3.3.5a** — grid, category flow, or list view. Sorted, rule-aware, performance-minded.
 
-*Fork of [Zendevve/OmniInventory](https://github.com/Zendevve/OmniInventory).*
+*Fork of [Zendevve/OmniInv-WoW](https://github.com/Zendevve/OmniInv-WoW).*
 
 [![Release](https://img.shields.io/github/v/release/RosemyneH/OmniInv-Syn?sort=semver&style=flat-square&label=release)](https://github.com/RosemyneH/OmniInv-Syn/releases)
 [![License](https://img.shields.io/github/license/RosemyneH/OmniInv-Syn?style=flat-square)](LICENSE)
