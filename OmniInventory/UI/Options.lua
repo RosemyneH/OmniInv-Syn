@@ -47,12 +47,30 @@ local function GetAttuneSettings()
     if attune.showRedForNonAttunable == nil then attune.showRedForNonAttunable = true end
     if attune.faeMode == nil then attune.faeMode = true end
 
-    attune.nonAttunableBarColor = attune.nonAttunableBarColor or { r = 1.0, g = 0.0, b = 0.0, a = 1.0 }
-    attune.textColor = attune.textColor or { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
-    attune.faeCompleteBarColor = attune.faeCompleteBarColor or { r = 0.95, g = 0.8, b = 0.2, a = 1.0 }
+    attune.nonAttunableBarColor = attune.nonAttunableBarColor or { r = 1.000, g = 0.267, b = 0.392, a = 1.0 }
+    attune.textColor            = attune.textColor            or { r = 0.941, g = 0.886, b = 0.878, a = 1.0 }
+    attune.faeCompleteBarColor  = attune.faeCompleteBarColor  or { r = 0.502, g = 0.949, b = 0.329, a = 1.0 }
+    if attune.forgeOutline == nil then attune.forgeOutline = true end
+
+    -- ʕ •ᴥ•ʔ✿ Forge tier color defaults mirror Data.lua so the picker always has a table to mutate ✿ ʕ •ᴥ•ʔ
+    attune.forgeColors = attune.forgeColors or {}
+    attune.forgeColors.BASE        = attune.forgeColors.BASE        or { r = 0.000, g = 1.000, b = 0.000, a = 1.0 }
+    attune.forgeColors.TITANFORGED = attune.forgeColors.TITANFORGED or { r = 0.468, g = 0.532, b = 1.000, a = 1.0 }
+    attune.forgeColors.WARFORGED   = attune.forgeColors.WARFORGED   or { r = 0.872, g = 0.206, b = 0.145, a = 1.0 }
+    attune.forgeColors.LIGHTFORGED = attune.forgeColors.LIGHTFORGED or { r = 1.000, g = 1.000, b = 0.506, a = 1.0 }
 
     return attune
 end
+
+-- ʕ •ᴥ•ʔ✿ Section header palette — distinct tints so categories read at a glance ✿ ʕ •ᴥ•ʔ
+local SECTION_COLORS = {
+    view   = { 0.85, 0.90, 1.00 },
+    sort   = { 0.85, 0.90, 1.00 },
+    attune = { 1.00, 0.82, 0.00 },
+    colors = { 1.00, 0.60, 0.20 },
+    footer = { 0.40, 1.00, 0.55 },
+    addon  = { 0.45, 0.80, 1.00 },
+}
 
 local function IsAttuneHelperEmbedEnabled()
     OmniInventoryDB = OmniInventoryDB or {}
@@ -73,12 +91,20 @@ local function IsAttuneHelperMiniNoBorderEnabled()
 end
 
 local FOOTER_BUTTON_OPTIONS = {
+    { key = "resetInstances", label = "Reset Instances" },
     { key = "transmog",     label = "Transmog"       },
     { key = "perks",        label = "Perks"          },
     { key = "lootFilter",   label = "Loot Filter"    },
     { key = "resourceBank", label = "Resource Bank"  },
     { key = "lootDb",       label = "Loot Database"  },
     { key = "attuneMgr",    label = "Attunable List" },
+    { key = "leaderboard",  label = "Leaderboard"    },
+}
+
+local ADDON_BUTTON_OPTIONS = {
+    { key = "scootsCraft", label = "ScootsCraft" },
+    { key = "atlasLoot",   label = "AtlasLoot"   },
+    { key = "theJournal",  label = "TheJournal"  },
 }
 
 local function GetFooterButtonsDB()
@@ -94,6 +120,19 @@ local function IsFooterButtonEnabled(key)
     return db[key] == true
 end
 
+local function GetAddonButtonsDB()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    OmniInventoryDB.global.addonButtons = OmniInventoryDB.global.addonButtons or {}
+    return OmniInventoryDB.global.addonButtons
+end
+
+local function IsAddonButtonEnabled(key)
+    local db = GetAddonButtonsDB()
+    if db[key] == nil then db[key] = true end
+    return db[key] == true
+end
+
 -- =============================================================================
 -- Creation
 -- =============================================================================
@@ -102,7 +141,7 @@ function Settings:CreateOptionsFrame()
     if optionsFrame then return optionsFrame end
 
     optionsFrame = CreateFrame("Frame", "OmniOptionsFrame", UIParent)
-    optionsFrame:SetSize(320, 600)
+    optionsFrame:SetSize(320, 520)
     optionsFrame:SetPoint("CENTER")
     optionsFrame:SetFrameStrata("DIALOG")
     optionsFrame:EnableMouse(true)
@@ -138,21 +177,52 @@ function Settings:CreateOptionsFrame()
         optionsFrame:Hide()
     end)
 
-    -- Content Container
-    local content = CreateFrame("Frame", nil, optionsFrame)
-    content:SetPoint("TOPLEFT", 16, -40)
-    content:SetPoint("BOTTOMRIGHT", -16, 16)
+    -- ʕ •ᴥ•ʔ✿ Scrollable content viewport so we never outgrow the frame ✿ ʕ •ᴥ•ʔ
+    local scrollFrame = CreateFrame("ScrollFrame", "OmniOptionsScroll", optionsFrame, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 16, -40)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -34, 16)
 
-    self.content = content
-    self:CreateControls(content)
+    -- Frame is 320 wide minus 16 (left inset) + 34 (right inset for scrollbar) = 270
+    local SCROLL_CHILD_WIDTH = 270
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(SCROLL_CHILD_WIDTH, 1)
+    scrollFrame:SetScrollChild(scrollChild)
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local bar = _G[self:GetName() .. "ScrollBar"]
+        if not bar then return end
+        local step = 28
+        bar:SetValue(bar:GetValue() - (delta * step))
+    end)
+
+    self.scrollFrame = scrollFrame
+    self.content = scrollChild
+    self:CreateControls(scrollChild)
+
+    local requiredHeight = self._contentHeight or 700
+    scrollChild:SetHeight(requiredHeight)
 
     optionsFrame:Hide()
     return optionsFrame
 end
 
+local function CreateSectionHeader(parent, text, y, color)
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:SetPoint("TOP", 0, y)
+    label:SetText(text)
+    if color then
+        label:SetTextColor(color[1], color[2], color[3], color[4] or 1)
+    end
+    return label
+end
+
 function Settings:CreateControls(parent)
     local yOffset = -20
     local SPACING = 40
+    -- ʕ •ᴥ•ʔ✿ Vertical rhythm — SECTION_GAP lives above every category header, HEADER_GAP under it ✿ ʕ •ᴥ•ʔ
+    local SECTION_GAP = 18
+    local HEADER_GAP = 22
+    self.colorSwatches = {}
 
     -- 1. Scale Slider
     local scaleSlider = CreateFrame("Slider", "OmniScaleSlider", parent, "OptionsSliderTemplate")
@@ -178,7 +248,7 @@ function Settings:CreateControls(parent)
     yOffset = yOffset - SPACING - 20
 
     -- 2. View Mode (Grid, Flow, List)
-    self:CreateLabel(parent, "View Mode", 0, yOffset)
+    CreateSectionHeader(parent, "View Mode", yOffset, SECTION_COLORS.view)
     yOffset = yOffset - 20
 
     local viewBtn = CreateFrame("Button", "OmniViewToggle", parent, "UIPanelButtonTemplate")
@@ -193,7 +263,7 @@ function Settings:CreateControls(parent)
     yOffset = yOffset - SPACING
 
     -- 3. Sort Mode
-    self:CreateLabel(parent, "Sort Mode (Default)", 0, yOffset)
+    CreateSectionHeader(parent, "Sort Mode (Default)", yOffset, SECTION_COLORS.sort)
     yOffset = yOffset - 20
 
     local sortBtn = CreateFrame("Button", "OmniSortToggle", parent, "UIPanelButtonTemplate")
@@ -207,21 +277,7 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - SPACING - 20
 
-    -- 4. Category Editor Button
-    local catBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    catBtn:SetSize(160, 24)
-    catBtn:SetPoint("TOP", 0, yOffset)
-    catBtn:SetText("Open Category Editor")
-    catBtn:SetScript("OnClick", function()
-        if Omni.CategoryEditor then
-            Omni.CategoryEditor:Toggle()
-        else
-            print("|cFF00FF00OmniInventory|r: Category Editor not loaded")
-        end
-    end)
-    self.catBtn = catBtn
-
-    yOffset = yOffset - SPACING - 6
+    -- ʕ ● ᴥ ●ʔ Category Editor intentionally hidden — custom-rule engine is disabled pending rewrite
 
     local highlightCb = CreateFrame("CheckButton", "OmniHighlightNewItems", parent, "UICheckButtonTemplate")
     highlightCb:SetSize(24, 24)
@@ -251,10 +307,10 @@ function Settings:CreateControls(parent)
         end
     end)
 
-    yOffset = yOffset - SPACING - 10
+    yOffset = yOffset - SPACING - SECTION_GAP
 
-    local attuneLabel = self:CreateLabel(parent, "Attune Overlay", 0, yOffset)
-    yOffset = yOffset - 18
+    CreateSectionHeader(parent, "Attune Overlay", yOffset, SECTION_COLORS.attune)
+    yOffset = yOffset - HEADER_GAP
 
     local function CreateAttuneCheckbox(key, text, xOffset)
         local settings = GetAttuneSettings()
@@ -282,6 +338,8 @@ function Settings:CreateControls(parent)
     yOffset = yOffset - 22
     self.attuneResist = CreateAttuneCheckbox("showResistIcons", "Resist", 14)
     self.attuneFae = CreateAttuneCheckbox("faeMode", "Fae 100%", 160)
+    yOffset = yOffset - 22
+    self.attuneForgeOutline = CreateAttuneCheckbox("forgeOutline", "Forge Outline", 14)
     yOffset = yOffset - 22
 
     local attuneHelperEmbedCb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
@@ -320,12 +378,10 @@ function Settings:CreateControls(parent)
     end)
     self.attuneHelperMiniNoBorderCb = attuneHelperMiniNoBorderCb
 
-    yOffset = yOffset - 22
+    yOffset = yOffset - 22 - SECTION_GAP
 
-    local footerHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    footerHeader:SetPoint("TOPLEFT", 14, yOffset)
-    footerHeader:SetText("Footer Buttons")
-    yOffset = yOffset - 18
+    CreateSectionHeader(parent, "Footer Buttons", yOffset, SECTION_COLORS.footer)
+    yOffset = yOffset - HEADER_GAP
 
     self.footerButtonCbs = self.footerButtonCbs or {}
     for i, def in ipairs(FOOTER_BUTTON_OPTIONS) do
@@ -354,16 +410,49 @@ function Settings:CreateControls(parent)
     local rowCount = math.ceil(#FOOTER_BUTTON_OPTIONS / 2)
     yOffset = yOffset - (rowCount * 22)
 
-    yOffset = yOffset - 10
+    yOffset = yOffset - SECTION_GAP
 
-    yOffset = yOffset - 32
+    CreateSectionHeader(parent, "Addon Buttons", yOffset, SECTION_COLORS.addon)
+    yOffset = yOffset - HEADER_GAP
 
-    local function CreateColorSwatch(key, title, xOffset)
-        local settings = GetAttuneSettings()
+    self.addonButtonCbs = self.addonButtonCbs or {}
+    for i, def in ipairs(ADDON_BUTTON_OPTIONS) do
+        local column = (i - 1) % 2
+        local row = math.floor((i - 1) / 2)
+        local xOffset = (column == 0) and 14 or 160
+        local rowY = yOffset - (row * 22)
+
+        local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        cb:SetSize(24, 24)
+        cb:SetPoint("TOPLEFT", xOffset, rowY)
+        local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        lbl:SetPoint("LEFT", cb, "RIGHT", 2, 1)
+        lbl:SetText(def.label)
+        cb:SetChecked(IsAddonButtonEnabled(def.key))
+        cb.__abKey = def.key
+        cb:SetScript("OnClick", function(self)
+            local db = GetAddonButtonsDB()
+            db[self.__abKey] = self:GetChecked() and true or false
+            if Omni.Frame and Omni.Frame.UpdateFooterCustomButtons then
+                Omni.Frame:UpdateFooterCustomButtons()
+            end
+        end)
+        self.addonButtonCbs[def.key] = cb
+    end
+    local addonRowCount = math.ceil(#ADDON_BUTTON_OPTIONS / 2)
+    yOffset = yOffset - (addonRowCount * 22)
+
+    yOffset = yOffset - SECTION_GAP
+
+    CreateSectionHeader(parent, "Colors", yOffset, SECTION_COLORS.colors)
+    yOffset = yOffset - HEADER_GAP
+
+    -- ʕ •ᴥ•ʔ✿ Single swatch factory — caller owns the color table so forge tiers & attune colors share code ✿ ʕ •ᴥ•ʔ
+    local function CreateColorSwatch(color, title, xOffset, yPos)
         local swatch = CreateFrame("Button", nil, parent)
         swatch:SetSize(18, 18)
-        swatch:SetPoint("TOPLEFT", xOffset, yOffset)
-        swatch.key = key
+        swatch:SetPoint("TOPLEFT", xOffset, yPos)
+        swatch.__color = color
 
         swatch.bg = swatch:CreateTexture(nil, "BACKGROUND")
         swatch.bg:SetAllPoints()
@@ -382,36 +471,49 @@ function Settings:CreateControls(parent)
 
         swatch:SetScript("OnClick", function(self)
             RegisterColorPickerCloseRefresh()
-            local color = settings[self.key]
-            local oldR, oldG, oldB, oldA = color.r, color.g, color.b, color.a or 1
+            local c = self.__color
+            local oldR, oldG, oldB, oldA = c.r, c.g, c.b, c.a or 1
             local function SyncFromPicker()
                 local r, g, b = ColorPickerFrame:GetColorRGB()
                 local a = OpacitySliderFrame:GetValue()
-                color.r, color.g, color.b, color.a = r, g, b, a
+                c.r, c.g, c.b, c.a = r, g, b, a
                 self.tex:SetVertexColor(r, g, b, a)
             end
             colorPickerCloseRefreshPending = true
             ColorPickerFrame.hasOpacity = true
-            ColorPickerFrame.opacity = color.a or 1
+            ColorPickerFrame.opacity = c.a or 1
             ColorPickerFrame.func = SyncFromPicker
             ColorPickerFrame.opacityFunc = SyncFromPicker
             ColorPickerFrame.cancelFunc = function()
-                color.r, color.g, color.b, color.a = oldR, oldG, oldB, oldA
+                c.r, c.g, c.b, c.a = oldR, oldG, oldB, oldA
                 self.tex:SetVertexColor(oldR, oldG, oldB, oldA)
             end
-            ColorPickerFrame:SetColorRGB(color.r, color.g, color.b)
-            OpacitySliderFrame:SetValue(color.a or 1)
+            ColorPickerFrame:SetColorRGB(c.r, c.g, c.b)
+            OpacitySliderFrame:SetValue(c.a or 1)
             ColorPickerFrame:Show()
         end)
 
-        local color = settings[key]
         swatch.tex:SetVertexColor(color.r, color.g, color.b, color.a or 1)
+        table.insert(self.colorSwatches, swatch)
         return swatch
     end
 
-    self.attuneRedColor = CreateColorSwatch("nonAttunableBarColor", "Red", 14)
-    self.attuneTextColor = CreateColorSwatch("textColor", "Text", 110)
-    self.attuneFaeColor = CreateColorSwatch("faeCompleteBarColor", "Fae", 200)
+    local attune = GetAttuneSettings()
+
+    -- ʕ ◕ᴥ◕ ʔ Row 1: attune bar/text colors
+    self.attuneRedColor  = CreateColorSwatch(attune.nonAttunableBarColor,  "Red",   14, yOffset)
+    self.attuneTextColor = CreateColorSwatch(attune.textColor,             "Text",  110, yOffset)
+    self.attuneFaeColor  = CreateColorSwatch(attune.faeCompleteBarColor,   "Fae",   200, yOffset)
+    yOffset = yOffset - 26
+
+    -- ＼ʕ •ᴥ•ʔ／ Row 2: forge tier colors (T/W/L letter + bar tint)
+    self.attuneTitanColor = CreateColorSwatch(attune.forgeColors.TITANFORGED, "Titan", 14,  yOffset)
+    self.attuneWarColor   = CreateColorSwatch(attune.forgeColors.WARFORGED,   "War",   110, yOffset)
+    self.attuneLightColor = CreateColorSwatch(attune.forgeColors.LIGHTFORGED, "Light", 200, yOffset)
+    yOffset = yOffset - 26
+
+    -- ʕ •ᴥ•ʔ✿ yOffset grows negative as rows are added — flip and pad for the scroll child ✿ ʕ •ᴥ•ʔ
+    self._contentHeight = math.abs(yOffset) + 40
 end
 
 function Settings:CreateLabel(parent, text, x, y)
@@ -458,6 +560,7 @@ function Settings:UpdateValues()
     if self.attuneResist then self.attuneResist:SetChecked(attune.showResistIcons ~= false) end
     if self.attuneRed then self.attuneRed:SetChecked(attune.showRedForNonAttunable ~= false) end
     if self.attuneFae then self.attuneFae:SetChecked(attune.faeMode == true) end
+    if self.attuneForgeOutline then self.attuneForgeOutline:SetChecked(attune.forgeOutline ~= false) end
     if self.attuneHelperEmbedCb then self.attuneHelperEmbedCb:SetChecked(IsAttuneHelperEmbedEnabled()) end
     if self.attuneHelperMiniNoBorderCb then self.attuneHelperMiniNoBorderCb:SetChecked(IsAttuneHelperMiniNoBorderEnabled()) end
     if self.footerButtonCbs then
@@ -466,17 +569,19 @@ function Settings:UpdateValues()
             if cb then cb:SetChecked(IsFooterButtonEnabled(def.key)) end
         end
     end
-    if self.attuneRedColor then
-        local c = attune.nonAttunableBarColor
-        self.attuneRedColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)
+    if self.addonButtonCbs then
+        for _, def in ipairs(ADDON_BUTTON_OPTIONS) do
+            local cb = self.addonButtonCbs[def.key]
+            if cb then cb:SetChecked(IsAddonButtonEnabled(def.key)) end
+        end
     end
-    if self.attuneTextColor then
-        local c = attune.textColor
-        self.attuneTextColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)
-    end
-    if self.attuneFaeColor then
-        local c = attune.faeCompleteBarColor
-        self.attuneFaeColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)
+    if self.colorSwatches then
+        for _, swatch in ipairs(self.colorSwatches) do
+            local c = swatch.__color
+            if c and swatch.tex then
+                swatch.tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+            end
+        end
     end
 end
 

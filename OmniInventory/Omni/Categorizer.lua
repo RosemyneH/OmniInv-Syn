@@ -379,13 +379,7 @@ function Categorizer:GetCategory(itemInfo)
         end
     end
 
-    -- Priority 1.5: Custom Rules Engine
-    if Omni.Rules then
-        local matchedRule = Omni.Rules:FindMatchingRule(itemInfo)
-        if matchedRule and matchedRule.category then
-            return matchedRule.category
-        end
-    end
+    -- ʕ ● ᴥ ●ʔ Custom Rules Engine disabled — module is no longer loaded (see OmniInventory.toc)
 
     -- Priority 1.75: Perishable / time-limited turn-in items
     if self:IsPerishableItem(GetItemID(itemInfo)) then

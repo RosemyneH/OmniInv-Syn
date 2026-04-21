@@ -189,6 +189,85 @@ local function RestoreEmbeddedAttuneHelper()
     miniFrame:Hide()
 end
 
+-- ʕ •ᴥ•ʔ✿ Keep AttuneHelper hidden on login until the bag is opened.
+-- Hooks both AH frames so any OnShow during load is suppressed; the embed
+-- path reclaims the mini frame when OmniInventory is displayed. ✿ ʕ •ᴥ•ʔ
+local earlyHideWatcher
+local earlyHideApplied = false
+
+local function InstallAttuneHelperEarlyHooks()
+    local main = _G.AttuneHelperFrame
+    local mini = _G.AttuneHelperMiniFrame
+    if not main and not mini then
+        return false
+    end
+
+    if main and not main.__OmniEarlyHideHooked then
+        main.__OmniEarlyHideHooked = true
+        main:HookScript("OnShow", function(frame)
+            if not IsAttuneHelperEmbedEnabled() then return end
+            frame:Hide()
+        end)
+    end
+
+    if mini and not mini.__OmniEarlyHideHooked then
+        mini.__OmniEarlyHideHooked = true
+        mini:HookScript("OnShow", function(frame)
+            if not IsAttuneHelperEmbedEnabled() then return end
+            if mainFrame and mainFrame:IsShown() then
+                return
+            end
+            frame:Hide()
+        end)
+    end
+
+    if IsAttuneHelperEmbedEnabled() then
+        _G.AttuneHelperDB = _G.AttuneHelperDB or {}
+        _G.AttuneHelperDB["Mini Mode"] = 1
+        if _G.AttuneHelper_UpdateDisplayMode then
+            pcall(_G.AttuneHelper_UpdateDisplayMode)
+        end
+        if main then main:Hide() end
+        if mini and not (mainFrame and mainFrame:IsShown()) then
+            mini:Hide()
+        end
+    end
+
+    return true
+end
+
+-- ʕ •ᴥ•ʔ✿ AH creates its frames on PLAYER_LOGIN; if we fire first we poll
+-- briefly via an OnUpdate ticker (3.3.5 has no C_Timer). ✿ ʕ •ᴥ•ʔ
+function Frame:HideAttuneHelperUntilOpened()
+    earlyHideApplied = earlyHideApplied or InstallAttuneHelperEarlyHooks()
+    if earlyHideApplied then
+        return
+    end
+
+    if not earlyHideWatcher then
+        earlyHideWatcher = CreateFrame("Frame")
+        earlyHideWatcher.__elapsed = 0
+        earlyHideWatcher.__totalElapsed = 0
+    end
+
+    earlyHideWatcher:SetScript("OnUpdate", function(self, elapsed)
+        self.__elapsed = (self.__elapsed or 0) + elapsed
+        self.__totalElapsed = (self.__totalElapsed or 0) + elapsed
+        if self.__elapsed < 0.1 then return end
+        self.__elapsed = 0
+
+        if InstallAttuneHelperEarlyHooks() then
+            earlyHideApplied = true
+            self:SetScript("OnUpdate", nil)
+            return
+        end
+
+        if self.__totalElapsed > 5 then
+            self:SetScript("OnUpdate", nil)
+        end
+    end)
+end
+
 local function GetSavedViewMode()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     return NormalizeViewMode(settings and settings.viewMode)
@@ -888,6 +967,87 @@ end
 -- Content Area (ScrollFrame)
 -- =============================================================================
 
+-- ʕ •ᴥ•ʔ✿ Trade Goods → Resource Bank deposit shortcut ✿ ʕ •ᴥ•ʔ
+local function DepositToResourceBank()
+    local btn = _G["RBankFrame-DepositAll"]
+    if btn and type(btn.Click) == "function" then
+        btn:Click()
+        return
+    end
+
+    -- Frame not yet constructed by the server UI; summon it, click, then
+    -- close on the same frame so it never renders.
+    if type(_G.OpenResourceSummary) ~= "function" then
+        print("|cFF00FF00OmniInventory|r: Resource Bank not available on this client.")
+        return
+    end
+
+    _G.OpenResourceSummary()
+
+    btn = _G["RBankFrame-DepositAll"]
+    if btn and type(btn.Click) == "function" then
+        btn:Click()
+    else
+        print("|cFF00FF00OmniInventory|r: RBankFrame-DepositAll button not found after opening.")
+    end
+
+    if type(_G.CloseResourceSummary) == "function" then
+        _G.CloseResourceSummary()
+    end
+end
+
+local function EnsureTradeGoodsDepositButton()
+    if not mainFrame then return nil end
+    if mainFrame.tradeGoodsDepositBtn then return mainFrame.tradeGoodsDepositBtn end
+
+    local btn = CreateFrame("Button", nil, mainFrame.scrollChild or mainFrame)
+    btn:SetSize(14, 14)
+    btn:SetNormalTexture("Interface\\Icons\\Achievement_BG_returnXflags_def_WSG")
+    local normal = btn:GetNormalTexture()
+    if normal and normal.SetTexCoord then
+        normal:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetTexture("Interface\\Icons\\Achievement_BG_returnXflags_def_WSG")
+    hl:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    hl:SetBlendMode("ADD")
+    hl:SetVertexColor(0.3, 0.3, 0.3, 0.5)
+
+    btn:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\UI-Quickslot-Depress",
+        edgeSize = 2,
+        insets = { left = -1, right = -1, top = -1, bottom = -1 },
+    })
+    btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
+
+    btn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Deposit to Resource Bank", 1, 1, 1)
+        GameTooltip:AddLine("Sends all eligible Trade Goods to your Resource Bank.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
+        GameTooltip:Hide()
+    end)
+    btn:SetScript("OnMouseDown", function(self)
+        local tex = self:GetNormalTexture()
+        if tex then tex:SetVertexColor(0.75, 0.75, 0.75) end
+    end)
+    btn:SetScript("OnMouseUp", function(self)
+        local tex = self:GetNormalTexture()
+        if tex then tex:SetVertexColor(1, 1, 1) end
+    end)
+    btn:SetScript("OnClick", DepositToResourceBank)
+    btn:Hide()
+
+    mainFrame.tradeGoodsDepositBtn = btn
+    return btn
+end
+
 function Frame:CreateContentArea()
     local content = CreateFrame("ScrollFrame", "OmniContentScroll", mainFrame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", mainFrame.filterBar, "BOTTOMLEFT", 0, -4)
@@ -1072,12 +1232,114 @@ local FOOTER_BTN_GAP = 3
 local FOOTER_SEP_GAP = 5
 
 local FOOTER_CUSTOM_BUTTONS = {
+    {
+        key     = "resetInstances",
+        icon    = "Interface\\Icons\\Achievement_Boss_Murmur",
+        title   = "Reset Instances",
+        sub     = "Teleports out of the current LFG dungeon (if any) and resets all instances.",
+        onClick = function()
+            if type(_G.LFGTeleport) == "function" and type(_G.IsInLFGDungeon) == "function" then
+                LFGTeleport(IsInLFGDungeon())
+            end
+            if type(_G.ResetInstances) == "function" then
+                _G.ResetInstances()
+            end
+        end,
+    },
     { key = "transmog",     icon = "Interface\\Icons\\INV_Mask_01",             title = "Transmog",       sub = "Open the transmog window",     fn = "OpenTransmog"        },
     { key = "perks",        icon = "Interface\\Icons\\Spell_Arcane_MindMastery", title = "Perks",          sub = "Open the perk manager",         fn = "OpenPerkMgr"         },
     { key = "lootFilter",   icon = "Interface\\Icons\\INV_Misc_Coin_17",        title = "Loot Filter",    sub = "Open the loot filter",          fn = "OpenLootFilter"      },
     { key = "resourceBank", icon = "Interface\\Icons\\INV_Misc_PlatnumDisks",   title = "Resource Bank",  sub = "Open resource summary",         fn = "OpenResourceSummary" },
     { key = "lootDb",       icon = "Interface\\Icons\\INV_Misc_Coin_18",        title = "Loot Database",  sub = "Search the loot database",      fn = "OpenLootDb"          },
     { key = "attuneMgr",    icon = "Interface\\Icons\\Ability_Townwatch",       title = "Attunables",     sub = "Open the attunable item list",  fn = "OpenAttuneMgr"       },
+    { key = "leaderboard",  icon = "Interface\\Icons\\INV_Misc_Trophy_Argent",  title = "Leaderboard",    sub = "Open the leaderboards",         fn = "OpenLeaderboards"    },
+}
+
+-- ʕ •ᴥ•ʔ✿ Third-party addon launcher ribbon (each entry owns its click).
+-- isAvailable gates visibility so we never show a broken tile. ✿ ʕ •ᴥ•ʔ
+local FOOTER_ADDON_BUTTONS = {
+    {
+        key         = "scootsCraft",
+        icon        = "Interface\\AddOns\\ScootsCraft\\Textures\\MinimapButton",
+        title       = "ScootsCraft",
+        sub         = "Toggle the ScootsCraft window",
+        trimIcon    = false,
+        isAvailable = function()
+            return type(_G.ScootsCraft) == "table"
+                and type(_G.ScootsCraft.interface) == "table"
+                and type(_G.ScootsCraft.interface.toggle) == "function"
+        end,
+        onClick = function()
+            if type(_G.ScootsCraft) == "table"
+                and type(_G.ScootsCraft.interface) == "table"
+                and type(_G.ScootsCraft.interface.toggle) == "function" then
+                _G.ScootsCraft.interface.toggle()
+            else
+                print("|cFF00FF00OmniInventory|r: ScootsCraft is not loaded.")
+            end
+        end,
+    },
+    {
+        key         = "atlasLoot",
+        icon        = "Interface\\AddOns\\AtlasLoot\\Images\\AtlasImages\\AtlasIcon",
+        title       = "AtlasLoot",
+        sub         = "Toggle the AtlasLoot browser",
+        trimIcon    = false,
+        isAvailable = function()
+            if _G.AtlasLootDefaultFrame then return true end
+            if type(_G.AtlasLoot) == "table" and type(_G.AtlasLoot.SlashCommand) == "function" then
+                return true
+            end
+            return SlashCmdList ~= nil and type(SlashCmdList["ATLASLOOT"]) == "function"
+        end,
+        -- ʕ •ᴥ•ʔ✿ Toggle pattern: hide the live frame if up, otherwise fall back
+        -- to the slash command so AtlasLoot lazy-loads its modules on first open. ✿ ʕ •ᴥ•ʔ
+        onClick = function()
+            local frame = _G.AtlasLootDefaultFrame
+            if frame and frame:IsShown() then
+                frame:Hide()
+                return
+            end
+            if type(_G.AtlasLoot) == "table" and type(_G.AtlasLoot.SlashCommand) == "function" then
+                pcall(_G.AtlasLoot.SlashCommand, _G.AtlasLoot, "")
+                return
+            end
+            if SlashCmdList and type(SlashCmdList["ATLASLOOT"]) == "function" then
+                SlashCmdList["ATLASLOOT"]("")
+                return
+            end
+            print("|cFF00FF00OmniInventory|r: AtlasLoot is not installed.")
+        end,
+    },
+    {
+        key         = "theJournal",
+        icon        = "Interface\\Icons\\INV_Misc_Book_06",
+        title       = "TheJournal",
+        sub         = "Click: Toggle Journal\nDrag item: /testboe (ping friends & guild)",
+        isAvailable = function()
+            return type(_G.ToggleJournal) == "function"
+        end,
+        onClick = function()
+            if type(_G.ToggleJournal) == "function" then
+                _G.ToggleJournal()
+            else
+                print("|cFF00FF00OmniInventory|r: TheJournal is not installed.")
+            end
+        end,
+        -- ʕ ◕ᴥ◕ ʔ✿ Drop an item to hand its link off to AttuneHelper's /testboe,
+        -- which pings friends & guild via QueryItemFromFriends. ✿ ʕ ◕ᴥ◕ ʔ
+        onReceiveDrag = function()
+            if type(_G.GetCursorInfo) ~= "function" then return end
+            local ctype, _, link = _G.GetCursorInfo()
+            if ctype ~= "item" or not link then return end
+            if _G.ClearCursor then _G.ClearCursor() end
+            if SlashCmdList and type(SlashCmdList["TESTBOE"]) == "function" then
+                SlashCmdList["TESTBOE"](link)
+            else
+                print("|cFF00FF00OmniInventory|r: /testboe unavailable (AttuneHelper required).")
+            end
+        end,
+    },
 }
 
 local function IsFooterCustomButtonEnabled(key)
@@ -1088,6 +1350,16 @@ local function IsFooterCustomButtonEnabled(key)
         global.footerButtons[key] = true
     end
     return global.footerButtons[key] ~= false
+end
+
+local function IsFooterAddonButtonEnabled(key)
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if not global then return true end
+    global.addonButtons = global.addonButtons or {}
+    if global.addonButtons[key] == nil then
+        global.addonButtons[key] = true
+    end
+    return global.addonButtons[key] ~= false
 end
 
 local function StyleFooterMiniButton(btn)
@@ -1119,16 +1391,19 @@ local function CreateFooterMiniButton(parent, def)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(FOOTER_BTN_SIZE, FOOTER_BTN_SIZE)
 
+    local trim = def.trimIcon ~= false
     btn:SetNormalTexture(def.icon)
     local normal = btn:GetNormalTexture()
-    if normal and normal.SetTexCoord then
+    if normal and normal.SetTexCoord and trim then
         normal:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     end
 
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetTexture(def.icon)
-    hl:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if trim then
+        hl:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
     hl:SetBlendMode("ADD")
     hl:SetVertexColor(0.25, 0.25, 0.25, 0.4)
 
@@ -1136,9 +1411,6 @@ local function CreateFooterMiniButton(parent, def)
 
     btn._tooltipTitle = def.title
     btn._tooltipSub = def.sub
-    btn.__openFn = def.fn
-    btn.__closeFn = def.fn:gsub("^Open", "Close")
-    btn.__isOpen = false
     btn:SetScript("OnMouseDown", function(self)
         local tex = self:GetNormalTexture()
         if tex then tex:SetVertexColor(0.75, 0.75, 0.75) end
@@ -1147,23 +1419,36 @@ local function CreateFooterMiniButton(parent, def)
         local tex = self:GetNormalTexture()
         if tex then tex:SetVertexColor(1, 1, 1) end
     end)
-    btn:SetScript("OnClick", function(self)
-        local openFn = _G[self.__openFn]
-        local closeFn = _G[self.__closeFn]
 
-        if self.__isOpen and type(closeFn) == "function" then
-            closeFn()
-            self.__isOpen = false
-            return
-        end
+    if type(def.onClick) == "function" then
+        btn:SetScript("OnClick", def.onClick)
+    else
+        btn.__openFn = def.fn
+        btn.__closeFn = def.fn:gsub("^Open", "Close")
+        btn.__isOpen = false
+        btn:SetScript("OnClick", function(self)
+            local openFn = _G[self.__openFn]
+            local closeFn = _G[self.__closeFn]
 
-        if type(openFn) == "function" then
-            openFn()
-            self.__isOpen = true
-        else
-            print("|cFF00FF00OmniInventory|r: " .. self.__openFn .. "() is not available on this client.")
-        end
-    end)
+            if self.__isOpen and type(closeFn) == "function" then
+                closeFn()
+                self.__isOpen = false
+                return
+            end
+
+            if type(openFn) == "function" then
+                openFn()
+                self.__isOpen = true
+            else
+                print("|cFF00FF00OmniInventory|r: " .. self.__openFn .. "() is not available on this client.")
+            end
+        end)
+    end
+
+    if type(def.onReceiveDrag) == "function" then
+        btn:RegisterForDrag("LeftButton")
+        btn:SetScript("OnReceiveDrag", def.onReceiveDrag)
+    end
     return btn
 end
 
@@ -1214,6 +1499,21 @@ function Frame:CreateFooter()
     end
     footer.customButtonOrder = FOOTER_CUSTOM_BUTTONS
 
+    footer.addonSep = footer:CreateTexture(nil, "OVERLAY")
+    footer.addonSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    footer.addonSep:SetVertexColor(0.35, 0.35, 0.35, 1)
+    footer.addonSep:SetSize(1, 14)
+    footer.addonSep:Hide()
+
+    footer.addonButtons = {}
+    for _, def in ipairs(FOOTER_ADDON_BUTTONS) do
+        local btn = CreateFooterMiniButton(footer, def)
+        btn:Hide()
+        btn.__def = def
+        footer.addonButtons[def.key] = btn
+    end
+    footer.addonButtonOrder = FOOTER_ADDON_BUTTONS
+
     footer.sellBtn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
     footer.sellBtn:SetSize(80, 20)
     footer.sellBtn:SetPoint("CENTER")
@@ -1227,49 +1527,220 @@ function Frame:CreateFooter()
     footer.money:SetPoint("RIGHT", -6, 0)
     footer.money:SetText("0g 0s 0c")
 
+    -- ʕ •ᴥ•ʔ✿ Overflow flyout: when ribbon + money can't fit, extra buttons
+    -- are re-parented here and revealed above the footer on demand ✿ ʕ •ᴥ•ʔ
+    footer.overflowPopup = CreateFrame("Frame", nil, footer)
+    footer.overflowPopup:SetFrameStrata("DIALOG")
+    footer.overflowPopup:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    footer.overflowPopup:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+    footer.overflowPopup:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+    footer.overflowPopup:Hide()
+
+    footer.overflowBtn = CreateFrame("Button", nil, footer)
+    footer.overflowBtn:SetSize(FOOTER_BTN_SIZE, FOOTER_BTN_SIZE)
+    footer.overflowBtn:SetNormalTexture("Interface\\Buttons\\WHITE8X8")
+    local overflowTex = footer.overflowBtn:GetNormalTexture()
+    if overflowTex then
+        overflowTex:SetVertexColor(0.18, 0.18, 0.18, 0.9)
+    end
+    footer.overflowBtn.label = footer.overflowBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    footer.overflowBtn.label:SetPoint("CENTER")
+    footer.overflowBtn.label:SetText("»")
+    StyleFooterMiniButton(footer.overflowBtn)
+    footer.overflowBtn._tooltipTitle = "More"
+    footer.overflowBtn._tooltipSub   = "Launchers that didn't fit"
+    footer.overflowBtn:SetScript("OnClick", function(self)
+        local popup = footer.overflowPopup
+        if not popup then return end
+        if popup:IsShown() then popup:Hide() else popup:Show() end
+    end)
+    footer.overflowBtn:Hide()
+
+    -- ʕ •ᴥ•ʔ✿ Live reflow when the window is resized; cheap enough per-frame ✿ ʕ •ᴥ•ʔ
+    footer:SetScript("OnSizeChanged", function()
+        if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
+    end)
+
     mainFrame.footer = footer
 end
 
--- ʕノ•ᴥ•ʔノ Lays out custom launcher buttons between AH embed host and money
+-- ʕノ•ᴥ•ʔノ Lays out custom + addon launcher buttons between AH embed host and money.
+-- Buttons that don't fit are re-parented into an overflow flyout, toggled by a » tile.
+local SEP_SLOT_WIDTH     = 1 + FOOTER_SEP_GAP * 2
+local MONEY_SAFETY_GAP   = 8
+local OVERFLOW_SLOT_COST = FOOTER_BTN_SIZE + FOOTER_BTN_GAP
+
+local function ComputeRibbonAvailableWidth(footer)
+    local footerWidth = footer:GetWidth()
+    if not footerWidth or footerWidth <= 0 then
+        return math.huge
+    end
+
+    local leftEdge
+    if footer.attuneHelperHost and footer.attuneHelperHost:IsShown() then
+        local hostW = footer.attuneHelperHost:GetWidth() or 0
+        leftEdge = 6 + (footer.slots:GetStringWidth() or 0) + 8 + hostW
+    else
+        leftEdge = 6 + (footer.slots:GetStringWidth() or 0)
+    end
+
+    local moneyReserve = (footer.money:GetStringWidth() or 0) + 6 + MONEY_SAFETY_GAP
+    return footerWidth - leftEdge - moneyReserve
+end
+
+local function CollectRibbonItems(footer)
+    local items = {}
+
+    local function appendGroup(orderList, buttonsMap, isEnabledFn, sep)
+        local groupHasMember = false
+        for _, def in ipairs(orderList) do
+            local btn = buttonsMap[def.key]
+            if btn then
+                local enabled = isEnabledFn(def.key)
+                local available = (type(def.isAvailable) ~= "function") or def.isAvailable()
+                if enabled and available then
+                    if not groupHasMember then
+                        groupHasMember = true
+                        table.insert(items, { kind = "sep", obj = sep })
+                    end
+                    table.insert(items, { kind = "btn", obj = btn, def = def })
+                else
+                    btn:ClearAllPoints()
+                    btn:SetParent(footer)
+                    btn:Hide()
+                end
+            end
+        end
+        if not groupHasMember then
+            sep:ClearAllPoints()
+            sep:Hide()
+        end
+    end
+
+    appendGroup(footer.customButtonOrder, footer.customButtons, IsFooterCustomButtonEnabled, footer.customSep)
+    appendGroup(footer.addonButtonOrder, footer.addonButtons, IsFooterAddonButtonEnabled, footer.addonSep)
+    return items
+end
+
 function Frame:UpdateFooterCustomButtons()
     if not mainFrame or not mainFrame.footer then return end
     local footer = mainFrame.footer
-    if not footer.customButtons then return end
+    if not footer.customButtons or not footer.addonButtons then return end
 
-    local anchor, anchorEdgeX
+    local inlineAnchor, inlineAnchorGap
     if footer.attuneHelperHost and footer.attuneHelperHost:IsShown() then
-        anchor = footer.attuneHelperHost
-        anchorEdgeX = FOOTER_SEP_GAP
+        inlineAnchor    = footer.attuneHelperHost
+        inlineAnchorGap = FOOTER_SEP_GAP
     else
-        anchor = footer.slots
-        anchorEdgeX = FOOTER_SEP_GAP + 2
+        inlineAnchor    = footer.slots
+        inlineAnchorGap = FOOTER_SEP_GAP + 2
     end
 
-    local prev
-    local anyVisible = false
-    for _, def in ipairs(footer.customButtonOrder) do
-        local btn = footer.customButtons[def.key]
-        if btn then
-            if IsFooterCustomButtonEnabled(def.key) then
-                btn:ClearAllPoints()
-                if not anyVisible then
-                    footer.customSep:ClearAllPoints()
-                    footer.customSep:SetPoint("LEFT", anchor, "RIGHT", anchorEdgeX, 0)
-                    footer.customSep:Show()
-                    btn:SetPoint("LEFT", footer.customSep, "RIGHT", FOOTER_SEP_GAP, 0)
-                else
-                    btn:SetPoint("LEFT", prev, "RIGHT", FOOTER_BTN_GAP, 0)
-                end
-                btn:Show()
-                prev = btn
-                anyVisible = true
+    local items = CollectRibbonItems(footer)
+    local totalNeededWidth = 0
+    for _, item in ipairs(items) do
+        if item.kind == "sep" then
+            totalNeededWidth = totalNeededWidth + SEP_SLOT_WIDTH
+        else
+            totalNeededWidth = totalNeededWidth + FOOTER_BTN_SIZE + FOOTER_BTN_GAP
+        end
+    end
+
+    local available     = ComputeRibbonAvailableWidth(footer)
+    local mustOverflow  = totalNeededWidth > available
+    local inlineBudget  = mustOverflow and (available - OVERFLOW_SLOT_COST) or available
+
+    local inlinePrev        = nil
+    local runningWidth      = 0
+    local overflowButtons   = {}
+    local lastInlineSep     = nil
+
+    local function placeInline(obj, kind)
+        obj:ClearAllPoints()
+        obj:SetParent(footer)
+        if kind == "sep" then
+            if inlinePrev then
+                obj:SetPoint("LEFT", inlinePrev, "RIGHT", FOOTER_SEP_GAP, 0)
             else
-                btn:Hide()
+                obj:SetPoint("LEFT", inlineAnchor, "RIGHT", inlineAnchorGap, 0)
+            end
+            obj:Show()
+            lastInlineSep = obj
+            inlinePrev = obj
+        else
+            if inlinePrev then
+                local gap = (inlinePrev == lastInlineSep) and FOOTER_SEP_GAP or FOOTER_BTN_GAP
+                obj:SetPoint("LEFT", inlinePrev, "RIGHT", gap, 0)
+            else
+                obj:SetPoint("LEFT", inlineAnchor, "RIGHT", inlineAnchorGap, 0)
+            end
+            obj:Show()
+            inlinePrev = obj
+        end
+    end
+
+    for i, item in ipairs(items) do
+        local cost = (item.kind == "sep") and SEP_SLOT_WIDTH or (FOOTER_BTN_SIZE + FOOTER_BTN_GAP)
+        local nextItem = items[i + 1]
+
+        local wouldOverflow = (runningWidth + cost) > inlineBudget
+        -- A sep alone at the tail is meaningless; if the next button won't fit, overflow the sep too
+        if item.kind == "sep" and nextItem and nextItem.kind == "btn" then
+            local btnCost = FOOTER_BTN_SIZE + FOOTER_BTN_GAP
+            if (runningWidth + cost + btnCost) > inlineBudget then
+                wouldOverflow = true
+            end
+        end
+
+        if not mustOverflow or not wouldOverflow then
+            placeInline(item.obj, item.kind)
+            runningWidth = runningWidth + cost
+        else
+            if item.kind == "sep" then
+                item.obj:ClearAllPoints()
+                item.obj:Hide()
+            else
+                table.insert(overflowButtons, item.obj)
             end
         end
     end
-    if not anyVisible then
-        footer.customSep:Hide()
+
+    if mustOverflow and #overflowButtons > 0 then
+        local attachAnchor = inlinePrev or inlineAnchor
+        local attachGap    = inlinePrev and FOOTER_BTN_GAP or inlineAnchorGap
+        footer.overflowBtn:ClearAllPoints()
+        footer.overflowBtn:SetPoint("LEFT", attachAnchor, "RIGHT", attachGap, 0)
+        footer.overflowBtn:Show()
+
+        local popup = footer.overflowPopup
+        local popupPad = 4
+        local popupWidth = popupPad * 2 + #overflowButtons * FOOTER_BTN_SIZE + (#overflowButtons - 1) * FOOTER_BTN_GAP
+        local popupHeight = popupPad * 2 + FOOTER_BTN_SIZE
+        popup:ClearAllPoints()
+        popup:SetSize(popupWidth, popupHeight)
+        popup:SetPoint("BOTTOMRIGHT", footer.overflowBtn, "TOPRIGHT", 2, 4)
+
+        local prevPopupBtn
+        for _, btn in ipairs(overflowButtons) do
+            btn:ClearAllPoints()
+            btn:SetParent(popup)
+            if prevPopupBtn then
+                btn:SetPoint("LEFT", prevPopupBtn, "RIGHT", FOOTER_BTN_GAP, 0)
+            else
+                btn:SetPoint("LEFT", popupPad, 0)
+            end
+            btn:Show()
+            prevPopupBtn = btn
+        end
+    else
+        footer.overflowBtn:ClearAllPoints()
+        footer.overflowBtn:Hide()
+        footer.overflowPopup:Hide()
     end
 end
 
@@ -1364,6 +1835,7 @@ function Frame:CreateResizeHandle()
         mainFrame:StopMovingOrSizing()
         Frame:SavePosition()
         Frame:UpdateLayout()
+        if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
     end)
 
     mainFrame.resizeHandle = handle
@@ -1748,6 +2220,7 @@ function Frame:RenderFlowView(items)
     -- Hide existing headers and list rows
     for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
+    if mainFrame.tradeGoodsDepositBtn then mainFrame.tradeGoodsDepositBtn:Hide() end
 
     local hInset = 8
     local usableWidth = mainFrame.content:GetWidth() - hInset
@@ -1878,6 +2351,17 @@ function Frame:RenderFlowView(items)
                     header:SetText(catName .. " (" .. #catItems .. ")")
                 end
                 header:Show()
+
+                if currentView ~= "bag" and catName == "Trade Goods" then
+                    local depositBtn = EnsureTradeGoodsDepositButton()
+                    if depositBtn then
+                        depositBtn:SetParent(scrollChild)
+                        depositBtn:SetFrameLevel(header:GetParent():GetFrameLevel() + 5)
+                        depositBtn:ClearAllPoints()
+                        depositBtn:SetPoint("LEFT", header, "RIGHT", 6, 0)
+                        depositBtn:Show()
+                    end
+                end
 
                 laneY = laneY - sectionHeaderHeight
             end

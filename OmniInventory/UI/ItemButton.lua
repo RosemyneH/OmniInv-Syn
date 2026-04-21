@@ -20,7 +20,15 @@ local BORDER_SIZE = 2
 local ATTUNE_BAR_WIDTH = 6
 local ATTUNE_MIN_HEIGHT_PERCENT = 0.2
 local ATTUNE_MAX_HEIGHT_PERCENT = 0.9
-local RESIST_ICON_TEXTURE = "Interface\\Icons\\Spell_Holy_MagicalSentry"
+-- ʕ •ᴥ•ʔ✿ Per-school resistance icons; fallback covers untyped/unknown schools ✿ ʕ •ᴥ•ʔ
+local RESIST_ICON_TEXTURES = {
+    Shadow = "Interface\\Icons\\Spell_Shadow_AntiShadow",
+    Fire   = "Interface\\Icons\\Spell_Fire_FireArmor",
+    Frost  = "Interface\\Icons\\Spell_Frost_FrostWard",
+    Arcane = "Interface\\Icons\\Spell_Shadow_DetectLesserInvisibility",
+    Nature = "Interface\\Icons\\Spell_Nature_ProtectionformNature",
+}
+local RESIST_ICON_FALLBACK = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
 local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
 local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
@@ -218,16 +226,17 @@ local function IsItemBountied(itemID)
     return (bountiedValue or 0) > 0
 end
 
-local function IsItemResistArmor(itemLink, itemID)
+-- ʕ •ᴥ•ʔ✿ Returns the resistance school (Arcane/Fire/Nature/Frost/Shadow) or nil ✿ ʕ •ᴥ•ʔ
+local function GetItemResistSchool(itemLink, itemID)
     if not itemLink or not itemID then
-        return false
+        return nil
     end
     if select(6, GetItemInfo(itemID)) ~= "Armor" then
-        return false
+        return nil
     end
     local itemName = itemLink:match("%[(.-)%]")
     if not itemName then
-        return false
+        return nil
     end
     local resistIndicators = { "Resistance", "Protection" }
     local resistTypes = { "Arcane", "Fire", "Nature", "Frost", "Shadow" }
@@ -235,12 +244,12 @@ local function IsItemResistArmor(itemLink, itemID)
         if string.find(itemName, indicator) then
             for _, resistType in ipairs(resistTypes) do
                 if string.find(itemName, resistType) then
-                    return true
+                    return resistType
                 end
             end
         end
     end
-    return false
+    return nil
 end
 
 local function HideAttuneDisplay(button)
@@ -282,6 +291,19 @@ local function UpdateForgeDisplay(button, itemInfo)
     else
         button.forgeText:SetTextColor(1, 1, 1, 1)
     end
+
+    -- ʕ •ᴥ•ʔ✿ Outline toggle: keep original font/size, only flip flags ✿ ʕ •ᴥ•ʔ
+    local wantOutline = not settings or settings.forgeOutline ~= false
+    if button.__forgeOutlineApplied ~= wantOutline then
+        if not button.__forgeFontBase then
+            local basePath, baseSize = button.forgeText:GetFont()
+            button.__forgeFontBase = { path = basePath, size = baseSize or 10 }
+        end
+        local base = button.__forgeFontBase
+        button.forgeText:SetFont(base.path, base.size, wantOutline and "OUTLINE" or "")
+        button.__forgeOutlineApplied = wantOutline
+    end
+
     button.forgeText:Show()
 end
 
@@ -468,7 +490,8 @@ function ItemButton:Create(parent)
     button.accountIcon:Hide()
 
     button.resistIcon = button:CreateTexture(nil, "OVERLAY")
-    button.resistIcon:SetTexture(RESIST_ICON_TEXTURE)
+    button.resistIcon:SetTexture(RESIST_ICON_FALLBACK)
+    button.resistIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     button.resistIcon:SetSize(16, 16)
     button.resistIcon:SetPoint("TOP", button, "TOP", 0, -2)
     button.resistIcon:Hide()
@@ -578,7 +601,9 @@ local function UpdateAttuneDisplay(button, itemInfo)
         button.accountIcon:Hide()
     end
 
-    if settings.showResistIcons and IsItemResistArmor(itemLink, itemID) then
+    local resistSchool = settings.showResistIcons and GetItemResistSchool(itemLink, itemID) or nil
+    if resistSchool then
+        button.resistIcon:SetTexture(RESIST_ICON_TEXTURES[resistSchool] or RESIST_ICON_FALLBACK)
         button.resistIcon:Show()
     else
         button.resistIcon:Hide()

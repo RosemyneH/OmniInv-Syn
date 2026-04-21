@@ -216,11 +216,21 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         OverrideBags()
 
+        -- ʕ •ᴥ•ʔ✿ Claim AttuneHelper right away so its default frame never
+        -- flashes on screen before the bag takes it hostage. ✿ ʕ •ᴥ•ʔ
+        if Omni.Frame and Omni.Frame.HideAttuneHelperUntilOpened then
+            Omni.Frame:HideAttuneHelperUntilOpened()
+        end
+
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Re-apply: late-loading addons may have replaced our globals.
         -- Safe in combat -- the Blizzard-frame suppression inside
         -- OverrideBags is itself combat-gated.
         OverrideBags()
+
+        if Omni.Frame and Omni.Frame.HideAttuneHelperUntilOpened then
+            Omni.Frame:HideAttuneHelperUntilOpened()
+        end
 
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Same defensive re-apply once combat lockdown lifts; this also

@@ -20,7 +20,7 @@ Omni\Utils.lua
 Omni\Data.lua
 Omni\Categorizer.lua
 Omni\Sorter.lua
-Omni\Rules.lua
+# Omni\Rules.lua            -- disabled: custom-rule engine is unsupported (kept for future rewrite)
 
 # =============================================================================
 # UI Components
@@ -32,7 +32,7 @@ UI\ListView.lua
 UI\Frame.lua
 UI\BankFrame.lua
 UI\Options.lua
-UI\CategoryEditor.lua
+# UI\CategoryEditor.lua     -- disabled alongside Omni\Rules.lua; do not re-enable without a rewrite
 
 # =============================================================================
 # Main Entry Point
