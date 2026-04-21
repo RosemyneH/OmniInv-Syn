@@ -22,12 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `slotButtons[bagID][slotID]` map instead of per-render pool acquire /
   release. Empty slots park in a trailing "overflow" strip at alpha 0 so
   every slot always has a valid on-screen position.
-- `UI/Frame.lua` `RenderFlowView` now pulls the **BoE** category out of
-  the dual-lane flow and renders it last as a dedicated full-width
-  section (always present in flow mode, even when the player holds zero
-  BoE equipment). The overflow strip sits flush under its header, so any
-  item that lands in a previously-empty slot during combat visually
-  appears "under BoE" instead of floating below the final lane.
+- `UI/Frame.lua` `RenderFlowView` now pins the **BoE** category to the
+  tail of the priority order so it renders last inside the normal
+  dual-lane flow (always present in flow mode, even when the player
+  holds zero BoE equipment). The overflow strip anchors to BoE's own
+  half-width lane and continues directly under its last item row, so
+  any item that lands in a previously-empty slot during combat visually
+  appears "under BoE" without breaking the two-sided category split.
 - `UI/Frame.lua` `RefreshCombatContent` now iterates the full slot-button
   map instead of only the last-render's populated list. Visibility is
   driven by `SetAlpha` (insecure) rather than `Show`/`Hide` (protected).

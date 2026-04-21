@@ -1586,32 +1586,40 @@ function Frame:RenderFlowView(items)
             end)
         end
 
-        -- ʕ •ᴥ•ʔ✿ Pull BoE out of the dual-lane flow so it renders last as
-        -- a dedicated full-width section. The overflow strip (where every
-        -- pre-parked empty slot button lives) then sits flush under its
-        -- header, which means any item that lands in a previously empty
-        -- slot during combat visually appears under "BoE" instead of
-        -- floating below the final lane. ✿ ʕ •ᴥ•ʔ
-        local filteredOrder = {}
+        -- ʕ •ᴥ•ʔ✿ Keep BoE inside the dual-lane flow, but pin it to the
+        -- tail of the priority order so it's the final section rendered.
+        -- We still render the BoE header even when the player holds zero
+        -- BoE equipment -- the overflow strip (where every pre-parked
+        -- empty slot button lives) anchors to BoE's lane, so any item
+        -- that lands in a previously empty slot during combat visually
+        -- appears under "BoE" inside its half-width lane. ✿ ʕ •ᴥ•ʔ
+        local reordered = {}
         for _, catName in ipairs(categoryOrder) do
             if catName ~= "BoE" then
-                table.insert(filteredOrder, catName)
+                table.insert(reordered, catName)
             end
         end
-        categoryOrder = filteredOrder
         categories["BoE"] = categories["BoE"] or {}
+        table.insert(reordered, "BoE")
+        categoryOrder = reordered
     end
 
     local headerIndex = 0
+    -- ʕ •ᴥ•ʔ✿ BoE tail anchor: captured when we render the BoE section
+    -- so the overflow strip below can slot in under BoE's lane at
+    -- BoE's own half-width. ✿ ʕ •ᴥ•ʔ
+    local boeAnchor = nil
+    local flowMode = (currentView ~= "grid" and currentView ~= "bag")
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
-        if catItems and #catItems > 0 then
+        local isBoeAnchor = (flowMode and catName == "BoE")
+        if catItems and (#catItems > 0 or isBoeAnchor) then
             renderedSectionCount = renderedSectionCount + 1
 
-            local laneX, laneY, columns
+            local laneX, laneY, columns, laneW
             if dualCategoryLanes then
-                local laneW = (usableWidth - laneGap) * 0.5
+                laneW = (usableWidth - laneGap) * 0.5
                 local edgePad = hInset * 0.5
                 local leftX = edgePad + ITEM_SPACING
                 local rightX = edgePad + laneW + laneGap + ITEM_SPACING
@@ -1620,6 +1628,7 @@ function Frame:RenderFlowView(items)
                 laneY = useRight and yRight or yLeft
                 columns = columnsForLaneWidth(laneW)
             else
+                laneW = usableWidth
                 laneX = ITEM_SPACING
                 laneY = yOffset
                 columns = columnsForLaneWidth(usableWidth)
@@ -1692,7 +1701,20 @@ function Frame:RenderFlowView(items)
             end
 
             local catRows = math.ceil(#catItems / columns)
-            laneY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+            local itemsBottomY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING))
+            laneY = itemsBottomY - sectionSpacing
+
+            if isBoeAnchor then
+                -- ʕ •ᴥ•ʔ✿ Remember BoE's lane geometry so the overflow
+                -- strip below slots in at BoE's x/width and continues the
+                -- lane directly under its last item row. ✿ ʕ •ᴥ•ʔ
+                boeAnchor = {
+                    x = laneX,
+                    y = itemsBottomY,
+                    columns = columns,
+                    laneW = laneW,
+                }
+            end
 
             if dualCategoryLanes then
                 if (renderedSectionCount % 2 == 0) then
@@ -1713,95 +1735,35 @@ function Frame:RenderFlowView(items)
         mainBottomY = yOffset
     end
 
-    -- ʕ •ᴥ•ʔ✿ BoE tail section ✿ ʕ •ᴥ•ʔ
-    --
-    -- Always rendered in flow mode, full width, even when the player has
-    -- zero BoE equipment on them. This acts as the anchor for the
-    -- overflow strip below: every pre-parked empty slot button sits
-    -- directly under this header, so anything that drops into a
-    -- previously-empty slot during combat pops in visually "under BoE"
-    -- rather than floating at the bottom of the scroll area.
-    local bottomY = mainBottomY
-    if currentView ~= "grid" and currentView ~= "bag" then
-        local boeItems = categories["BoE"] or {}
-        local boeX = ITEM_SPACING
-        local boeY = mainBottomY
-        local boeColumns = columnsForLaneWidth(usableWidth)
-
-        headerIndex = headerIndex + 1
-        local header = categoryHeaders[headerIndex]
-        if not header then
-            header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            categoryHeaders[headerIndex] = header
-        end
-        header:ClearAllPoints()
-        header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", boeX, boeY)
-        if Omni.Categorizer then
-            local r, g, b = Omni.Categorizer:GetCategoryColor("BoE")
-            header:SetTextColor(r, g, b)
-        else
-            header:SetTextColor(0.4, 0.9, 1.0)
-        end
-        header:SetText("BoE (" .. #boeItems .. ")")
-        header:Show()
-        boeY = boeY - sectionHeaderHeight
-
-        for i, itemInfo in ipairs(boeItems) do
-            local bagID = itemInfo.bagID
-            local slotID = itemInfo.slotID
-            local btn = (bagID and slotID) and GetSlotButton(bagID, slotID) or nil
-
-            if btn then
-                local col = ((i - 1) % boeColumns)
-                local row = math.floor((i - 1) / boeColumns)
-                local x = boeX + col * (ITEM_SIZE + ITEM_SPACING)
-                local y = boeY - row * (ITEM_SIZE + ITEM_SPACING)
-
-                pcall(function()
-                    btn:ClearAllPoints()
-                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                    btn:SetAlpha(1)
-                end)
-
-                local success = pcall(function()
-                    SetButtonItem(btn, itemInfo)
-                    btn:Show()
-                end)
-                if not success then
-                    pcall(SetButtonItem, btn, nil)
-                    if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
-                    pcall(btn.Show, btn)
-                end
-
-                touched[bagID] = touched[bagID] or {}
-                touched[bagID][slotID] = true
-                table.insert(itemButtons, btn)
-            end
-        end
-
-        local boeRows = math.ceil(#boeItems / boeColumns)
-        -- Skip the trailing sectionSpacing here because the overflow strip
-        -- applies its own OVERFLOW_ROW_GAP immediately below.
-        boeY = boeY - (boeRows * (ITEM_SIZE + ITEM_SPACING))
-        bottomY = boeY
-    end
-
     -- ʕ •ᴥ•ʔ✿ Overflow strip ✿ ʕ •ᴥ•ʔ
     --
     -- Every slot button that did NOT receive an item from the sorted pass
-    -- gets parked in a grid below the sorted content at alpha 0. This
-    -- guarantees two things:
+    -- gets parked in a grid at alpha 0 immediately below the BoE section
+    -- (its own dual-lane column), so any item that lands in a previously
+    -- empty slot during combat visually pops in "under BoE" without
+    -- needing a protected SetPoint call. This guarantees:
     --
     --   1) Every bag slot has a real, on-screen position at all times --
-    --      so if an item lands in a previously empty slot during combat,
     --      RefreshCombatContent can just SetAlpha(1) + SetItem and the
-    --      user sees the new item immediately. No SetPoint required.
+    --      user sees the new item immediately.
     --
     --   2) Items that are used / sold / moved during combat can fade out
     --      (alpha 0) in place without protected Hide() calls, and come
     --      back cleanly on the next OOC render.
-    local overflowColumns = columnsForLaneWidth(usableWidth)
-    local overflowTop = bottomY - OVERFLOW_ROW_GAP
+    --
+    -- If flow mode didn't render a BoE anchor (grid/bag view), we fall
+    -- back to full-width overflow anchored at the deepest lane.
+    local overflowX, overflowColumns, overflowTop
+    if boeAnchor then
+        overflowX = boeAnchor.x
+        overflowColumns = boeAnchor.columns
+        overflowTop = boeAnchor.y - OVERFLOW_ROW_GAP
+    else
+        overflowX = ITEM_SPACING
+        overflowColumns = columnsForLaneWidth(usableWidth)
+        overflowTop = mainBottomY - OVERFLOW_ROW_GAP
+    end
+
     local overflowIndex = 0
     IterateSlotButtons(function(bagID, slotID, btn)
         local isTouched = touched[bagID] and touched[bagID][slotID]
@@ -1809,7 +1771,7 @@ function Frame:RenderFlowView(items)
 
         local col = overflowIndex % overflowColumns
         local row = math.floor(overflowIndex / overflowColumns)
-        local x = ITEM_SPACING + col * (ITEM_SIZE + ITEM_SPACING)
+        local x = overflowX + col * (ITEM_SIZE + ITEM_SPACING)
         local y = overflowTop - row * (ITEM_SIZE + ITEM_SPACING)
 
         pcall(function()
@@ -1828,7 +1790,12 @@ function Frame:RenderFlowView(items)
         and (OVERFLOW_ROW_GAP + overflowRows * (ITEM_SIZE + ITEM_SPACING))
         or 0
 
-    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING + overflowExtent)
+    -- Scroll height has to accommodate the deepest point on the page,
+    -- which is either the deepest lane (mainBottomY) or the bottom of
+    -- the overflow strip anchored at BoE's lane.
+    local overflowBottom = boeAnchor and (boeAnchor.y - overflowExtent) or (mainBottomY - overflowExtent)
+    local deepestY = math.min(mainBottomY, overflowBottom)
+    scrollChild:SetHeight(math.abs(deepestY) + ITEM_SPACING)
 end
 
 -- =============================================================================
