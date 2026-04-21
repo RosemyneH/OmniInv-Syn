@@ -41,6 +41,8 @@ local defaults = {
             nonAttunableBarColor = { r = 1.0, g = 0.0, b = 0.0, a = 1.0 },
             textColor = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },
         },
+        attuneHelperEmbed = true,
+        attuneHelperMiniNoBorder = false,
     },
     char = {
         position = nil,         -- { point, x, y }

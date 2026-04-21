@@ -45,21 +45,27 @@ The main frame is the primary window for OmniInventory, providing the container 
 ## API Reference
 
 ### Frame:Init()
+
 Create and initialize the main frame.
 
 ### Frame:Show()
+
 Show the frame, refresh items.
 
 ### Frame:Hide()
+
 Hide the frame, release pooled buttons.
 
 ### Frame:Toggle()
+
 Toggle visibility.
 
 ### Frame:UpdateLayout(changedBags)
+
 Refresh item display for changed bags.
 
 ### Frame:SetView(mode)
+
 Switch view mode: "grid", "flow", "list"
 
 ---
@@ -85,9 +91,10 @@ Switch view mode: "grid", "flow", "list"
 
 ## Definition of Done
 
-- [x] Frame displays with proper backdrop
-- [x] Header with title, close button
-- [x] Search box functional
-- [x] Position saves between sessions
-- [x] B key toggles
-- [x] ESC closes
+- Frame displays with proper backdrop
+- Header with title, close button
+- Search box functional
+- Position saves between sessions
+- B key toggles
+- ESC closes
+

@@ -54,6 +54,24 @@ local function GetAttuneSettings()
     return attune
 end
 
+local function IsAttuneHelperEmbedEnabled()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if OmniInventoryDB.global.attuneHelperEmbed == nil then
+        OmniInventoryDB.global.attuneHelperEmbed = true
+    end
+    return OmniInventoryDB.global.attuneHelperEmbed == true
+end
+
+local function IsAttuneHelperMiniNoBorderEnabled()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if OmniInventoryDB.global.attuneHelperMiniNoBorder == nil then
+        OmniInventoryDB.global.attuneHelperMiniNoBorder = false
+    end
+    return OmniInventoryDB.global.attuneHelperMiniNoBorder == true
+end
+
 -- =============================================================================
 -- Creation
 -- =============================================================================
@@ -244,6 +262,44 @@ function Settings:CreateControls(parent)
     self.attuneFae = CreateAttuneCheckbox("faeMode", "Fae 100%", 160)
     yOffset = yOffset - 22
 
+    local attuneHelperEmbedCb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    attuneHelperEmbedCb:SetSize(24, 24)
+    attuneHelperEmbedCb:SetPoint("TOPLEFT", 14, yOffset)
+    local attuneHelperEmbedLabel = attuneHelperEmbedCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    attuneHelperEmbedLabel:SetPoint("LEFT", attuneHelperEmbedCb, "RIGHT", 2, 1)
+    attuneHelperEmbedLabel:SetText("Embed AH Mini Buttons")
+    attuneHelperEmbedCb:SetChecked(IsAttuneHelperEmbedEnabled())
+    attuneHelperEmbedCb:SetScript("OnClick", function(self)
+        OmniInventoryDB = OmniInventoryDB or {}
+        OmniInventoryDB.global = OmniInventoryDB.global or {}
+        OmniInventoryDB.global.attuneHelperEmbed = self:GetChecked() and true or false
+        if Omni.Frame and Omni.Frame.UpdateEmbeddedAttuneHelper then
+            Omni.Frame:UpdateEmbeddedAttuneHelper()
+        end
+    end)
+    self.attuneHelperEmbedCb = attuneHelperEmbedCb
+
+    yOffset = yOffset - 22
+
+    local attuneHelperMiniNoBorderCb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    attuneHelperMiniNoBorderCb:SetSize(24, 24)
+    attuneHelperMiniNoBorderCb:SetPoint("TOPLEFT", 14, yOffset)
+    local attuneHelperMiniNoBorderLabel = attuneHelperMiniNoBorderCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    attuneHelperMiniNoBorderLabel:SetPoint("LEFT", attuneHelperMiniNoBorderCb, "RIGHT", 2, 1)
+    attuneHelperMiniNoBorderLabel:SetText("Hide AH Mini Border")
+    attuneHelperMiniNoBorderCb:SetChecked(IsAttuneHelperMiniNoBorderEnabled())
+    attuneHelperMiniNoBorderCb:SetScript("OnClick", function(self)
+        OmniInventoryDB = OmniInventoryDB or {}
+        OmniInventoryDB.global = OmniInventoryDB.global or {}
+        OmniInventoryDB.global.attuneHelperMiniNoBorder = self:GetChecked() and true or false
+        if Omni.Frame and Omni.Frame.UpdateEmbeddedAttuneHelper then
+            Omni.Frame:UpdateEmbeddedAttuneHelper()
+        end
+    end)
+    self.attuneHelperMiniNoBorderCb = attuneHelperMiniNoBorderCb
+
+    yOffset = yOffset - 22
+
     yOffset = yOffset - 32
 
     local function CreateColorSwatch(key, title, xOffset)
@@ -346,6 +402,8 @@ function Settings:UpdateValues()
     if self.attuneResist then self.attuneResist:SetChecked(attune.showResistIcons ~= false) end
     if self.attuneRed then self.attuneRed:SetChecked(attune.showRedForNonAttunable ~= false) end
     if self.attuneFae then self.attuneFae:SetChecked(attune.faeMode == true) end
+    if self.attuneHelperEmbedCb then self.attuneHelperEmbedCb:SetChecked(IsAttuneHelperEmbedEnabled()) end
+    if self.attuneHelperMiniNoBorderCb then self.attuneHelperMiniNoBorderCb:SetChecked(IsAttuneHelperMiniNoBorderEnabled()) end
     if self.attuneRedColor then
         local c = attune.nonAttunableBarColor
         self.attuneRedColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)

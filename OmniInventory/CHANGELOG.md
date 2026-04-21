@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Combat-Safe Slot Buttons** (`docs/Features/combat-safe-bags.md`): Every
+  physical bag slot now has a persistent `ItemButton` pre-parented and
+  `SetID`'d out of combat. Items that appear mid-combat (loot, quest
+  rewards, crafting output) are immediately visible AND clickable via
+  Blizzard's secure `ContainerFrameItemButton_OnClick` — no more waiting
+  for `PLAYER_REGEN_ENABLED` to see a new drop.
+
+### Changed
+
+- `UI/Frame.lua` `RenderFlowView` rebuilt around a persistent
+  `slotButtons[bagID][slotID]` map instead of per-render pool acquire /
+  release. Empty slots park in a trailing "overflow" strip at alpha 0 so
+  every slot always has a valid on-screen position.
+- `UI/Frame.lua` `RenderFlowView` now pulls the **BoE** category out of
+  the dual-lane flow and renders it last as a dedicated full-width
+  section (always present in flow mode, even when the player holds zero
+  BoE equipment). The overflow strip sits flush under its header, so any
+  item that lands in a previously-empty slot during combat visually
+  appears "under BoE" instead of floating below the final lane.
+- `UI/Frame.lua` `RefreshCombatContent` now iterates the full slot-button
+  map instead of only the last-render's populated list. Visibility is
+  driven by `SetAlpha` (insecure) rather than `Show`/`Hide` (protected).
+
+### Fixed
+
+- **Invisible items during combat**: Previously, items that dropped into
+  slots that were empty at the last OOC render were completely invisible
+  and uninteractable until combat ended. They now render immediately in
+  the overflow strip and are clickable via the secure item-button path.
+
 ## [2.0-alpha] - 2025-12-26
 
 ### Added

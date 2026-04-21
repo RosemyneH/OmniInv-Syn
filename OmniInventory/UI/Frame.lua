@@ -33,7 +33,14 @@ local BAG_IDS = { 0, 1, 2, 3, 4 }
 -- =============================================================================
 
 local mainFrame = nil
-local itemButtons = {}  -- Active item buttons
+-- ʕ •ᴥ•ʔ✿ Persistent slot-button map: slotButtons[bagID][slotID] = button.
+-- Each button is created, parented to its bag's ItemContainer, and SetID
+-- once out-of-combat. It is never reparented or renumbered again. During
+-- combat we only mutate insecure state (alpha, icon, count), which keeps
+-- every physical bag slot interactable even for items that appear while
+-- PLAYER_REGEN_ENABLED is still pending. ✿ ʕ •ᴥ•ʔ
+local slotButtons = {}
+local itemButtons = {}  -- Flat list of populated slot buttons (search / cooldown)
 local categoryHeaders = {}  -- Active category header FontStrings
 local listRows = {}  -- Track list row frames
 local currentView = DEFAULT_VIEW_MODE
@@ -89,6 +96,51 @@ local function NormalizeViewMode(mode)
         return mode
     end
     return DEFAULT_VIEW_MODE
+end
+
+local function IsAttuneHelperEmbedEnabled()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if global and global.attuneHelperEmbed == nil then
+        global.attuneHelperEmbed = true
+    end
+    return not global or global.attuneHelperEmbed ~= false
+end
+
+local function IsAttuneHelperMiniNoBorderEnabled()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if global and global.attuneHelperMiniNoBorder == nil then
+        global.attuneHelperMiniNoBorder = false
+    end
+    return global and global.attuneHelperMiniNoBorder == true
+end
+
+local function ApplyEmbeddedMiniBorderStyle(miniFrame)
+    if not miniFrame then return end
+    if not miniFrame.SetBackdropBorderColor then return end
+
+    if IsAttuneHelperMiniNoBorderEnabled() then
+        miniFrame:SetBackdropBorderColor(0, 0, 0, 0)
+    else
+        miniFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+    end
+end
+
+local function RestoreEmbeddedAttuneHelper()
+    if not mainFrame or not mainFrame.footer then return end
+
+    local host = mainFrame.footer.attuneHelperHost
+    if host then
+        host:Hide()
+    end
+
+    local miniFrame = _G.AttuneHelperMiniFrame
+    if not miniFrame then return end
+    if miniFrame:GetParent() ~= UIParent then
+        miniFrame:SetParent(UIParent)
+    end
+    miniFrame:ClearAllPoints()
+    miniFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    miniFrame:Hide()
 end
 
 local function GetSavedViewMode()
@@ -867,6 +919,104 @@ end
 Frame._GetItemContainer = GetItemContainer
 
 -- =============================================================================
+-- Persistent Slot-Button Map
+-- =============================================================================
+--
+-- ʕ •ᴥ•ʔ✿ Why this exists ✿ ʕ •ᴥ•ʔ
+--
+-- ContainerFrameItemButtonTemplate is a protected frame. Structural ops
+-- (SetParent, SetPoint, ClearAllPoints, SetID, Show, Hide) are forbidden
+-- during combat. The ONLY way to guarantee a new item arriving mid-combat
+-- is still clickable is to pre-allocate a button for every physical bag
+-- slot out-of-combat, then touch ONLY insecure state (SetAlpha, icon,
+-- count) when combat fills or empties it.
+
+local OVERFLOW_ROW_GAP = 4
+
+local function GetSlotButton(bagID, slotID)
+    local byBag = slotButtons[bagID]
+    if not byBag then return nil end
+    return byBag[slotID]
+end
+Frame._GetSlotButton = GetSlotButton
+
+local function CreateSlotButton(bagID, slotID)
+    if InCombat() then return nil end
+
+    local container = GetItemContainer(bagID)
+    if not container then return nil end
+
+    local btn
+    if Omni.Pool then
+        btn = Omni.Pool:Acquire("ItemButton")
+    end
+    if not btn and Omni.ItemButton then
+        btn = Omni.ItemButton:Create(container)
+    end
+    if not btn then return nil end
+
+    pcall(function()
+        if btn:GetParent() ~= container then
+            btn:SetParent(container)
+        end
+        if btn.SetID then btn:SetID(slotID) end
+        btn:ClearAllPoints()
+        btn:SetAlpha(0)
+        btn:Show()
+    end)
+
+    btn.bagID = bagID
+    btn.slotID = slotID
+
+    return btn
+end
+
+-- ʕ ◕ᴥ◕ ʔ Ensure every physical bag slot has a persistent button. Called
+-- OOC from RenderFlowView. Grows on bag upgrades and releases surplus
+-- buttons back to the pool when a bag is swapped for something smaller.
+local function EnsureSlotButtons()
+    if InCombat() then return end
+
+    for _, bagID in ipairs(BAG_IDS) do
+        slotButtons[bagID] = slotButtons[bagID] or {}
+        local byBag = slotButtons[bagID]
+        local numSlots = GetContainerNumSlots(bagID) or 0
+
+        for slotID = 1, numSlots do
+            if not byBag[slotID] then
+                byBag[slotID] = CreateSlotButton(bagID, slotID)
+            end
+        end
+
+        for slotID, btn in pairs(byBag) do
+            if slotID > numSlots then
+                if Omni.Pool then
+                    Omni.Pool:Release("ItemButton", btn)
+                else
+                    pcall(btn.Hide, btn)
+                end
+                byBag[slotID] = nil
+            end
+        end
+    end
+end
+Frame._EnsureSlotButtons = EnsureSlotButtons
+
+local function IterateSlotButtons(callback)
+    for _, bagID in ipairs(BAG_IDS) do
+        local byBag = slotButtons[bagID]
+        if byBag then
+            for slotID, btn in pairs(byBag) do
+                if btn then
+                    callback(bagID, slotID, btn)
+                end
+            end
+        end
+    end
+end
+Frame._IterateSlotButtons = IterateSlotButtons
+
+-- =============================================================================
 -- Footer
 -- =============================================================================
 
@@ -887,6 +1037,11 @@ function Frame:CreateFooter()
     footer.slots:SetPoint("LEFT", 6, 0)
     footer.slots:SetText("0/0")
 
+    footer.attuneHelperHost = CreateFrame("Frame", nil, footer)
+    footer.attuneHelperHost:SetPoint("LEFT", footer.slots, "RIGHT", 8, 0)
+    footer.attuneHelperHost:SetSize(96, 24)
+    footer.attuneHelperHost:Hide()
+
     -- Sell Junk Button
     footer.sellBtn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
     footer.sellBtn:SetSize(80, 20)
@@ -903,6 +1058,68 @@ function Frame:CreateFooter()
     footer.money:SetText("0g 0s 0c")
 
     mainFrame.footer = footer
+end
+
+function Frame:UpdateEmbeddedAttuneHelper()
+    if not mainFrame or not mainFrame.footer then return end
+    local host = mainFrame.footer.attuneHelperHost
+    if not host then return end
+
+    if not IsAttuneHelperEmbedEnabled() or not mainFrame:IsShown() then
+        RestoreEmbeddedAttuneHelper()
+        return
+    end
+
+    local miniFrame = _G.AttuneHelperMiniFrame
+    if not miniFrame then
+        host:Hide()
+        return
+    end
+
+    _G.AttuneHelperDB = _G.AttuneHelperDB or {}
+    if _G.AttuneHelperDB["Mini Mode"] ~= 1 then
+        _G.AttuneHelperDB["Mini Mode"] = 1
+    end
+
+    if _G.AttuneHelper_UpdateDisplayMode then
+        _G.AttuneHelper_UpdateDisplayMode()
+    elseif _G.AttuneHelperFrame then
+        _G.AttuneHelperFrame:Hide()
+    end
+
+    if not miniFrame.__OmniEmbedHooked then
+        miniFrame.__OmniEmbedHooked = true
+        miniFrame:HookScript("OnShow", function(frame)
+            if not mainFrame or not mainFrame.footer or not mainFrame.footer.attuneHelperHost then
+                return
+            end
+            if not IsAttuneHelperEmbedEnabled() or not mainFrame:IsShown() then
+                return
+            end
+            local embedHost = mainFrame.footer.attuneHelperHost
+            if frame:GetParent() ~= embedHost then
+                frame:SetParent(embedHost)
+            end
+            frame:ClearAllPoints()
+            frame:SetPoint("LEFT", embedHost, "LEFT", 0, 0)
+            ApplyEmbeddedMiniBorderStyle(frame)
+            embedHost:SetSize(frame:GetWidth(), frame:GetHeight())
+            embedHost:Show()
+        end)
+    end
+
+    miniFrame:SetParent(host)
+    miniFrame:ClearAllPoints()
+    miniFrame:SetPoint("LEFT", host, "LEFT", 0, 0)
+    ApplyEmbeddedMiniBorderStyle(miniFrame)
+    miniFrame:SetFrameStrata(mainFrame:GetFrameStrata())
+    miniFrame:SetFrameLevel(mainFrame:GetFrameLevel() + 40)
+    miniFrame:SetMovable(false)
+    miniFrame:EnableMouse(false)
+    miniFrame:Show()
+
+    host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
+    host:Show()
 end
 
 -- =============================================================================
@@ -1105,14 +1322,31 @@ function Frame:UpdateBankTabState() end
 -- Combat-safe in-place content refresh
 -- =============================================================================
 
--- ʕ ◕ᴥ◕ ʔ Re-read live container data for every button already parented and
--- positioned by the previous OOC render, and re-apply SetItem. Only touches
--- textures / font strings / insecure Lua properties, so this is safe to call
--- inside a protected-frame lockdown. Items sold in combat visually clear,
--- stack counts tick down, and GameTooltip:SetBagItem picks up the new
--- contents of any slot whose button survived the last render.
+-- ʕ ◕ᴥ◕ ʔ Combat-safe refresh. Walks the persistent slotButtons map (one
+-- entry per physical bag slot, pre-parented and SetID'd OOC) and mirrors
+-- the live container state onto each button using ONLY insecure calls
+-- (SetAlpha + ItemButton:SetItem). Items that pop in during combat become
+-- visible and clickable at whatever position the last OOC render parked
+-- their slot button (their sorted home, or the overflow strip for slots
+-- that were empty at last render). Items used during combat clear by
+-- fading to alpha 0.
+--
+-- SetParent / SetPoint / SetID / Show / Hide are NEVER called here --
+-- those are protected on ContainerFrameItemButtonTemplate children.
 function Frame:RefreshCombatContent(changedBags)
     if not mainFrame or not OmniC_Container then return end
+
+    -- ʕ •ᴥ•ʔ✿ List view parks all slot buttons at alpha 0 and drives its
+    -- own insecure row widgets -- which are OOC-only anyway (list row
+    -- clicks call PickupContainerItem directly and are blocked in combat).
+    -- Flipping slot-button alpha here would punch ghost icons through the
+    -- list layout, so we short-circuit and let PLAYER_REGEN_ENABLED do a
+    -- clean full re-render once combat ends. ✿ ʕ •ᴥ•ʔ
+    if currentView == "list" then
+        self:UpdateSlotCount()
+        self:UpdateMoney()
+        return
+    end
 
     local affected
     if type(changedBags) == "table" then
@@ -1123,11 +1357,15 @@ function Frame:RefreshCombatContent(changedBags)
         end
     end
 
-    for _, btn in ipairs(itemButtons) do
-        local bagID = btn.bagID
-        local slotID = btn.slotID
-        if bagID and slotID and (affected == nil or affected[bagID]) then
-            local info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
+    -- ʕ •ᴥ•ʔ✿ Rebuild the populated-button list so search / cooldown passes
+    -- that run during combat see every visible item, including ones that
+    -- arrived after the last OOC render. ✿ ʕ •ᴥ•ʔ
+    local refreshed = {}
+
+    IterateSlotButtons(function(bagID, slotID, btn)
+        local info
+        if affected == nil or affected[bagID] then
+            info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
             if info then
                 if Omni.Categorizer then
                     info.category = info.category or Omni.Categorizer:GetCategory(info)
@@ -1137,11 +1375,20 @@ function Frame:RefreshCombatContent(changedBags)
                 end
                 info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
                 SetButtonItem(btn, info)
+                pcall(btn.SetAlpha, btn, 1)
+                table.insert(refreshed, btn)
             else
                 SetButtonItem(btn, nil)
+                pcall(btn.SetAlpha, btn, 0)
+            end
+        else
+            if btn.itemInfo then
+                table.insert(refreshed, btn)
             end
         end
-    end
+    end)
+
+    itemButtons = refreshed
 
     self:UpdateSlotCount()
     self:UpdateMoney()
@@ -1268,13 +1515,15 @@ function Frame:RenderFlowView(items)
 
     local scrollChild = mainFrame.scrollChild
 
-    -- Release existing buttons
-    if Omni.Pool then
-        for _, btn in ipairs(itemButtons) do
-            Omni.Pool:Release("ItemButton", btn)
-        end
-    end
+    -- ʕ •ᴥ•ʔ✿ Make sure every physical bag slot has a persistent button
+    -- before we begin. This is the foundation of combat safety: any item
+    -- that lands in any slot already has a pre-parented, pre-SetID button
+    -- ready to accept content updates from RefreshCombatContent without
+    -- needing a protected structural call. ✿ ʕ •ᴥ•ʔ
+    EnsureSlotButtons()
+
     itemButtons = {}
+    local touched = {}  -- [bagID][slotID] = true for slots rendered with an item
 
     -- Hide existing headers and list rows
     for _, header in ipairs(categoryHeaders) do header:Hide() end
@@ -1336,6 +1585,21 @@ function Frame:RenderFlowView(items)
                 return (infoA.priority or 99) < (infoB.priority or 99)
             end)
         end
+
+        -- ʕ •ᴥ•ʔ✿ Pull BoE out of the dual-lane flow so it renders last as
+        -- a dedicated full-width section. The overflow strip (where every
+        -- pre-parked empty slot button lives) then sits flush under its
+        -- header, which means any item that lands in a previously empty
+        -- slot during combat visually appears under "BoE" instead of
+        -- floating below the final lane. ✿ ʕ •ᴥ•ʔ
+        local filteredOrder = {}
+        for _, catName in ipairs(categoryOrder) do
+            if catName ~= "BoE" then
+                table.insert(filteredOrder, catName)
+            end
+        end
+        categoryOrder = filteredOrder
+        categories["BoE"] = categories["BoE"] or {}
     end
 
     local headerIndex = 0
@@ -1390,12 +1654,14 @@ function Frame:RenderFlowView(items)
             end
 
             for i, itemInfo in ipairs(catItems) do
-                local btn
-                if Omni.Pool then
-                    btn = Omni.Pool:Acquire("ItemButton")
-                else
-                    btn = Omni.ItemButton:Create(scrollChild)
-                end
+                -- ʕ •ᴥ•ʔ✿ Look up the persistent slot button for this item's
+                -- (bag, slot). It was created, parented to the bag's
+                -- ItemContainer, and SetID'd by EnsureSlotButtons above, so
+                -- we only need to reposition and SetItem here -- all of
+                -- which is still OOC because UpdateLayout is combat-gated. ✿ ʕ •ᴥ•ʔ
+                local bagID = itemInfo.bagID
+                local slotID = itemInfo.slotID
+                local btn = (bagID and slotID) and GetSlotButton(bagID, slotID) or nil
 
                 if btn then
                     local col = ((i - 1) % columns)
@@ -1403,18 +1669,10 @@ function Frame:RenderFlowView(items)
                     local x = laneX + col * (ITEM_SIZE + ITEM_SPACING)
                     local y = laneY - row * (ITEM_SIZE + ITEM_SPACING)
 
-                    -- ʕ •ᴥ•ʔ✿ Parent under the ItemContainer that matches this
-                    -- item's bag so ContainerFrameItemButton_OnClick resolves
-                    -- the right bag. SetParent / SetPoint / SetID on the
-                    -- ContainerFrameItemButton are protected; we only get
-                    -- here OOC because UpdateLayout is combat-gated. ✿ ʕ •ᴥ•ʔ
-                    local container = GetItemContainer(itemInfo.bagID or -1) or scrollChild
                     pcall(function()
-                        if btn:GetParent() ~= container then
-                            btn:SetParent(container)
-                        end
                         btn:ClearAllPoints()
                         btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                        btn:SetAlpha(1)
                     end)
 
                     local success = pcall(function()
@@ -1427,6 +1685,8 @@ function Frame:RenderFlowView(items)
                         pcall(btn.Show, btn)
                     end
 
+                    touched[bagID] = touched[bagID] or {}
+                    touched[bagID][slotID] = true
                     table.insert(itemButtons, btn)
                 end
             end
@@ -1446,13 +1706,129 @@ function Frame:RenderFlowView(items)
         end
     end
 
-    local bottomY
+    local mainBottomY
     if dualCategoryLanes then
-        bottomY = math.min(yLeft, yRight)
+        mainBottomY = math.min(yLeft, yRight)
     else
-        bottomY = yOffset
+        mainBottomY = yOffset
     end
-    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING)
+
+    -- ʕ •ᴥ•ʔ✿ BoE tail section ✿ ʕ •ᴥ•ʔ
+    --
+    -- Always rendered in flow mode, full width, even when the player has
+    -- zero BoE equipment on them. This acts as the anchor for the
+    -- overflow strip below: every pre-parked empty slot button sits
+    -- directly under this header, so anything that drops into a
+    -- previously-empty slot during combat pops in visually "under BoE"
+    -- rather than floating at the bottom of the scroll area.
+    local bottomY = mainBottomY
+    if currentView ~= "grid" and currentView ~= "bag" then
+        local boeItems = categories["BoE"] or {}
+        local boeX = ITEM_SPACING
+        local boeY = mainBottomY
+        local boeColumns = columnsForLaneWidth(usableWidth)
+
+        headerIndex = headerIndex + 1
+        local header = categoryHeaders[headerIndex]
+        if not header then
+            header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            categoryHeaders[headerIndex] = header
+        end
+        header:ClearAllPoints()
+        header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", boeX, boeY)
+        if Omni.Categorizer then
+            local r, g, b = Omni.Categorizer:GetCategoryColor("BoE")
+            header:SetTextColor(r, g, b)
+        else
+            header:SetTextColor(0.4, 0.9, 1.0)
+        end
+        header:SetText("BoE (" .. #boeItems .. ")")
+        header:Show()
+        boeY = boeY - sectionHeaderHeight
+
+        for i, itemInfo in ipairs(boeItems) do
+            local bagID = itemInfo.bagID
+            local slotID = itemInfo.slotID
+            local btn = (bagID and slotID) and GetSlotButton(bagID, slotID) or nil
+
+            if btn then
+                local col = ((i - 1) % boeColumns)
+                local row = math.floor((i - 1) / boeColumns)
+                local x = boeX + col * (ITEM_SIZE + ITEM_SPACING)
+                local y = boeY - row * (ITEM_SIZE + ITEM_SPACING)
+
+                pcall(function()
+                    btn:ClearAllPoints()
+                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                    btn:SetAlpha(1)
+                end)
+
+                local success = pcall(function()
+                    SetButtonItem(btn, itemInfo)
+                    btn:Show()
+                end)
+                if not success then
+                    pcall(SetButtonItem, btn, nil)
+                    if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                    pcall(btn.Show, btn)
+                end
+
+                touched[bagID] = touched[bagID] or {}
+                touched[bagID][slotID] = true
+                table.insert(itemButtons, btn)
+            end
+        end
+
+        local boeRows = math.ceil(#boeItems / boeColumns)
+        -- Skip the trailing sectionSpacing here because the overflow strip
+        -- applies its own OVERFLOW_ROW_GAP immediately below.
+        boeY = boeY - (boeRows * (ITEM_SIZE + ITEM_SPACING))
+        bottomY = boeY
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Overflow strip ✿ ʕ •ᴥ•ʔ
+    --
+    -- Every slot button that did NOT receive an item from the sorted pass
+    -- gets parked in a grid below the sorted content at alpha 0. This
+    -- guarantees two things:
+    --
+    --   1) Every bag slot has a real, on-screen position at all times --
+    --      so if an item lands in a previously empty slot during combat,
+    --      RefreshCombatContent can just SetAlpha(1) + SetItem and the
+    --      user sees the new item immediately. No SetPoint required.
+    --
+    --   2) Items that are used / sold / moved during combat can fade out
+    --      (alpha 0) in place without protected Hide() calls, and come
+    --      back cleanly on the next OOC render.
+    local overflowColumns = columnsForLaneWidth(usableWidth)
+    local overflowTop = bottomY - OVERFLOW_ROW_GAP
+    local overflowIndex = 0
+    IterateSlotButtons(function(bagID, slotID, btn)
+        local isTouched = touched[bagID] and touched[bagID][slotID]
+        if isTouched then return end
+
+        local col = overflowIndex % overflowColumns
+        local row = math.floor(overflowIndex / overflowColumns)
+        local x = ITEM_SPACING + col * (ITEM_SIZE + ITEM_SPACING)
+        local y = overflowTop - row * (ITEM_SIZE + ITEM_SPACING)
+
+        pcall(function()
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+            btn:SetAlpha(0)
+        end)
+        pcall(SetButtonItem, btn, nil)
+        pcall(btn.Show, btn)
+
+        overflowIndex = overflowIndex + 1
+    end)
+
+    local overflowRows = math.ceil(overflowIndex / math.max(overflowColumns, 1))
+    local overflowExtent = overflowRows > 0
+        and (OVERFLOW_ROW_GAP + overflowRows * (ITEM_SIZE + ITEM_SPACING))
+        or 0
+
+    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING + overflowExtent)
 end
 
 -- =============================================================================
@@ -1465,20 +1841,19 @@ function Frame:RenderListView(items)
 
     local scrollChild = mainFrame.scrollChild
 
-    -- Release existing item buttons
-    if Omni.Pool then
-        for _, btn in ipairs(itemButtons) do
-            Omni.Pool:Release("ItemButton", btn)
-        end
-    end
+    -- ʕ •ᴥ•ʔ✿ Park every persistent slot button at alpha 0 so flow buttons
+    -- don't peek through the list layout. We never Release them back to
+    -- the pool -- they stay allocated so we can flip straight back to
+    -- flow/grid without re-parenting (which is protected during combat). ✿ ʕ •ᴥ•ʔ
+    IterateSlotButtons(function(_, _, btn)
+        pcall(btn.SetAlpha, btn, 0)
+    end)
     itemButtons = {}
 
-    -- Hide existing list rows
     for _, row in ipairs(listRows) do
         row:Hide()
     end
 
-    -- Hide category headers if any
     for _, header in ipairs(categoryHeaders) do
         header:Hide()
     end
@@ -1751,6 +2126,9 @@ function Frame:UpdateSlotCount()
 
     local used = total - free
     mainFrame.footer.slots:SetText(string.format("%d/%d", used, total))
+    if self.UpdateEmbeddedAttuneHelper then
+        self:UpdateEmbeddedAttuneHelper()
+    end
 end
 
 function Frame:UpdateMoney()
@@ -1834,12 +2212,14 @@ function Frame:Show()
 
     if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
     self:UpdateLayout()
+    self:UpdateEmbeddedAttuneHelper()
 end
 
 function Frame:Hide()
     if not mainFrame then return end
 
     pcall(mainFrame.Hide, mainFrame)
+    RestoreEmbeddedAttuneHelper()
 
     if not InCombat()
             and OmniInventoryDB and OmniInventoryDB.global

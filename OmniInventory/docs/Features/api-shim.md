@@ -40,6 +40,8 @@ sequenceDiagram
     Shim-->>Module: { iconFileID, stackCount, quality, itemID, isBound, ... }
 ```
 
+
+
 ---
 
 ## API Reference
@@ -48,17 +50,19 @@ sequenceDiagram
 
 Returns a table with item information or `nil` if slot is empty.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| iconFileID | string | Texture path |
-| itemID | number | Parsed from itemLink |
-| hyperlink | string | Full item link |
-| stackCount | number | Current stack size |
-| isLocked | boolean | Item is locked |
-| quality | number | 0=Poor to 5=Legendary |
-| isBound | boolean | Soulbound status |
-| bagID | number | Source bag |
-| slotID | number | Source slot |
+
+| Field      | Type    | Description           |
+| ---------- | ------- | --------------------- |
+| iconFileID | string  | Texture path          |
+| itemID     | number  | Parsed from itemLink  |
+| hyperlink  | string  | Full item link        |
+| stackCount | number  | Current stack size    |
+| isLocked   | boolean | Item is locked        |
+| quality    | number  | 0=Poor to 5=Legendary |
+| isBound    | boolean | Soulbound status      |
+| bagID      | number  | Source bag            |
+| slotID     | number  | Source slot           |
+
 
 ### OmniC_Container.GetContainerNumSlots(bagID)
 
@@ -114,10 +118,11 @@ Returns array of all item info tables from bank and bank bags.
 
 ## Definition of Done
 
-- [x] `Omni/API.lua` created with OmniC_Container namespace
-- [x] GetContainerItemInfo returns modern table structure
-- [x] itemID parsed from link
-- [x] Tooltip scanning implemented for binding detection
-- [x] Client version detection included
-- [x] ADR documented
-- [ ] In-game verification complete
+- `Omni/API.lua` created with OmniC_Container namespace
+- GetContainerItemInfo returns modern table structure
+- itemID parsed from link
+- Tooltip scanning implemented for binding detection
+- Client version detection included
+- ADR documented
+- In-game verification complete
+
