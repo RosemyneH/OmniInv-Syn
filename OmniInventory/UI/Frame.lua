@@ -45,7 +45,6 @@ local categoryHeaders = {}  -- Active category header FontStrings
 local listRows = {}  -- Track list row frames
 local currentView = DEFAULT_VIEW_MODE
 local currentMode = "bags"
-local isMerchantOpen = false
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
@@ -1514,15 +1513,6 @@ function Frame:CreateFooter()
     end
     footer.addonButtonOrder = FOOTER_ADDON_BUTTONS
 
-    footer.sellBtn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
-    footer.sellBtn:SetSize(80, 20)
-    footer.sellBtn:SetPoint("CENTER")
-    footer.sellBtn:SetText("Sell Junk")
-    footer.sellBtn:Hide()
-    footer.sellBtn:SetScript("OnClick", function()
-        Frame:SellJunk()
-    end)
-
     footer.money = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     footer.money:SetPoint("RIGHT", -6, 0)
     footer.money:SetText("0g 0s 0c")
@@ -1864,17 +1854,6 @@ function Frame:RegisterEvents()
             for _, btn in ipairs(itemButtons) do
                 Omni.ItemButton:UpdateCooldown(btn)
             end
-        end)
-
-        -- Merchant events (unique to Frame, not in Events.lua)
-        Omni.Events:RegisterEvent("MERCHANT_SHOW", function()
-            isMerchantOpen = true
-            Frame:UpdateFooterButton()
-        end)
-
-        Omni.Events:RegisterEvent("MERCHANT_CLOSED", function()
-            isMerchantOpen = false
-            Frame:UpdateFooterButton()
         end)
     end
 end
@@ -2817,51 +2796,6 @@ function Frame:UpdateMoney()
     mainFrame.footer.money:SetText(string.format("%dg %ds %dc", gold, silver, copper))
 end
 
-function Frame:UpdateFooterButton()
-    if not mainFrame or not mainFrame.footer or not mainFrame.footer.sellBtn then return end
-
-    if isMerchantOpen then
-        mainFrame.footer.sellBtn:Show()
-    else
-        mainFrame.footer.sellBtn:Hide()
-    end
-end
-
--- =============================================================================
--- Sell Junk Logic
--- =============================================================================
-
-function Frame:SellJunk()
-    if not isMerchantOpen then return end
-
-    local totalValue = 0
-    local sellCount = 0
-
-    for bagID = 0, 4 do
-        local numSlots = GetContainerNumSlots(bagID)
-        for slotID = 1, numSlots do
-            local texture, count, locked, quality, readable, lootable, link = GetContainerItemInfo(bagID, slotID)
-            if link and (quality == 0) then -- 0 is Poor/Grey
-                local _, _, _, _, _, _, _, _, _, _, vendorPrice = GetItemInfo(link)
-                if vendorPrice and vendorPrice > 0 then
-                    UseContainerItem(bagID, slotID)
-                    totalValue = totalValue + (vendorPrice * (count or 1))
-                    sellCount = sellCount + 1
-                end
-            end
-        end
-    end
-
-    if sellCount > 0 then
-        local gold = math.floor(totalValue / 10000)
-        local silver = math.floor((totalValue % 10000) / 100)
-        local copper = totalValue % 100
-        print(string.format("|cFF00FF00OmniInventory|r: Sold %d junk items for %dg %ds %dc", sellCount, gold, silver, copper))
-    else
-        print("|cFF00FF00OmniInventory|r: No junk to sell.")
-    end
-end
-
 -- =============================================================================
 -- Show/Hide/Toggle
 -- =============================================================================
@@ -2881,7 +2815,6 @@ function Frame:Show()
     -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
     pcall(mainFrame.Show, mainFrame)
 
-    if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
     self:UpdateLayout()
     self:UpdateEmbeddedAttuneHelper()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
