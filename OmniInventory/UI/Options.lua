@@ -66,6 +66,7 @@ end
 local SECTION_COLORS = {
     view   = { 0.85, 0.90, 1.00 },
     sort   = { 0.85, 0.90, 1.00 },
+    misc   = { 0.78, 0.88, 1.00 },
     attune = { 1.00, 0.82, 0.00 },
     colors = { 1.00, 0.60, 0.20 },
     footer = { 0.40, 1.00, 0.55 },
@@ -279,12 +280,25 @@ function Settings:CreateControls(parent)
 
     -- ʕ ● ᴥ ●ʔ Category Editor intentionally hidden — custom-rule engine is disabled pending rewrite
 
+    yOffset = yOffset - SECTION_GAP
+    CreateSectionHeader(parent, "Misc Options", yOffset, SECTION_COLORS.misc)
+    yOffset = yOffset - HEADER_GAP
+
     local highlightCb = CreateFrame("CheckButton", "OmniHighlightNewItems", parent, "UICheckButtonTemplate")
     highlightCb:SetSize(24, 24)
-    highlightCb:SetPoint("TOP", 0, yOffset)
+    highlightCb:SetPoint("TOPLEFT", 14, yOffset)
     local highlightLabel = highlightCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     highlightLabel:SetPoint("LEFT", highlightCb, "RIGHT", 2, 1)
-    highlightLabel:SetText("Highlight New Items")
+    highlightLabel:SetText("New items")
+    highlightCb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Highlight new items", 1, 0.82, 0)
+        GameTooltip:AddLine("Visually emphasize items that count as new in your bags.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    highlightCb:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
     highlightCb:SetScript("OnClick", function(self)
         if Omni.Data then
             Omni.Data:Set("highlightNewItems", self:GetChecked() and true or false)
@@ -292,6 +306,34 @@ function Settings:CreateControls(parent)
         end
     end)
     self.highlightNewItemsCb = highlightCb
+
+    local footerMoneyCb = CreateFrame("CheckButton", "OmniFooterMoneyEmphasis", parent, "UICheckButtonTemplate")
+    footerMoneyCb:SetSize(24, 24)
+    footerMoneyCb:SetPoint("TOPLEFT", 160, yOffset)
+    local footerMoneyLabel = footerMoneyCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    footerMoneyLabel:SetPoint("LEFT", footerMoneyCb, "RIGHT", 2, 1)
+    footerMoneyLabel:SetText("Bold footer")
+    footerMoneyCb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Bold footer", 1, 0.82, 0)
+        GameTooltip:AddLine("Larger outlined gold and bag count. Slot text shifts from light blue to red as bags fill.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    footerMoneyCb:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    footerMoneyCb:SetScript("OnClick", function(self)
+        if Omni.Data then
+            Omni.Data:Set("footerMoneyEmphasis", self:GetChecked() and true or false)
+        end
+        if Omni.Frame and Omni.Frame.RefreshFooterMoneyStyle then
+            Omni.Frame:RefreshFooterMoneyStyle()
+        end
+        RefreshAllInventory()
+    end)
+    self.footerMoneyEmphasisCb = footerMoneyCb
+
+    yOffset = yOffset - 22
 
     yOffset = yOffset - SPACING - 4
 
@@ -545,6 +587,9 @@ function Settings:UpdateValues()
 
     if self.highlightNewItemsCb and Omni.Data then
         self.highlightNewItemsCb:SetChecked(Omni.Data:Get("highlightNewItems") == true)
+    end
+    if self.footerMoneyEmphasisCb and Omni.Data then
+        self.footerMoneyEmphasisCb:SetChecked(Omni.Data:Get("footerMoneyEmphasis") == true)
     end
 
     -- Sync slider with current scale

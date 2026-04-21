@@ -22,6 +22,8 @@ local defaults = {
         scale = 1.0,
         opacity = 0.95,
         highlightNewItems = false,
+        -- ʕ •ᴥ•ʔ✿ Footer: larger outlined gold + slot count; slots tint blue→red by fill ✿ ʕ •ᴥ•ʔ
+        footerMoneyEmphasis = true,
         attune = {
             enabled = true,
             showRedForNonAttunable = true,

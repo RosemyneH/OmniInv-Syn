@@ -344,6 +344,7 @@ function Frame:CreateMainFrame()
     self:CreateFilterBar()
     self:CreateContentArea()
     self:CreateFooter()
+    self:RefreshFooterMoneyStyle()
     self:CreateResizeHandle()
 
     -- ʕ •ᴥ•ʔ✿ Combat hint: only surfaces on the rare "opened during combat
@@ -2763,6 +2764,28 @@ end
 -- Footer Updates
 -- =============================================================================
 
+-- ʕ ◕ᴥ◕ ʔ Footer emphasis: money + slot count fonts; slot fill color is driven in UpdateSlotCount ✿ ʕ ◕ᴥ◕ ʔ
+function Frame:RefreshFooterMoneyStyle()
+    if not mainFrame or not mainFrame.footer then return end
+    local footer = mainFrame.footer
+    if not footer.money or not footer.slots then return end
+
+    local emphasize = Omni.Data and Omni.Data:Get("footerMoneyEmphasis") == true
+    local path, size = GameFontNormal:GetFont()
+    size = (size or 12) + 2
+    if emphasize then
+        footer.money:SetFont(path, size, "OUTLINE")
+        footer.slots:SetFont(path, size, "OUTLINE")
+    else
+        footer.money:SetFontObject(GameFontNormalSmall)
+        footer.slots:SetFontObject(GameFontNormalSmall)
+    end
+    if self.UpdateFooterCustomButtons then
+        self:UpdateFooterCustomButtons()
+    end
+    self:UpdateSlotCount()
+end
+
 function Frame:UpdateSlotCount()
     if not mainFrame or not mainFrame.footer then return end
 
@@ -2775,7 +2798,22 @@ function Frame:UpdateSlotCount()
     end
 
     local used = total - free
-    mainFrame.footer.slots:SetText(string.format("%d/%d", used, total))
+    local slots = mainFrame.footer.slots
+    slots:SetText(string.format("%d/%d", used, total))
+
+    local emphasize = Omni.Data and Omni.Data:Get("footerMoneyEmphasis") == true
+    if emphasize then
+        local t = 0
+        if total > 0 then
+            t = used / total
+        end
+        local br, bg, bb = 0.55, 0.80, 1.00
+        local rr, rg, rb = 1.00, 0.15, 0.15
+        slots:SetTextColor(br + (rr - br) * t, bg + (rg - bg) * t, bb + (rb - bb) * t, 1)
+    else
+        slots:SetTextColor(1, 1, 1, 1)
+    end
+
     if self.UpdateEmbeddedAttuneHelper then
         self:UpdateEmbeddedAttuneHelper()
     end
