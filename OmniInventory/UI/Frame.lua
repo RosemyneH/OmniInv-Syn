@@ -125,6 +125,52 @@ local function ApplyEmbeddedMiniBorderStyle(miniFrame)
     end
 end
 
+-- ʕ •ᴥ•ʔ✿ Rebind drag-drop on embedded mini buttons so cursor items feed
+-- AHSet / AHIgnore directly via AH.*, bypassing the hidden main frame. ✿ ʕ •ᴥ•ʔ
+local function GetAttuneHelperAddon()
+    local ah = _G.AH
+    if type(ah) == "table" then
+        return ah
+    end
+    -- Fallback: _G.AttuneHelper is clobbered to the main frame, so reject
+    -- frame-like handles and only accept the real addon table.
+    local legacy = _G.AttuneHelper
+    if type(legacy) == "table" and type(legacy.AddCursorItemToAHSet) == "function" then
+        return legacy
+    end
+    return nil
+end
+
+local function RebindEmbeddedDragHandlers()
+    local AH = GetAttuneHelperAddon()
+
+    local equipBtn = _G.AttuneHelperMiniEquipButton
+    if equipBtn and not equipBtn.__OmniEmbedDragFixed then
+        equipBtn.__OmniEmbedDragFixed = true
+        equipBtn:SetScript("OnReceiveDrag", function()
+            local addon = GetAttuneHelperAddon()
+            if addon and addon.AddCursorItemToAHSet then
+                addon.AddCursorItemToAHSet()
+            elseif _G.EquipAllButton and _G.EquipAllButton:GetScript("OnReceiveDrag") then
+                _G.EquipAllButton:GetScript("OnReceiveDrag")()
+            end
+        end)
+    end
+
+    local vendorBtn = _G.AttuneHelperMiniVendorButton
+    if vendorBtn and not vendorBtn.__OmniEmbedDragFixed then
+        vendorBtn.__OmniEmbedDragFixed = true
+        vendorBtn:SetScript("OnReceiveDrag", function(self)
+            local addon = GetAttuneHelperAddon()
+            if addon and addon.AddCursorItemToIgnore then
+                addon.AddCursorItemToIgnore()
+            elseif _G.VendorAttunedButton and _G.VendorAttunedButton:GetScript("OnReceiveDrag") then
+                _G.VendorAttunedButton:GetScript("OnReceiveDrag")(self)
+            end
+        end)
+    end
+end
+
 local function RestoreEmbeddedAttuneHelper()
     if not mainFrame or not mainFrame.footer then return end
 
@@ -1020,44 +1066,211 @@ Frame._IterateSlotButtons = IterateSlotButtons
 -- Footer
 -- =============================================================================
 
+-- ʕ •ᴥ•ʔ✿ Footer custom launcher buttons ✿ ʕ •ᴥ•ʔ
+local FOOTER_BTN_SIZE = 20
+local FOOTER_BTN_GAP = 3
+local FOOTER_SEP_GAP = 5
+
+local FOOTER_CUSTOM_BUTTONS = {
+    { key = "transmog",     icon = "Interface\\Icons\\INV_Mask_01",             title = "Transmog",       sub = "Open the transmog window",     fn = "OpenTransmog"        },
+    { key = "perks",        icon = "Interface\\Icons\\Spell_Arcane_MindMastery", title = "Perks",          sub = "Open the perk manager",         fn = "OpenPerkMgr"         },
+    { key = "lootFilter",   icon = "Interface\\Icons\\INV_Misc_Coin_17",        title = "Loot Filter",    sub = "Open the loot filter",          fn = "OpenLootFilter"      },
+    { key = "resourceBank", icon = "Interface\\Icons\\INV_Misc_PlatnumDisks",   title = "Resource Bank",  sub = "Open resource summary",         fn = "OpenResourceSummary" },
+    { key = "lootDb",       icon = "Interface\\Icons\\INV_Misc_Coin_18",        title = "Loot Database",  sub = "Search the loot database",      fn = "OpenLootDb"          },
+    { key = "attuneMgr",    icon = "Interface\\Icons\\Ability_Townwatch",       title = "Attunables",     sub = "Open the attunable item list",  fn = "OpenAttuneMgr"       },
+}
+
+local function IsFooterCustomButtonEnabled(key)
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if not global then return true end
+    global.footerButtons = global.footerButtons or {}
+    if global.footerButtons[key] == nil then
+        global.footerButtons[key] = true
+    end
+    return global.footerButtons[key] ~= false
+end
+
+local function StyleFooterMiniButton(btn)
+    btn:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\UI-Quickslot-Depress",
+        edgeSize = 2,
+        insets = { left = -1, right = -1, top = -1, bottom = -1 },
+    })
+    btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
+
+    btn:HookScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
+        if self._tooltipTitle then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(self._tooltipTitle, 1, 1, 1)
+            if self._tooltipSub then
+                GameTooltip:AddLine(self._tooltipSub, 0.8, 0.8, 0.8)
+            end
+            GameTooltip:Show()
+        end
+    end)
+    btn:HookScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
+        GameTooltip:Hide()
+    end)
+end
+
+local function CreateFooterMiniButton(parent, def)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(FOOTER_BTN_SIZE, FOOTER_BTN_SIZE)
+
+    btn:SetNormalTexture(def.icon)
+    local normal = btn:GetNormalTexture()
+    if normal and normal.SetTexCoord then
+        normal:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetTexture(def.icon)
+    hl:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    hl:SetBlendMode("ADD")
+    hl:SetVertexColor(0.25, 0.25, 0.25, 0.4)
+
+    StyleFooterMiniButton(btn)
+
+    btn._tooltipTitle = def.title
+    btn._tooltipSub = def.sub
+    btn.__openFn = def.fn
+    btn.__closeFn = def.fn:gsub("^Open", "Close")
+    btn.__isOpen = false
+    btn:SetScript("OnMouseDown", function(self)
+        local tex = self:GetNormalTexture()
+        if tex then tex:SetVertexColor(0.75, 0.75, 0.75) end
+    end)
+    btn:SetScript("OnMouseUp", function(self)
+        local tex = self:GetNormalTexture()
+        if tex then tex:SetVertexColor(1, 1, 1) end
+    end)
+    btn:SetScript("OnClick", function(self)
+        local openFn = _G[self.__openFn]
+        local closeFn = _G[self.__closeFn]
+
+        if self.__isOpen and type(closeFn) == "function" then
+            closeFn()
+            self.__isOpen = false
+            return
+        end
+
+        if type(openFn) == "function" then
+            openFn()
+            self.__isOpen = true
+        else
+            print("|cFF00FF00OmniInventory|r: " .. self.__openFn .. "() is not available on this client.")
+        end
+    end)
+    return btn
+end
+
 function Frame:CreateFooter()
     local footer = CreateFrame("Frame", nil, mainFrame)
     footer:SetHeight(FOOTER_HEIGHT)
     footer:SetPoint("BOTTOMLEFT", PADDING, PADDING)
     footer:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
 
-    -- Background
     footer.bg = footer:CreateTexture(nil, "BACKGROUND")
     footer.bg:SetAllPoints()
     footer.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    footer.bg:SetVertexColor(0.12, 0.12, 0.12, 1)
+    footer.bg:SetVertexColor(0.15, 0.15, 0.15, 1)
 
-    -- Bag space counter
+    footer.topBorder = footer:CreateTexture(nil, "BORDER")
+    footer.topBorder:SetTexture("Interface\\Buttons\\WHITE8X8")
+    footer.topBorder:SetVertexColor(0.35, 0.35, 0.35, 1)
+    footer.topBorder:SetHeight(1)
+    footer.topBorder:SetPoint("TOPLEFT", 0, 0)
+    footer.topBorder:SetPoint("TOPRIGHT", 0, 0)
+
     footer.slots = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     footer.slots:SetPoint("LEFT", 6, 0)
     footer.slots:SetText("0/0")
+
+    footer.slotsSep = footer:CreateTexture(nil, "OVERLAY")
+    footer.slotsSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    footer.slotsSep:SetVertexColor(0.35, 0.35, 0.35, 1)
+    footer.slotsSep:SetSize(1, 14)
+    footer.slotsSep:Hide()
 
     footer.attuneHelperHost = CreateFrame("Frame", nil, footer)
     footer.attuneHelperHost:SetPoint("LEFT", footer.slots, "RIGHT", 8, 0)
     footer.attuneHelperHost:SetSize(96, 24)
     footer.attuneHelperHost:Hide()
 
-    -- Sell Junk Button
+    footer.customSep = footer:CreateTexture(nil, "OVERLAY")
+    footer.customSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    footer.customSep:SetVertexColor(0.35, 0.35, 0.35, 1)
+    footer.customSep:SetSize(1, 14)
+    footer.customSep:Hide()
+
+    footer.customButtons = {}
+    for _, def in ipairs(FOOTER_CUSTOM_BUTTONS) do
+        local btn = CreateFooterMiniButton(footer, def)
+        btn:Hide()
+        footer.customButtons[def.key] = btn
+    end
+    footer.customButtonOrder = FOOTER_CUSTOM_BUTTONS
+
     footer.sellBtn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
     footer.sellBtn:SetSize(80, 20)
     footer.sellBtn:SetPoint("CENTER")
     footer.sellBtn:SetText("Sell Junk")
-    footer.sellBtn:Hide()  -- Hidden by default
+    footer.sellBtn:Hide()
     footer.sellBtn:SetScript("OnClick", function()
         Frame:SellJunk()
     end)
 
-    -- Money display
     footer.money = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     footer.money:SetPoint("RIGHT", -6, 0)
     footer.money:SetText("0g 0s 0c")
 
     mainFrame.footer = footer
+end
+
+-- ʕノ•ᴥ•ʔノ Lays out custom launcher buttons between AH embed host and money
+function Frame:UpdateFooterCustomButtons()
+    if not mainFrame or not mainFrame.footer then return end
+    local footer = mainFrame.footer
+    if not footer.customButtons then return end
+
+    local anchor, anchorEdgeX
+    if footer.attuneHelperHost and footer.attuneHelperHost:IsShown() then
+        anchor = footer.attuneHelperHost
+        anchorEdgeX = FOOTER_SEP_GAP
+    else
+        anchor = footer.slots
+        anchorEdgeX = FOOTER_SEP_GAP + 2
+    end
+
+    local prev
+    local anyVisible = false
+    for _, def in ipairs(footer.customButtonOrder) do
+        local btn = footer.customButtons[def.key]
+        if btn then
+            if IsFooterCustomButtonEnabled(def.key) then
+                btn:ClearAllPoints()
+                if not anyVisible then
+                    footer.customSep:ClearAllPoints()
+                    footer.customSep:SetPoint("LEFT", anchor, "RIGHT", anchorEdgeX, 0)
+                    footer.customSep:Show()
+                    btn:SetPoint("LEFT", footer.customSep, "RIGHT", FOOTER_SEP_GAP, 0)
+                else
+                    btn:SetPoint("LEFT", prev, "RIGHT", FOOTER_BTN_GAP, 0)
+                end
+                btn:Show()
+                prev = btn
+                anyVisible = true
+            else
+                btn:Hide()
+            end
+        end
+    end
+    if not anyVisible then
+        footer.customSep:Hide()
+    end
 end
 
 function Frame:UpdateEmbeddedAttuneHelper()
@@ -1067,12 +1280,14 @@ function Frame:UpdateEmbeddedAttuneHelper()
 
     if not IsAttuneHelperEmbedEnabled() or not mainFrame:IsShown() then
         RestoreEmbeddedAttuneHelper()
+        if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
         return
     end
 
     local miniFrame = _G.AttuneHelperMiniFrame
     if not miniFrame then
         host:Hide()
+        if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
         return
     end
 
@@ -1105,6 +1320,8 @@ function Frame:UpdateEmbeddedAttuneHelper()
             ApplyEmbeddedMiniBorderStyle(frame)
             embedHost:SetSize(frame:GetWidth(), frame:GetHeight())
             embedHost:Show()
+            RebindEmbeddedDragHandlers()
+            if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
         end)
     end
 
@@ -1120,6 +1337,9 @@ function Frame:UpdateEmbeddedAttuneHelper()
 
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
+
+    RebindEmbeddedDragHandlers()
+    if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
 -- =============================================================================
@@ -2180,6 +2400,7 @@ function Frame:Show()
     if Frame.UpdateFooterButton then Frame:UpdateFooterButton() end
     self:UpdateLayout()
     self:UpdateEmbeddedAttuneHelper()
+    if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
 function Frame:Hide()

@@ -43,6 +43,15 @@ local defaults = {
         },
         attuneHelperEmbed = true,
         attuneHelperMiniNoBorder = false,
+        -- ʕ •ᴥ•ʔ✿ Custom footer launcher buttons (mini-mode themed) ✿ ʕ •ᴥ•ʔ
+        footerButtons = {
+            transmog      = true,
+            perks         = true,
+            lootFilter    = true,
+            resourceBank  = true,
+            lootDb        = true,
+            attuneMgr     = true,
+        },
     },
     char = {
         position = nil,         -- { point, x, y }

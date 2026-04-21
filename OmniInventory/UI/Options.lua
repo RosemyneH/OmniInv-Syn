@@ -72,6 +72,28 @@ local function IsAttuneHelperMiniNoBorderEnabled()
     return OmniInventoryDB.global.attuneHelperMiniNoBorder == true
 end
 
+local FOOTER_BUTTON_OPTIONS = {
+    { key = "transmog",     label = "Transmog"       },
+    { key = "perks",        label = "Perks"          },
+    { key = "lootFilter",   label = "Loot Filter"    },
+    { key = "resourceBank", label = "Resource Bank"  },
+    { key = "lootDb",       label = "Loot Database"  },
+    { key = "attuneMgr",    label = "Attunable List" },
+}
+
+local function GetFooterButtonsDB()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    OmniInventoryDB.global.footerButtons = OmniInventoryDB.global.footerButtons or {}
+    return OmniInventoryDB.global.footerButtons
+end
+
+local function IsFooterButtonEnabled(key)
+    local db = GetFooterButtonsDB()
+    if db[key] == nil then db[key] = true end
+    return db[key] == true
+end
+
 -- =============================================================================
 -- Creation
 -- =============================================================================
@@ -300,6 +322,40 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - 22
 
+    local footerHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    footerHeader:SetPoint("TOPLEFT", 14, yOffset)
+    footerHeader:SetText("Footer Buttons")
+    yOffset = yOffset - 18
+
+    self.footerButtonCbs = self.footerButtonCbs or {}
+    for i, def in ipairs(FOOTER_BUTTON_OPTIONS) do
+        local column = (i - 1) % 2
+        local row = math.floor((i - 1) / 2)
+        local xOffset = (column == 0) and 14 or 160
+        local rowY = yOffset - (row * 22)
+
+        local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        cb:SetSize(24, 24)
+        cb:SetPoint("TOPLEFT", xOffset, rowY)
+        local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        lbl:SetPoint("LEFT", cb, "RIGHT", 2, 1)
+        lbl:SetText(def.label)
+        cb:SetChecked(IsFooterButtonEnabled(def.key))
+        cb.__fbKey = def.key
+        cb:SetScript("OnClick", function(self)
+            local db = GetFooterButtonsDB()
+            db[self.__fbKey] = self:GetChecked() and true or false
+            if Omni.Frame and Omni.Frame.UpdateFooterCustomButtons then
+                Omni.Frame:UpdateFooterCustomButtons()
+            end
+        end)
+        self.footerButtonCbs[def.key] = cb
+    end
+    local rowCount = math.ceil(#FOOTER_BUTTON_OPTIONS / 2)
+    yOffset = yOffset - (rowCount * 22)
+
+    yOffset = yOffset - 10
+
     yOffset = yOffset - 32
 
     local function CreateColorSwatch(key, title, xOffset)
@@ -404,6 +460,12 @@ function Settings:UpdateValues()
     if self.attuneFae then self.attuneFae:SetChecked(attune.faeMode == true) end
     if self.attuneHelperEmbedCb then self.attuneHelperEmbedCb:SetChecked(IsAttuneHelperEmbedEnabled()) end
     if self.attuneHelperMiniNoBorderCb then self.attuneHelperMiniNoBorderCb:SetChecked(IsAttuneHelperMiniNoBorderEnabled()) end
+    if self.footerButtonCbs then
+        for _, def in ipairs(FOOTER_BUTTON_OPTIONS) do
+            local cb = self.footerButtonCbs[def.key]
+            if cb then cb:SetChecked(IsFooterButtonEnabled(def.key)) end
+        end
+    end
     if self.attuneRedColor then
         local c = attune.nonAttunableBarColor
         self.attuneRedColor.tex:SetVertexColor(c.r, c.g, c.b, c.a or 1)
