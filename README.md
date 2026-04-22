@@ -63,8 +63,7 @@ OmniInventory/
 
 ## Ingame
 
-<img width="837" height="844" alt="image" src="https://github.com/user-attachments/assets/1e56337b-e5f6-48e6-a264-76c57135b77a" />
-
+<img width="1037" height="992" alt="image" src="https://github.com/user-attachments/assets/1131f8da-5e88-4925-93c4-3fa044a5253d" />
 
 ## License
 
