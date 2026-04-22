@@ -2,7 +2,7 @@
 ## Title: |cFF00FF00Omni|r Inventory - Synastria
 ## Notes: The definitive inventory management addon for WoW 3.3.5a
 ## Author: Qt, Zendevve
-## Version: 1.0.0
+## Version: 2.0.0
 ## SavedVariables: OmniInventoryDB
 
 ## X-Website: https://github.com/RosemyneH/OmniInv-Syn
