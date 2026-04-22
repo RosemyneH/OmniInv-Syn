@@ -1747,7 +1747,7 @@ function Frame:CreateFooter()
     end
     footer.overflowBtn.label = footer.overflowBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     footer.overflowBtn.label:SetPoint("CENTER")
-    footer.overflowBtn.label:SetText("»")
+    footer.overflowBtn.label:SetText(">>")
     StyleFooterMiniButton(footer.overflowBtn)
     footer.overflowBtn._tooltipTitle = "More"
     footer.overflowBtn._tooltipSub   = "Launchers that didn't fit"

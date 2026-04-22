@@ -262,7 +262,7 @@ function Theme:CreateSectionHeader(parent, text, width)
     -- Chevron
     local chevron = frame:CreateFontString(nil, "OVERLAY", self.Fonts.Small)
     chevron:SetPoint("LEFT", self.Spacing.sm, 0)
-    chevron:SetText("▼")
+    chevron:SetText("v")
     chevron:SetTextColor(unpack(self.Colors.TextSecondary))
     frame.chevron = chevron
 
@@ -292,7 +292,7 @@ function Theme:CreateSectionHeader(parent, text, width)
     frame.collapsed = false
     frame.SetCollapsed = function(self, collapsed)
         self.collapsed = collapsed
-        self.chevron:SetText(collapsed and "▶" or "▼")
+        self.chevron:SetText(collapsed and ">" or "v")
     end
 
     return frame

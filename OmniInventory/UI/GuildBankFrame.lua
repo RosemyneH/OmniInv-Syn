@@ -971,7 +971,7 @@ local function CreateHeader(parent)
         self:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("View: Flow / Grid", 1, 1, 1)
-        GameTooltip:AddLine("Flow: categories like the main bag. Grid: 7×14 bank layout.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Flow: categories like the main bag. Grid: 7x14 bank layout.", 0.75, 0.75, 0.75, true)
         GameTooltip:Show()
     end)
     header.viewModeBtn:SetScript("OnLeave", function(self)
@@ -1810,7 +1810,7 @@ function GuildBankFrame:ShowTabContextMenu(tabIndex)
             end,
         },
         {
-            text = "── Smart deposit (toggle each) ──",
+            text = "-- Smart deposit (toggle each) --",
             isTitle = true,
             notCheckable = true,
         },

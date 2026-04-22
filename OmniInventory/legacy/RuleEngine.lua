@@ -250,7 +250,7 @@ SlashCmdList["ZENRULES"] = function(msg)
         print("  |cFFFFD700User Rules:|r")
         for i, rule in ipairs(NS.RuleEngine.rules) do
             local status = rule.enabled and "|cFF00FF00ON|r" or "|cFFFF0000OFF|r"
-            print(string.format("    %d. %s → %s [%s]", i, rule.name, rule.category, status))
+            print(string.format("    %d. %s -> %s [%s]", i, rule.name, rule.category, status))
         end
     end
 end
