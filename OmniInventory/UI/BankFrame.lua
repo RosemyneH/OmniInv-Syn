@@ -26,7 +26,11 @@ local ITEM_SIZE = 37
 local ITEM_SPACING = 4
 local FRAME_GAP = 6
 local BAG_ICON_SIZE = 18
-local BANK_BAG_IDS = { -1, 5, 6, 7, 8, 9, 10, 11 }
+local RIBBON_GAP = 3
+local RIBBON_SEP_GAP = 5
+local RIBBON_ICON_BTN_SIZE = 20
+local SETTINGS_ICON = "Interface\\Icons\\Trade_Engineering"
+local BANK_BAG_IDS = { 5, 6, 7, 8, 9, 10, 11 }
 
 -- =============================================================================
 -- State
@@ -59,7 +63,9 @@ local function IsValidBankBagID(bagID)
     if bagID == nil then return false end
     if bagID == -1 then return true end
     if type(bagID) == "number" and bagID >= 5 and bagID <= 11 then
-        return true
+        local idx = bagID - 4
+        local numPurchased = (GetNumBankSlots and GetNumBankSlots()) or 0
+        return idx <= numPurchased
     end
     return false
 end
@@ -75,12 +81,93 @@ local function GetSavedBankBagFilter()
 end
 
 local function GetBankBagIconTexture(bagID)
-    if bagID == -1 then
-        return "Interface\\Icons\\INV_Misc_Bag_08"
-    end
     local inv = ContainerIDToInventoryID and ContainerIDToInventoryID(bagID)
     local tex = inv and GetInventoryItemTexture("player", inv)
     return tex or "Interface\\Icons\\INV_Misc_Bag_10_Blue"
+end
+
+local function StyleRibbonButton(btn)
+    btn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    btn:SetBackdropColor(0.12, 0.12, 0.12, 1)
+    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+
+    btn:HookScript("OnEnter", function(self)
+        self:SetBackdropColor(0.22, 0.22, 0.22, 1)
+        self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        if self._tooltipTitle then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(self._tooltipTitle, 1, 1, 1)
+            if self._tooltipSub then
+                GameTooltip:AddLine(self._tooltipSub, 0.8, 0.8, 0.8)
+            end
+            GameTooltip:Show()
+        end
+    end)
+    btn:HookScript("OnLeave", function(self)
+        self:SetBackdropColor(0.12, 0.12, 0.12, 1)
+        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+        GameTooltip:Hide()
+    end)
+end
+
+local function CreateRibbonIconButton(parent, iconTexture, tooltipTitle, tooltipSub, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(RIBBON_ICON_BTN_SIZE, RIBBON_ICON_BTN_SIZE)
+    StyleRibbonButton(btn)
+
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetPoint("TOPLEFT", 2, -2)
+    btn.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    btn.icon:SetTexture(iconTexture)
+    btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+    return btn
+end
+
+local function BankBagSlotIndex(bagID)
+    return bagID - 4
+end
+
+local function BankBagSlotsMax()
+    return NUM_BANKBAGSLOTS or 7
+end
+
+local function HandleUnpurchasedBankBagClick(bagID)
+    local slotIndex = BankBagSlotIndex(bagID)
+    local numSlots, full = GetNumBankSlots()
+    numSlots = numSlots or 0
+    if slotIndex <= numSlots then
+        return false
+    end
+    if full or numSlots >= BankBagSlotsMax() then
+        return true
+    end
+    if slotIndex ~= numSlots + 1 then
+        if UIErrorsFrame and UIErrorsFrame.AddMessage then
+            UIErrorsFrame:AddMessage("Purchase bank bag slots in order.", 1, 0.1, 0.1, 1)
+        end
+        return true
+    end
+    local cost = GetBankSlotCost and GetBankSlotCost(numSlots)
+    if not cost then
+        return true
+    end
+    local bf = _G.BankFrame
+    if bf then
+        bf.nextSlotCost = cost
+    end
+    if PlaySound then
+        PlaySound("igMainMenuOption")
+    end
+    StaticPopup_Show("CONFIRM_BUY_BANK_SLOT")
+    return true
 end
 
 local function SavePosition()
@@ -147,7 +234,7 @@ local function CreateHeader(parent)
 
     header.title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header.title:SetPoint("LEFT", 6, 0)
-    header.title:SetText("|cFF00FFAA Omni|r Bank")
+    header.title:SetText("|cFF00FF00Omni|r Bank")
 
     header.closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
     header.closeBtn:SetSize(20, 20)
@@ -157,41 +244,32 @@ local function CreateHeader(parent)
         BankFrame:Hide()
     end)
 
-    header:EnableMouse(true)
-    header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function()
-        parent:StartMoving()
-    end)
-    header:SetScript("OnDragStop", function()
-        parent:StopMovingOrSizing()
-        parent.userMoved = true
-        SavePosition()
-    end)
+    header.optBtn = CreateRibbonIconButton(header, SETTINGS_ICON,
+        "Settings", "Open the OmniInventory settings panel",
+        function()
+            if Omni.Settings then
+                Omni.Settings:Toggle()
+            else
+                print("|cFF00FF00OmniInventory|r: Settings not loaded")
+            end
+        end)
+    header.optBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -RIBBON_GAP, 0)
 
-    parent.header = header
-    return header
-end
+    header.ribbonSep = header:CreateTexture(nil, "OVERLAY")
+    header.ribbonSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header.ribbonSep:SetVertexColor(0.35, 0.35, 0.35, 1)
+    header.ribbonSep:SetSize(1, 14)
+    header.ribbonSep:SetPoint("RIGHT", header.optBtn, "LEFT", -RIBBON_SEP_GAP, 0)
 
-local function CreateBankBagRow(parent)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetHeight(22)
-    row:SetPoint("TOPLEFT", parent.header, "BOTTOMLEFT", 0, -2)
-    row:SetPoint("TOPRIGHT", parent.header, "BOTTOMRIGHT", 0, -2)
+    header.bagBar = CreateFrame("Frame", nil, header)
+    header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BANK_BAG_IDS, BAG_ICON_SIZE)
+    header.bagBar:SetPoint("RIGHT", header.ribbonSep, "LEFT", -RIBBON_SEP_GAP, 0)
 
-    row.bg = row:CreateTexture(nil, "BACKGROUND")
-    row.bg:SetAllPoints()
-    row.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    row.bg:SetVertexColor(0.11, 0.11, 0.11, 1)
-
-    row.bar = CreateFrame("Frame", nil, row)
-    row.bar:SetHeight(BAG_ICON_SIZE + 2)
-    row.bar:SetPoint("LEFT", PADDING, 0)
-
-    row.buttons = {}
+    header.bagButtons = {}
     for index, bagID in ipairs(BANK_BAG_IDS) do
-        local bagBtn = CreateFrame("Button", nil, row.bar)
+        local bagBtn = CreateFrame("Button", nil, header.bagBar)
         bagBtn:SetSize(BAG_ICON_SIZE, BAG_ICON_SIZE)
-        bagBtn:SetPoint("LEFT", (index - 1) * (BAG_ICON_SIZE + 3), 0)
+        bagBtn:SetPoint("LEFT", (index - 1) * (BAG_ICON_SIZE + 2), 0)
         bagBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         bagBtn:RegisterForDrag("LeftButton")
         bagBtn.bagID = bagID
@@ -230,6 +308,9 @@ local function CreateBankBagRow(parent)
                     BankFrame:EquipBankBagFromCursor(self.bagID)
                     return
                 end
+                if HandleUnpurchasedBankBagClick(self.bagID) then
+                    return
+                end
                 BankFrame:ToggleBankBagPreview(self.bagID)
             elseif mouseButton == "RightButton" then
                 BankFrame:ForceEmptyBankBag(self.bagID)
@@ -239,43 +320,61 @@ local function CreateBankBagRow(parent)
             BankFrame:EquipBankBagFromCursor(self.bagID)
         end)
         bagBtn:SetScript("OnEnter", function(self)
+            local slotIndex = BankBagSlotIndex(self.bagID)
+            local numPurchased, bankBagsFull = GetNumBankSlots()
+            numPurchased = numPurchased or 0
+            local nextToBuy = (not bankBagsFull) and numPurchased < BankBagSlotsMax()
+                and (slotIndex == numPurchased + 1)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            if self.bagID == -1 then
-                GameTooltip:AddLine("Main bank", 1, 1, 1)
+            if slotIndex > numPurchased then
+                GameTooltip:AddLine(BANK_BAG_PURCHASE or "Purchase this bank slot", 1, 0.2, 0.2)
+                if nextToBuy then
+                    GameTooltip:AddLine("Left-click: Purchase this slot (gold confirmation)", 0.8, 0.8, 0.8)
+                elseif not bankBagsFull then
+                    GameTooltip:AddLine("Buy earlier bank bag slots first.", 0.75, 0.75, 0.75)
+                end
             else
-                local name = GetBagName and GetBagName(self.bagID) or ("Bank bag " .. tostring(self.bagID - 4))
+                local name = GetBagName and GetBagName(self.bagID) or ("Bank bag " .. tostring(slotIndex))
                 local slots = GetContainerNumSlots(self.bagID) or 0
                 if slots > 0 and name and name ~= "" then
                     GameTooltip:AddLine(name, 1, 1, 1)
                 else
-                    GameTooltip:AddLine("Empty bank bag slot " .. tostring(self.bagID - 4), 1, 1, 1)
+                    GameTooltip:AddLine("Empty bank bag slot " .. tostring(slotIndex), 1, 1, 1)
                 end
-            end
-            GameTooltip:AddLine("Left-click: Show only this bank section", 0.8, 0.8, 0.8)
-            GameTooltip:AddLine("Left-click (again): Show all bank slots", 0.8, 0.8, 0.8)
-            if self.bagID ~= -1 then
+                GameTooltip:AddLine("Left-click: Show only this bank section", 0.8, 0.8, 0.8)
+                GameTooltip:AddLine("Left-click (again): Show all bank slots", 0.8, 0.8, 0.8)
                 GameTooltip:AddLine("Drag a bag here to equip in this slot", 0.6, 0.9, 0.6)
+                GameTooltip:AddLine("Right-click: Move items to other bank space", 0.8, 0.8, 0.8)
             end
-            GameTooltip:AddLine("Right-click: Move items to other bank space", 0.8, 0.8, 0.8)
             GameTooltip:Show()
         end)
         bagBtn:SetScript("OnLeave", function()
             GameTooltip:Hide()
         end)
 
-        row.buttons[bagID] = bagBtn
+        header.bagButtons[bagID] = bagBtn
     end
 
-    parent.bankBagRow = row
-    return row
+    header:EnableMouse(true)
+    header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart", function()
+        parent:StartMoving()
+    end)
+    header:SetScript("OnDragStop", function()
+        parent:StopMovingOrSizing()
+        parent.userMoved = true
+        SavePosition()
+    end)
+
+    parent.header = header
+    return header
 end
 
 local function CreateSearchBar(parent)
     local searchBar = CreateFrame("Frame", nil, parent)
     searchBar:SetHeight(SEARCH_HEIGHT)
-    local top = parent.bankBagRow or parent.header
-    searchBar:SetPoint("TOPLEFT", top, "BOTTOMLEFT", 0, -4)
-    searchBar:SetPoint("TOPRIGHT", top, "BOTTOMRIGHT", 0, -4)
+    searchBar:SetPoint("TOPLEFT", parent.header, "BOTTOMLEFT", 0, -4)
+    searchBar:SetPoint("TOPRIGHT", parent.header, "BOTTOMRIGHT", 0, -4)
 
     searchBar.bg = searchBar:CreateTexture(nil, "BACKGROUND")
     searchBar.bg:SetAllPoints()
@@ -436,7 +535,6 @@ function BankFrame:CreateMainFrame()
     tinsert(UISpecialFrames, "OmniInventoryBankFrame")
 
     CreateHeader(bankFrame)
-    CreateBankBagRow(bankFrame)
     CreateSearchBar(bankFrame)
     CreateContentArea(bankFrame)
     CreateFooter(bankFrame)
@@ -519,16 +617,27 @@ function BankFrame:ToggleBankBagPreview(bagID)
 end
 
 function BankFrame:UpdateBankBagButtonIcons()
-    if not bankFrame or not bankFrame.bankBagRow or not bankFrame.bankBagRow.buttons then
+    if not bankFrame or not bankFrame.header or not bankFrame.header.bagButtons then
         return
     end
+    local numPurchased = (GetNumBankSlots and GetNumBankSlots()) or 0
     for _, bagID in ipairs(BANK_BAG_IDS) do
-        local btn = bankFrame.bankBagRow.buttons[bagID]
+        local btn = bankFrame.header.bagButtons[bagID]
         if btn and btn.icon then
             btn.icon:SetTexture(GetBankBagIconTexture(bagID))
+            local slotIndex = BankBagSlotIndex(bagID)
             local slots = GetContainerNumSlots(bagID) or 0
+            local purchased = slotIndex <= numPurchased
+            if btn.icon.SetVertexColor then
+                if not purchased then
+                    btn.icon:SetVertexColor(1, 0.15, 0.15)
+                else
+                    btn.icon:SetVertexColor(1, 1, 1)
+                end
+            end
             if btn.icon.SetDesaturated then
-                if bagID ~= -1 and slots <= 0 then
+                local emptySocket = purchased and slots <= 0
+                if not purchased or emptySocket then
                     btn.icon:SetDesaturated(1)
                 else
                     btn.icon:SetDesaturated(0)
@@ -539,11 +648,11 @@ function BankFrame:UpdateBankBagButtonIcons()
 end
 
 function BankFrame:UpdateBankBagButtonVisuals()
-    if not bankFrame or not bankFrame.bankBagRow or not bankFrame.bankBagRow.buttons then
+    if not bankFrame or not bankFrame.header or not bankFrame.header.bagButtons then
         return
     end
     for _, bagID in ipairs(BANK_BAG_IDS) do
-        local btn = bankFrame.bankBagRow.buttons[bagID]
+        local btn = bankFrame.header.bagButtons[bagID]
         if btn then
             local r, g, b = 0.4, 0.4, 0.4
             if selectedBankBagID == bagID then
@@ -558,7 +667,11 @@ function BankFrame:UpdateBankBagButtonVisuals()
 end
 
 function BankFrame:EquipBankBagFromCursor(bagID)
-    if not IsValidBankBagID(bagID) or bagID == -1 then
+    if bagID == -1 then
+        if ClearCursor then ClearCursor() end
+        return
+    end
+    if not IsValidBankBagID(bagID) then
         if ClearCursor then ClearCursor() end
         return
     end
