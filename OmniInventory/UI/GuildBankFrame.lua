@@ -35,6 +35,10 @@ local PADDING = 8
 local HEADER_HEIGHT = 24
 local FOOTER_HEIGHT = 48
 local SEARCH_HEIGHT = 22
+local FOOTER_ICON_BTN_SIZE = 24
+local FOOTER_ICON_BTN_GAP = 4
+local FOOTER_SMART_ICON = "Interface\\Icons\\INV_Misc_Coin_01"
+local FOOTER_BUYTAB_ICON = "Interface\\Icons\\INV_Misc_Coin_02"
 
 local FRAME_WIDTH = TAB_COLUMN_WIDTH + 6 + (SLOTS_PER_ROW * (SLOT_SIZE + SLOT_SPACING))
                     + PADDING * 2 + 8
@@ -1035,6 +1039,51 @@ local function CreateSearchBar(parent)
     parent.searchBar = bar
 end
 
+local function StyleFooterRibbonButton(btn)
+    btn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    btn:SetBackdropColor(0.12, 0.12, 0.12, 1)
+    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+
+    btn:HookScript("OnEnter", function(self)
+        self:SetBackdropColor(0.22, 0.22, 0.22, 1)
+        self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        if self._tooltipTitle then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(self._tooltipTitle, 1, 1, 1)
+            if self._tooltipSub then
+                GameTooltip:AddLine(self._tooltipSub, 0.8, 0.8, 0.8, true)
+            end
+            GameTooltip:Show()
+        end
+    end)
+    btn:HookScript("OnLeave", function(self)
+        self:SetBackdropColor(0.12, 0.12, 0.12, 1)
+        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+        GameTooltip:Hide()
+    end)
+end
+
+local function CreateFooterIconButton(parent, iconTexture, tooltipTitle, tooltipSub, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(FOOTER_ICON_BTN_SIZE, FOOTER_ICON_BTN_SIZE)
+    StyleFooterRibbonButton(btn)
+
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetPoint("TOPLEFT", 2, -2)
+    btn.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    btn.icon:SetTexture(iconTexture)
+    btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+    return btn
+end
+
 local function CreateFooter(parent)
     local footer = CreateFrame("Frame", nil, parent)
     footer:SetHeight(FOOTER_HEIGHT)
@@ -1046,55 +1095,74 @@ local function CreateFooter(parent)
     footer.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
     footer.bg:SetVertexColor(0.12, 0.12, 0.12, 1)
 
-    footer.money = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    footer.money:SetPoint("TOPLEFT", 8, -6)
-    footer.money:SetText("Guild Bank: 0g")
-
-    footer.withdrawLimit = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    footer.withdrawLimit:SetPoint("TOPLEFT", footer.money, "BOTTOMLEFT", 0, -2)
-    footer.withdrawLimit:SetTextColor(0.7, 0.7, 0.7)
-    footer.withdrawLimit:SetText("Withdraw limit: 0g")
-
-    local function MakeButton(text, width)
-        local b = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
-        b:SetSize(width or 110, 20)
-        b:SetText(text)
-        return b
-    end
-
-    footer.depositBtn = MakeButton("Deposit Money", 110)
-    footer.depositBtn:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -6, 4)
-    footer.depositBtn:SetScript("OnClick", function()
-        StaticPopup_Show("OMNI_GUILDBANK_DEPOSIT_MONEY")
+    footer.moneyBtn = CreateFrame("Button", nil, footer)
+    footer.moneyBtn:SetSize(260, 24)
+    footer.moneyBtn:SetPoint("TOPLEFT", 6, -4)
+    footer.moneyBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    StyleFooterRibbonButton(footer.moneyBtn)
+    footer.moneyBtn._tooltipTitle = "Guild Funds"
+    footer.moneyBtn._tooltipSub = "Left-click: withdraw | Right-click: deposit"
+    footer.moneyBtn:SetScript("OnClick", function(self, mouseButton)
+        if mouseButton == "RightButton" then
+            StaticPopup_Show("OMNI_GUILDBANK_DEPOSIT_MONEY")
+        else
+            StaticPopup_Show("OMNI_GUILDBANK_WITHDRAW_MONEY")
+        end
     end)
-
-    footer.withdrawBtn = MakeButton("Withdraw Money", 110)
-    footer.withdrawBtn:SetPoint("RIGHT", footer.depositBtn, "LEFT", -4, 0)
-    footer.withdrawBtn:SetScript("OnClick", function()
-        StaticPopup_Show("OMNI_GUILDBANK_WITHDRAW_MONEY")
-    end)
-
-    footer.smartDepositBtn = MakeButton("Smart Deposit BoEs", 140)
-    footer.smartDepositBtn:SetPoint("RIGHT", footer.withdrawBtn, "LEFT", -4, 0)
-    footer.smartDepositBtn:SetScript("OnClick", function()
-        GuildBankFrame:RunSmartDeposit()
-    end)
-    footer.smartDepositBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Smart Deposit BoEs", 1, 1, 1)
-        GameTooltip:AddLine("Moves BoE + Account Attunable gear from your bags")
-        GameTooltip:AddLine("into tabs you configured (weapons, armor types, jewelry).", 0.7, 0.7, 0.7)
+    footer.moneyBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.22, 0.22, 0.22, 1)
+        self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+        GameTooltip:AddLine("Guild Funds", 1, 1, 1)
+        GameTooltip:AddLine((self._moneyText and self._moneyText ~= "") and self._moneyText or "0", 1, 0.85, 0.25)
+        if self._withdrawText and self._withdrawText ~= "" then
+            GameTooltip:AddLine(self._withdrawText, 0.75, 0.75, 0.75)
+        end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Right-click a tab: toggle one or more deposit types.", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Left-click: Withdraw", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Right-click: Deposit", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
-    footer.smartDepositBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    footer.moneyBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.12, 0.12, 0.12, 1)
+        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+        GameTooltip:Hide()
+    end)
 
-    footer.buyTabBtn = MakeButton("Buy Next Tab", 110)
-    footer.buyTabBtn:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", 6, 4)
-    footer.buyTabBtn:SetScript("OnClick", function()
+    footer.moneyIcon = footer.moneyBtn:CreateTexture(nil, "ARTWORK")
+    footer.moneyIcon:SetSize(16, 16)
+    footer.moneyIcon:SetPoint("LEFT", 6, 0)
+    footer.moneyIcon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10_Blue")
+
+    footer.money = footer.moneyBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    footer.money:SetPoint("LEFT", footer.moneyIcon, "RIGHT", 5, 0)
+    footer.money:SetJustifyH("LEFT")
+    footer.money:SetText("0")
+
+    footer.withdrawLimit = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    footer.withdrawLimit:SetPoint("TOPLEFT", footer.moneyBtn, "BOTTOMLEFT", 2, -2)
+    footer.withdrawLimit:SetTextColor(0.76, 0.76, 0.76)
+    footer.withdrawLimit:SetText("Withdraw: 0")
+
+    footer.smartDepositBtn = CreateFooterIconButton(
+        footer,
+        FOOTER_SMART_ICON,
+        "Smart Deposit BoEs",
+        "Moves BoE + account-attunable gear using tab mapping.",
+        function()
+        GuildBankFrame:RunSmartDeposit()
+    end)
+    footer.smartDepositBtn:SetPoint("RIGHT", footer, "RIGHT", -6, 0)
+
+    footer.buyTabBtn = CreateFooterIconButton(
+        footer,
+        FOOTER_BUYTAB_ICON,
+        "Buy Next Guild Tab",
+        "Guild leaders can purchase the next tab.",
+        function()
         StaticPopup_Show("OMNI_GUILDBANK_BUY_TAB")
     end)
+    footer.buyTabBtn:SetPoint("RIGHT", footer.smartDepositBtn, "LEFT", -FOOTER_ICON_BTN_GAP, 0)
     footer.buyTabBtn:Hide()
 
     parent.footer = footer
@@ -1486,11 +1554,16 @@ function GuildBankFrame:UpdateMoney()
     if not frame or not frame.footer then return end
     local money = GetGuildBankMoney and GetGuildBankMoney() or 0
     local withdraw = GetGuildBankWithdrawMoney and GetGuildBankWithdrawMoney() or 0
-    frame.footer.money:SetText("Guild Bank: " .. GetCoinTextureString(money))
+    local moneyText = GetCoinTextureString(money)
+    frame.footer.money:SetText(moneyText)
+    frame.footer.moneyBtn._moneyText = moneyText
     if withdraw == -1 then
-        frame.footer.withdrawLimit:SetText("Withdraw limit: |cFFFFD700Unlimited|r")
+        frame.footer.withdrawLimit:SetText("Withdraw: |cFFFFD700Unlimited|r")
+        frame.footer.moneyBtn._withdrawText = "Withdraw: Unlimited"
     else
-        frame.footer.withdrawLimit:SetText("Withdraw limit: " .. GetCoinTextureString(withdraw))
+        local withdrawText = GetCoinTextureString(withdraw)
+        frame.footer.withdrawLimit:SetText("Withdraw: " .. withdrawText)
+        frame.footer.moneyBtn._withdrawText = "Withdraw: " .. withdrawText
     end
 end
 
@@ -1511,7 +1584,7 @@ function GuildBankFrame:UpdateBuyButton()
     local numTabs = GetNumGuildBankTabs() or 0
     local isLeader = IsGuildLeader and IsGuildLeader() or false
     if isLeader and numTabs < MAX_TABS then
-        btn:SetText(string.format("Buy Tab %d", numTabs + 1))
+        btn._tooltipTitle = string.format("Buy Tab %d", numTabs + 1)
         btn:Show()
     else
         btn:Hide()
@@ -1893,6 +1966,21 @@ StaticPopupDialogs["OMNI_GUILDBANK_EDIT_INFO"] = {
     end,
 }
 
+local GUILD_BANK_MAX_COPPER = 18446744073709551615
+
+local function ClampGuildBankMoneyCopper(value)
+    if not value or value ~= value or value == math.huge or value == -math.huge then
+        return nil
+    end
+    if value <= 0 then
+        return nil
+    end
+    if value > GUILD_BANK_MAX_COPPER then
+        return GUILD_BANK_MAX_COPPER
+    end
+    return value
+end
+
 local function ParseGuildBankMoneyInputToCopper(raw)
     if not raw then return nil end
     local s = string.lower(string.gsub(string.gsub(tostring(raw), "^%s+", ""), "%s+$", ""))
@@ -1903,11 +1991,11 @@ local function ParseGuildBankMoneyInputToCopper(raw)
     if num and suf then
         local v = tonumber(num)
         if not v or v <= 0 then return nil end
-        if suf == "c" then return math.floor(v + 0.5) end
-        if suf == "s" then return math.floor(v * 100 + 0.5) end
-        if suf == "g" then return math.floor(v * 10000 + 0.5) end
-        if suf == "k" then return math.floor(v * 1000 * 10000 + 0.5) end
-        if suf == "m" then return math.floor(v * 1000000 * 10000 + 0.5) end
+        if suf == "c" then return ClampGuildBankMoneyCopper(math.floor(v + 0.5)) end
+        if suf == "s" then return ClampGuildBankMoneyCopper(math.floor(v * 100 + 0.5)) end
+        if suf == "g" then return ClampGuildBankMoneyCopper(math.floor(v * 10000 + 0.5)) end
+        if suf == "k" then return ClampGuildBankMoneyCopper(math.floor(v * 1000 * 10000 + 0.5)) end
+        if suf == "m" then return ClampGuildBankMoneyCopper(math.floor(v * 1000000 * 10000 + 0.5)) end
     end
 
     local total = 0
@@ -1928,12 +2016,12 @@ local function ParseGuildBankMoneyInputToCopper(raw)
         end
     end
     if found and total > 0 then
-        return math.floor(total)
+        return ClampGuildBankMoneyCopper(math.floor(total))
     end
 
     local c = tonumber(s)
     if c and c > 0 then
-        return math.floor(c + 0.5)
+        return ClampGuildBankMoneyCopper(math.floor(c + 0.5))
     end
     return nil
 end
@@ -1943,7 +2031,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
-    maxLetters = 24,
+    maxLetters = 32,
     timeout = 0,
     whileDead = 0,
     hideOnEscape = 1,
@@ -1953,6 +2041,14 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
             DepositGuildBankMoney(amt)
         end
     end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        local amt = ParseGuildBankMoneyInputToCopper(self:GetText())
+        if amt and amt > 0 and DepositGuildBankMoney then
+            DepositGuildBankMoney(amt)
+            parent:Hide()
+        end
+    end,
 }
 
 StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
@@ -1960,7 +2056,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
-    maxLetters = 24,
+    maxLetters = 32,
     timeout = 0,
     whileDead = 0,
     hideOnEscape = 1,
@@ -1968,6 +2064,14 @@ StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
         local amt = ParseGuildBankMoneyInputToCopper(self.editBox:GetText())
         if amt and amt > 0 and WithdrawGuildBankMoney then
             WithdrawGuildBankMoney(amt)
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        local amt = ParseGuildBankMoneyInputToCopper(self:GetText())
+        if amt and amt > 0 and WithdrawGuildBankMoney then
+            WithdrawGuildBankMoney(amt)
+            parent:Hide()
         end
     end,
 }
