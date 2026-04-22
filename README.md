@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src=".assets/Icon.jpg" width="160" height="160" alt="OmniInventory logo"/>
+<img width="1456" height="501" alt="OmniInv" src="https://github.com/user-attachments/assets/21328b06-093a-4036-835c-2bc075c3d0dc" />
 
 # Omni Inventory · **Syn**
 
