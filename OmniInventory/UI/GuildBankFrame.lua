@@ -59,6 +59,17 @@ local JEWELRY_EQUIP_SLOTS = {
     ["INVTYPE_TRINKET"] = true,
 }
 
+local SMART_DEPOSIT_KEYS = {
+    weapons = true,
+    jewelry = true,
+    armor_cloth = true,
+    armor_leather = true,
+    armor_mail = true,
+    armor_plate = true,
+    armor_misc = true,
+    armor = true,
+}
+
 -- =============================================================================
 -- State
 -- =============================================================================
@@ -77,11 +88,21 @@ local VIEW_GRID = "grid"
 -- Saved Variables
 -- =============================================================================
 
+local tabMappingStringsCoerced = false
+
 local function GetDB()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.char = OmniInventoryDB.char or {}
     OmniInventoryDB.char.guildBank = OmniInventoryDB.char.guildBank or {}
     OmniInventoryDB.char.guildBank.tabMappings = OmniInventoryDB.char.guildBank.tabMappings or {}
+    if not tabMappingStringsCoerced then
+        tabMappingStringsCoerced = true
+        for tab, val in pairs(OmniInventoryDB.char.guildBank.tabMappings) do
+            if type(val) == "string" and val ~= "" then
+                OmniInventoryDB.char.guildBank.tabMappings[tab] = { [val] = true }
+            end
+        end
+    end
     if not OmniInventoryDB.char.guildBank.viewMode then
         OmniInventoryDB.char.guildBank.viewMode = VIEW_FLOW
     end
@@ -102,32 +123,71 @@ local function GetTabMappings()
     return GetDB().tabMappings
 end
 
-local function SetTabMapping(tab, category)
+-- ʕ •ᴥ•ʔ✿ set table: [categoryKey] = true; multiple keys per tab ✿ ʕ •ᴥ•ʔ
+local function GetTabSet(tab)
+    local m = GetTabMappings()
+    if not m then return nil end
+    local s = m[tab]
+    if not s then return nil end
+    if type(s) == "string" and s ~= "" then
+        return { [s] = true }
+    end
+    if type(s) == "table" then
+        return s
+    end
+    return nil
+end
+
+function GuildBankFrame:TabSetDescribesCategory(set, category)
+    if not set or not category then return false end
+    if set[category] then
+        return true
+    end
+    if set["armor"] and string.find(category, "^armor_") then
+        return true
+    end
+    return false
+end
+
+function GuildBankFrame:ToggleTabCategoryMapping(tab, categoryKey)
+    if not tab or not categoryKey then
+        return
+    end
+    if not SMART_DEPOSIT_KEYS[categoryKey] then
+        return
+    end
     local mappings = GetTabMappings()
-    for otherTab, otherCat in pairs(mappings) do
-        if otherCat == category and otherTab ~= tab then
-            mappings[otherTab] = nil
+    local nextSet = {}
+    local cur = GetTabSet(tab)
+    if cur then
+        for k, v in pairs(cur) do
+            if v then
+                nextSet[k] = true
+            end
         end
     end
-    if category then
-        mappings[tab] = category
+    if nextSet[categoryKey] then
+        nextSet[categoryKey] = nil
     else
-        mappings[tab] = nil
+        nextSet[categoryKey] = true
     end
+    if not next(nextSet) then
+        mappings[tab] = nil
+    else
+        mappings[tab] = nextSet
+    end
+    GuildBankFrame:UpdateTabs()
+end
+
+function GuildBankFrame:ClearTabCategoryMappings(tab)
+    GetTabMappings()[tab] = nil
+    self:UpdateTabs()
 end
 
 local function GetTabForCategory(category)
-    local mappings = GetTabMappings()
-    for tab, cat in pairs(mappings) do
-        if cat == category then
+    for tab = 1, MAX_TABS do
+        if GuildBankFrame:TabSetDescribesCategory(GetTabSet(tab), category) then
             return tab
-        end
-    end
-    if category and string.find(category, "^armor_") then
-        for tab, cat in pairs(mappings) do
-            if cat == "armor" then
-                return tab
-            end
         end
     end
     return nil
@@ -226,21 +286,17 @@ local function ApplyGuildBankTabRename(tabIndex, newName)
     pcall(SetGuildBankTabInfo, tabIndex, newName, shortName)
 end
 
-local SMART_DEPOSIT_KEYS = {
-    weapons = true,
-    jewelry = true,
-    armor_cloth = true,
-    armor_leather = true,
-    armor_mail = true,
-    armor_plate = true,
-    armor_misc = true,
-    armor = true,
-}
-
 local function HasAnySmartDepositMapping()
-    for _, cat in pairs(GetTabMappings()) do
-        if SMART_DEPOSIT_KEYS[cat] then
+    for _, v in pairs(GetTabMappings()) do
+        if type(v) == "string" and SMART_DEPOSIT_KEYS[v] then
             return true
+        end
+        if type(v) == "table" and next(v) then
+            for k, on in pairs(v) do
+                if on and SMART_DEPOSIT_KEYS[k] then
+                    return true
+                end
+            end
         end
     end
     return false
@@ -424,10 +480,20 @@ local function CreateTabButton(parent, index)
                     (numWith or 0) - (remainWith or 0), numWith or 0), 0.8, 0.8, 0.8)
             end
         end
-        local mappings = GetTabMappings()
-        if mappings[self.tabIndex] then
+        local set = GetTabSet(self.tabIndex)
+        if set and next(set) then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Smart deposit: |cFF00FFAA" .. mappings[self.tabIndex] .. "|r")
+            GameTooltip:AddLine("Smart deposit categories:", 0.7, 0.85, 0.9)
+            local list = {}
+            for k, on in pairs(set) do
+                if on and SMART_DEPOSIT_KEYS[k] then
+                    table.insert(list, k)
+                end
+            end
+            table.sort(list)
+            for _, k in ipairs(list) do
+                GameTooltip:AddLine("  |cFF00FFAA" .. k .. "|r", 0.9, 0.95, 0.9)
+            end
         end
         if isViewable and isViewable ~= 0 then
             local u = self._gbSlotsUsed or 0
@@ -494,18 +560,35 @@ local function UpdateTabButtonAppearance(btn, index)
         end
     end
 
-    local mapping = GetTabMappings()[index]
-    if mapping then
-        local tag = mapping == "weapons" and "W"
-            or mapping == "jewelry" and "J"
-            or mapping == "armor_cloth" and "c"
-            or mapping == "armor_leather" and "L"
-            or mapping == "armor_mail" and "M"
-            or mapping == "armor_plate" and "P"
-            or mapping == "armor_misc" and "m"
-            or mapping == "armor" and "A"
-            or "?"
-        btn.mapTag:SetText(tag)
+    local set = GetTabSet(index)
+    if set and next(set) then
+        local function oneTag(k)
+            return (k == "weapons" and "W")
+                or (k == "jewelry" and "J")
+                or (k == "armor_cloth" and "c")
+                or (k == "armor_leather" and "L")
+                or (k == "armor_mail" and "M")
+                or (k == "armor_plate" and "P")
+                or (k == "armor_misc" and "m")
+                or (k == "armor" and "A")
+                or "?"
+        end
+        local keys = {}
+        for k, on in pairs(set) do
+            if on and SMART_DEPOSIT_KEYS[k] then
+                table.insert(keys, k)
+            end
+        end
+        table.sort(keys)
+        local str = ""
+        for i = 1, #keys do
+            if i > 4 then
+                str = str .. "+"
+                break
+            end
+            str = str .. oneTag(keys[i])
+        end
+        btn.mapTag:SetText(str ~= "" and str or "?")
         btn.mapTag:Show()
     else
         btn.mapTag:Hide()
@@ -567,55 +650,84 @@ local function EnsureGuildSlotDecorationFrames(btn)
     btn.forgeText:Hide()
 end
 
-local function GuildBankSlotOnClick(self, mouseButton)
-        local tab = self.gbTab or currentTab
-        local slot = self.gbSlot or self.slotIndex
-        local tex = select(1, GetGuildBankItemInfo(tab, slot))
-        local hasItem = tex and tex ~= ""
+-- ʕ •ᴥ•ʔ✿ RegisterForClicks("RightButtonUp") passes "RightButtonUp" — must match
+-- ItemButton.lua (NormalizeMouseButton) or the RightButton branch never runs. ✿ ʕ •ᴥ•ʔ
+local function NormalizeGuildBankMouseButton(mouseButton)
+    if mouseButton == "LeftButtonUp" or mouseButton == "LeftButtonDown" or mouseButton == "LeftButton" then
+        return "LeftButton"
+    end
+    if mouseButton == "RightButtonUp" or mouseButton == "RightButtonDown" or mouseButton == "RightButton" then
+        return "RightButton"
+    end
+    return mouseButton
+end
 
-        if mouseButton == "RightButton" then
-            if hasItem then
-                if CursorHasItem and CursorHasItem() and ClearCursor then
-                    ClearCursor()
+-- ʕ •ᴥ•ʔ✿ Guild item buttons: same order as Blizzard_GuildBankUI (GuildBankItemButtonTemplate
+-- OnClick). Right = AutoStoreGuildBankItem (withdraw to bags / deposit from cursor). ✿ ʕ •ᴥ•ʔ
+local function GuildBankSlot_ResolveTarget(self)
+    local bankTab = (GetCurrentGuildBankTab and GetCurrentGuildBankTab()) or (self.gbTab or currentTab)
+    local bankSlot
+    if self.GetID and self:GetID() and self:GetID() > 0 then
+        bankSlot = self:GetID()
+    else
+        bankSlot = self.gbSlot or self.slotIndex
+    end
+    return bankTab, bankSlot
+end
+
+local function GuildBankSlotOnClick(self, mouseButton)
+    mouseButton = NormalizeGuildBankMouseButton(mouseButton) or mouseButton
+    if not mouseButton then
+        return
+    end
+
+    local bankTab, bankSlot = GuildBankSlot_ResolveTarget(self)
+    local itemLink = GetGuildBankItemLink and GetGuildBankItemLink(bankTab, bankSlot) or nil
+    if HandleModifiedItemClick and itemLink and HandleModifiedItemClick(itemLink) then
+        return
+    end
+
+    if IsModifiedClick and IsModifiedClick("SPLITSTACK") then
+        local _tex, count, locked = GetGuildBankItemInfo(bankTab, bankSlot)
+        if count and count > 1 and not locked then
+            self.SplitStack = function(btn, splitCount)
+                if not SplitGuildBankItem then
+                    return
                 end
-                if PickupGuildBankItem then
-                    PickupGuildBankItem(tab, slot)
-                end
-                return
+                local t = (GetCurrentGuildBankTab and GetCurrentGuildBankTab()) or bankTab
+                local s = (btn.GetID and btn:GetID() and btn:GetID() > 0) and btn:GetID() or bankSlot
+                SplitGuildBankItem(t, s, splitCount)
             end
-            if CursorHasItem and not CursorHasItem() then
-                if AutoStoreGuildBankItem then
-                    AutoStoreGuildBankItem(tab, slot)
-                end
-                return
-            end
-            if PickupGuildBankItem then
-                PickupGuildBankItem(tab, slot)
-            end
-            return
+            OpenStackSplitFrame(count, self, "BOTTOMLEFT", "TOPLEFT")
         end
-        if IsShiftKeyDown() and CursorHasItem and not CursorHasItem() then
-            local link = GetGuildBankItemLink(tab, slot)
-            if link and ChatEdit_InsertLink then
-                ChatEdit_InsertLink(link)
-            end
-            return
+        return
+    end
+
+    local cType, cMoney
+    if GetCursorInfo then
+        cType, cMoney = GetCursorInfo()
+    end
+    if cType == "money" and cMoney and DepositGuildBankMoney and ClearCursor then
+        DepositGuildBankMoney(cMoney)
+        ClearCursor()
+        return
+    end
+    if cType == "guildbankmoney" and DropCursorMoney and ClearCursor then
+        DropCursorMoney()
+        ClearCursor()
+        return
+    end
+
+    if mouseButton == "RightButton" and AutoStoreGuildBankItem then
+        AutoStoreGuildBankItem(bankTab, bankSlot)
+        if GuildBankFrame and GuildBankFrame.UpdateLayout then
+            GuildBankFrame:UpdateLayout()
         end
-        if IsModifiedClick and IsModifiedClick("SPLITSTACK") then
-            local _, count = GetGuildBankItemInfo(tab, slot)
-            if count and count > 1 then
-                self.SplitStack = function(_, splitCount)
-                    if SplitGuildBankItem then
-                        SplitGuildBankItem(tab, slot, splitCount)
-                    end
-                end
-                OpenStackSplitFrame(count, self, "BOTTOMRIGHT", "TOPRIGHT")
-                return
-            end
-        end
-        if PickupGuildBankItem then
-            PickupGuildBankItem(tab, slot)
-        end
+        return
+    end
+    if mouseButton == "LeftButton" and PickupGuildBankItem then
+        PickupGuildBankItem(bankTab, bankSlot)
+    end
 end
 
 local function CreateSlotButton(parent, slotIndex)
@@ -803,6 +915,9 @@ end
 local function UpdateSlotButton(btn)
     btn.gbTab = currentTab
     btn.gbSlot = btn.slotIndex
+    if btn.SetID and btn.gbSlot then
+        btn:SetID(btn.gbSlot)
+    end
     UpdateGuildBankSlotVisual(btn, currentTab, btn.slotIndex)
 end
 
@@ -892,12 +1007,12 @@ local function CreateSearchBar(parent)
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
     bar.bg:SetAllPoints()
     bar.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    bar.bg:SetVertexColor(0.09, 0.09, 0.09, 1)
+    bar.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
 
     bar.icon = bar:CreateTexture(nil, "ARTWORK")
     bar.icon:SetSize(14, 14)
     bar.icon:SetPoint("LEFT", 6, 0)
-    bar.icon:SetTexture("Interface\\Icons\\INV_Misc_Spyglass_01")
+    bar.icon:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
 
     bar.editBox = CreateFrame("EditBox", "OmniGuildBankSearchBox", bar)
     bar.editBox:SetPoint("LEFT", bar.icon, "RIGHT", 4, 0)
@@ -968,9 +1083,9 @@ local function CreateFooter(parent)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Smart Deposit BoEs", 1, 1, 1)
         GameTooltip:AddLine("Moves BoE + Account Attunable gear from your bags")
-        GameTooltip:AddLine("into the mapped Weapon / Armor / Jewelry tabs.", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("into tabs you configured (weapons, armor types, jewelry).", 0.7, 0.7, 0.7)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Right-click a tab to assign it a category.", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Right-click a tab: toggle one or more deposit types.", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
     footer.smartDepositBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1157,6 +1272,9 @@ function GuildBankFrame:RenderFlowView(items)
                 end
                 btn.gbTab = itemInfo.guildBankTab
                 btn.gbSlot = itemInfo.guildBankSlot
+                if btn.SetID and itemInfo.guildBankSlot then
+                    btn:SetID(itemInfo.guildBankSlot)
+                end
                 UpdateGuildBankSlotVisual(btn, itemInfo.guildBankTab, itemInfo.guildBankSlot)
 
                 local col = ((i - 1) % columns)
@@ -1470,7 +1588,7 @@ end
 
 function GuildBankFrame:RunSmartDeposit()
     if not HasAnySmartDepositMapping() then
-        print("|cFFFF4040Omni Guild Bank:|r No tab mappings set. Right-click a tab to assign Weapons / Armor / Jewelry.")
+        print("|cFFFF4040Omni Guild Bank:|r No tab rules set. Right-click a tab and turn on at least one smart deposit type.")
         return
     end
 
@@ -1584,6 +1702,8 @@ function GuildBankFrame:ShowTabContextMenu(tabIndex)
         end
     end
 
+    local snap = GetTabSet(tabIndex) or {}
+
     local menu = {
         {
             text = "Tab " .. tabIndex,
@@ -1617,35 +1737,87 @@ function GuildBankFrame:ShowTabContextMenu(tabIndex)
             end,
         },
         {
-            text = "Smart deposit: Weapons tab",
+            text = "── Smart deposit (toggle each) ──",
+            isTitle = true,
             notCheckable = true,
+        },
+        {
+            text = "  Weapons (BoE gear)",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.weapons and true or false,
             func = function()
-                SetTabMapping(tabIndex, "weapons")
-                GuildBankFrame:UpdateTabs()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "weapons")
             end,
         },
         {
-            text = "Smart deposit: Armor tab (all weights)",
-            notCheckable = true,
+            text = "  Jewelry (rings, neck, trinkets)",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.jewelry and true or false,
             func = function()
-                SetTabMapping(tabIndex, "armor")
-                GuildBankFrame:UpdateTabs()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "jewelry")
             end,
         },
         {
-            text = "Smart deposit: Jewelry tab",
-            notCheckable = true,
+            text = "  All armor (any weight)",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor and true or false,
             func = function()
-                SetTabMapping(tabIndex, "jewelry")
-                GuildBankFrame:UpdateTabs()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor")
             end,
         },
         {
-            text = "Clear smart deposit map",
+            text = "  Armor: Cloth",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor_cloth and true or false,
+            func = function()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor_cloth")
+            end,
+        },
+        {
+            text = "  Armor: Leather",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor_leather and true or false,
+            func = function()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor_leather")
+            end,
+        },
+        {
+            text = "  Armor: Mail",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor_mail and true or false,
+            func = function()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor_mail")
+            end,
+        },
+        {
+            text = "  Armor: Plate",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor_plate and true or false,
+            func = function()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor_plate")
+            end,
+        },
+        {
+            text = "  Armor: Other / misc",
+            checkable = true,
+            keepShownOnClick = 1,
+            checked = snap.armor_misc and true or false,
+            func = function()
+                GuildBankFrame:ToggleTabCategoryMapping(tabIndex, "armor_misc")
+            end,
+        },
+        {
+            text = "  Clear all rules on this tab",
             notCheckable = true,
             func = function()
-                SetTabMapping(tabIndex, nil)
-                GuildBankFrame:UpdateTabs()
+                GuildBankFrame:ClearTabCategoryMappings(tabIndex)
             end,
         },
         {
