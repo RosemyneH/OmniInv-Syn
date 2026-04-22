@@ -48,6 +48,10 @@ local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
+-- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
+-- bag icon forced bag view. ToggleBagPreview uses it to restore the
+-- prior view (flow/grid/list) when the bag is unselected. ✿ ʕ •ᴥ•ʔ
+local preBagViewMode = nil
 local forceEmptyFrame = nil
 local forceEmptyJob = nil
 local FORCE_EMPTY_STEP_INTERVAL = 0.12
@@ -869,16 +873,76 @@ end
 -- =============================================================================
 
 local FILTER_HEIGHT = 22
+local FILTER_BUTTON_HEIGHT = 18
+local FILTER_BUTTON_SPACING = 2
+local FILTER_BUTTON_START_X = 4
+local FILTER_TEXT_PADDING_MAX = 10
+local FILTER_TEXT_PADDING_MIN = 3
+local FILTER_BUTTON_MIN_WIDTH = 22
+local FILTER_FONT_PATH = "Fonts\\FRIZQT__.TTF"
+local FILTER_FONT_SIZES = { 10, 9, 8, 7 }
+local FILTER_ROW_SPACING = 2
+local FILTER_ROW_TOP_PAD = 2
+local FILTER_ROW_BOTTOM_PAD = 2
+local FILTER_NEUTRAL_COLOR = { 0.75, 0.75, 0.75 }
 local activeFilter = nil  -- Current active filter
 
-local QUICK_FILTERS = {
-    { name = "All", filter = nil },
-    { name = "New", filter = "NEW_ITEMS", isSpecial = true },
-    { name = "Quest", filter = "Quest" },
-    { name = "Gear", filter = "Equipment" },
-    { name = "Cons", filter = "Consumable" },
-    { name = "Junk", filter = "Junk" },
+-- ʕ ◕ᴥ◕ ʔ✿ Static specials always rendered first. "All" clears the
+-- filter, "New" matches the session-acquired flag, and everything
+-- after them is generated dynamically from the categories currently
+-- present in the inventory (see RebuildFilterTabs). ✿ ʕ ◕ᴥ◕ ʔ
+local SPECIAL_FILTERS = {
+    { name = "All", filter = nil, color = FILTER_NEUTRAL_COLOR },
+    { name = "New", filter = "NEW_ITEMS", isSpecial = true, categoryColorFor = "New Items" },
 }
+
+local function ApplyFilterButtonVisual(btn, hovered)
+    local c = btn.colorTuple or FILTER_NEUTRAL_COLOR
+    local r, g, b = c[1], c[2], c[3]
+    local isActive = (activeFilter == btn.filterName)
+    local bgIntensity
+    if isActive then
+        bgIntensity = 0.45
+    elseif hovered then
+        bgIntensity = 0.28
+    else
+        bgIntensity = 0.14
+    end
+    btn:SetBackdropColor(r * bgIntensity, g * bgIntensity, b * bgIntensity, 1)
+    local borderAlpha = isActive and 1.0 or (hovered and 0.75 or 0.45)
+    btn:SetBackdropBorderColor(r, g, b, borderAlpha)
+    if btn.text then
+        btn.text:SetTextColor(r, g, b, 1)
+    end
+end
+
+local function CreateFilterButton(parent)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetHeight(FILTER_BUTTON_HEIGHT)
+    btn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.text:SetPoint("CENTER")
+    btn:SetScript("OnClick", function(self)
+        Frame:SetQuickFilter(self.filterName)
+    end)
+    btn:SetScript("OnEnter", function(self) ApplyFilterButtonVisual(self, true) end)
+    btn:SetScript("OnLeave", function(self) ApplyFilterButtonVisual(self, false) end)
+    return btn
+end
+
+local function ResolveCategoryColor(name)
+    if Omni.Categorizer and name then
+        local r, g, b = Omni.Categorizer:GetCategoryColor(name)
+        if r and g and b then
+            return { r, g, b }
+        end
+    end
+    return FILTER_NEUTRAL_COLOR
+end
 
 function Frame:CreateFilterBar()
     local filterBar = CreateFrame("Frame", nil, mainFrame)
@@ -886,76 +950,197 @@ function Frame:CreateFilterBar()
     filterBar:SetPoint("TOPLEFT", mainFrame.searchBar, "BOTTOMLEFT", 0, -2)
     filterBar:SetPoint("TOPRIGHT", mainFrame.searchBar, "BOTTOMRIGHT", 0, -2)
 
-    -- Background
     filterBar.bg = filterBar:CreateTexture(nil, "BACKGROUND")
     filterBar.bg:SetAllPoints()
     filterBar.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
     filterBar.bg:SetVertexColor(0.08, 0.08, 0.08, 1)
 
-    -- Create filter buttons
+    -- ʕ •ᴥ•ʔ✿ Button pool: buttons are created lazily as the inventory
+    -- grows into new categories, then reused across refreshes. Each
+    -- refresh repositions, re-labels, and re-colors them based on the
+    -- categories currently in the bag. ✿ ʕ •ᴥ•ʔ
     filterBar.buttons = {}
-    local buttonWidth = 45
-    local buttonSpacing = 2
-    local startX = 4
-
-    for i, filterInfo in ipairs(QUICK_FILTERS) do
-        local btn = CreateFrame("Button", nil, filterBar)
-        btn:SetSize(buttonWidth, 18)
-        btn:SetPoint("LEFT", startX + (i-1) * (buttonWidth + buttonSpacing), 0)
-
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-
-        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btn.text:SetPoint("CENTER")
-        btn.text:SetText(filterInfo.name)
-
-        btn.filterName = filterInfo.filter
-
-        btn:SetScript("OnClick", function(self)
-            Frame:SetQuickFilter(self.filterName)
-        end)
-
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.25, 1)
-        end)
-
-        btn:SetScript("OnLeave", function(self)
-            if activeFilter == self.filterName then
-                self:SetBackdropColor(0.2, 0.4, 0.2, 1)
-            else
-                self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            end
-        end)
-
-        filterBar.buttons[i] = btn
-    end
 
     mainFrame.filterBar = filterBar
 end
 
+function Frame:RebuildFilterTabs(presentCategories)
+    local filterBar = mainFrame and mainFrame.filterBar
+    if not filterBar then return end
+
+    -- ʕ •ᴥ•ʔ✿ Assemble the ordered tab definition list: specials first,
+    -- then every category that currently holds an item (sorted by the
+    -- Categorizer's priority so tabs read left-to-right in the same
+    -- order the sections render). ✿ ʕ •ᴥ•ʔ
+    local defs = {}
+    for _, spec in ipairs(SPECIAL_FILTERS) do
+        local color = spec.color or ResolveCategoryColor(spec.categoryColorFor)
+        table.insert(defs, {
+            name = spec.name,
+            filter = spec.filter,
+            color = color,
+            isSpecial = spec.isSpecial,
+        })
+    end
+
+    local categoryNames = {}
+    if presentCategories then
+        for name in pairs(presentCategories) do
+            table.insert(categoryNames, name)
+        end
+    end
+    table.sort(categoryNames, function(a, b)
+        local ia = Omni.Categorizer and Omni.Categorizer:GetCategoryInfo(a) or { priority = 99 }
+        local ib = Omni.Categorizer and Omni.Categorizer:GetCategoryInfo(b) or { priority = 99 }
+        if (ia.priority or 99) ~= (ib.priority or 99) then
+            return (ia.priority or 99) < (ib.priority or 99)
+        end
+        return a < b
+    end)
+
+    for _, name in ipairs(categoryNames) do
+        table.insert(defs, {
+            name = name,
+            filter = name,
+            color = ResolveCategoryColor(name),
+        })
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Single-row shrink-to-fit. We first try every tab at the
+    -- default font and max padding. If the labels overflow the bar,
+    -- we progressively compress: reduce padding, then step the font
+    -- size down (10→9→8→7). We keep the existing wrap path as a last-
+    -- resort fallback so oddly-wide labels on a tiny frame still land
+    -- somewhere visible. ✿ ʕ •ᴥ•ʔ
+    local barWidth = filterBar:GetWidth()
+    if not barWidth or barWidth <= 0 then
+        barWidth = mainFrame:GetWidth() - 16
+    end
+    local rowMaxX = barWidth - FILTER_BUTTON_START_X
+    local availableWidth = barWidth - FILTER_BUTTON_START_X * 2
+
+    -- Pre-create buttons so we can measure
+    for i, def in ipairs(defs) do
+        local btn = filterBar.buttons[i]
+        if not btn then
+            btn = CreateFilterButton(filterBar)
+            filterBar.buttons[i] = btn
+        end
+        btn.text:SetText(def.name)
+    end
+
+    local function measureForFontAndPadding(fontSize, padding)
+        local widths = {}
+        local total = 0
+        for i, def in ipairs(defs) do
+            local btn = filterBar.buttons[i]
+            btn.text:SetFont(FILTER_FONT_PATH, fontSize)
+            local w = math.max(btn.text:GetStringWidth() + padding * 2, FILTER_BUTTON_MIN_WIDTH)
+            widths[i] = w
+            total = total + w
+        end
+        total = total + FILTER_BUTTON_SPACING * math.max(#defs - 1, 0)
+        return widths, total
+    end
+
+    -- Walk (fontSize, padding) combinations from most generous to
+    -- tightest; stop at the first combo where everything fits.
+    local chosenWidths = nil
+    for _, fontSize in ipairs(FILTER_FONT_SIZES) do
+        for padding = FILTER_TEXT_PADDING_MAX, FILTER_TEXT_PADDING_MIN, -1 do
+            local widths, total = measureForFontAndPadding(fontSize, padding)
+            if total <= availableWidth then
+                chosenWidths = widths
+                break
+            end
+        end
+        if chosenWidths then break end
+    end
+
+    -- Fallback: use the tightest combo even if it still overflows, and
+    -- allow the wrap logic below to push the leftovers onto row 2.
+    if not chosenWidths then
+        chosenWidths = measureForFontAndPadding(
+            FILTER_FONT_SIZES[#FILTER_FONT_SIZES],
+            FILTER_TEXT_PADDING_MIN
+        )
+    end
+
+    local x = FILTER_BUTTON_START_X
+    local row = 0
+    for i, def in ipairs(defs) do
+        local btn = filterBar.buttons[i]
+        local finalWidth = chosenWidths[i]
+
+        -- Wrap only if we couldn't shrink enough to fit on one row.
+        if x > FILTER_BUTTON_START_X and (x + finalWidth) > rowMaxX then
+            row = row + 1
+            x = FILTER_BUTTON_START_X
+        end
+
+        local y = -(FILTER_ROW_TOP_PAD + row * (FILTER_BUTTON_HEIGHT + FILTER_ROW_SPACING))
+
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", x, y)
+        btn:SetSize(finalWidth, FILTER_BUTTON_HEIGHT)
+
+        btn.filterName = def.filter
+        btn.colorTuple = def.color
+        btn:Show()
+        ApplyFilterButtonVisual(btn, false)
+
+        x = x + finalWidth + FILTER_BUTTON_SPACING
+    end
+
+    for i = #defs + 1, #filterBar.buttons do
+        filterBar.buttons[i]:Hide()
+    end
+
+    local rowCount = (#defs > 0) and (row + 1) or 1
+    local barHeight = FILTER_ROW_TOP_PAD
+        + rowCount * FILTER_BUTTON_HEIGHT
+        + math.max(rowCount - 1, 0) * FILTER_ROW_SPACING
+        + FILTER_ROW_BOTTOM_PAD
+    filterBar:SetHeight(math.max(barHeight, FILTER_HEIGHT))
+
+    -- ʕ •ᴥ•ʔ✿ If the active filter's category vanished from the bag
+    -- (e.g. vendored every Junk item), fall back to "All" so the user
+    -- isn't stuck looking at an empty filtered view. Re-apply visuals
+    -- afterward so the previously-active tab no longer reads active. ✿ ʕ •ᴥ•ʔ
+    if activeFilter and activeFilter ~= "NEW_ITEMS" then
+        local stillPresent = false
+        for _, def in ipairs(defs) do
+            if def.filter == activeFilter then
+                stillPresent = true
+                break
+            end
+        end
+        if not stillPresent then
+            activeFilter = nil
+            for i = 1, #defs do
+                ApplyFilterButtonVisual(filterBar.buttons[i], false)
+            end
+        end
+    end
+end
+
 function Frame:SetQuickFilter(filterName)
+    -- ʕ •ᴥ•ʔ✿ Toggle semantics: clicking the active tab a second time
+    -- clears the filter so the bag "sorts back" to its normal LPT
+    -- layout without needing a separate "All" click. ✿ ʕ •ᴥ•ʔ
+    if activeFilter ~= nil and activeFilter == filterName then
+        filterName = nil
+    end
     activeFilter = filterName
 
-    -- Update button visuals
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
-            if btn.filterName == activeFilter then
-                btn:SetBackdropColor(0.2, 0.4, 0.2, 1)
-                btn:SetBackdropBorderColor(0.3, 0.6, 0.3, 1)
-            else
-                btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-                btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+            if btn:IsShown() then
+                ApplyFilterButtonVisual(btn, false)
             end
         end
     end
 
-    -- Apply filter (reuse search highlight logic)
     self:UpdateLayout()
 end
 
@@ -1470,6 +1655,27 @@ function Frame:CreateFooter()
     footer.topBorder:SetPoint("TOPLEFT", 0, 0)
     footer.topBorder:SetPoint("TOPRIGHT", 0, 0)
 
+    -- ʕ •ᴥ•ʔ✿ FontString has no EnableMouse in 3.3.5a — use a button as hit box for the ! ✿ ʕ •ᴥ•ʔ
+    footer.bagFullAlert = CreateFrame("Button", nil, footer)
+    footer.bagFullAlert:SetPoint("LEFT", 6, 0)
+    footer.bagFullAlert:SetHeight(FOOTER_HEIGHT)
+    footer.bagFullAlert:SetWidth(16)
+    footer.bagFullAlert:EnableMouse(true)
+    footer.bagFullAlert.label = footer.bagFullAlert:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    footer.bagFullAlert.label:SetPoint("CENTER", 0, 0)
+    footer.bagFullAlert.label:SetText("!")
+    footer.bagFullAlert.label:SetTextColor(1, 0.12, 0.12, 1)
+    footer.bagFullAlert:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Bags full", 1, 0.12, 0.12)
+        GameTooltip:AddLine("No free inventory slots.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    footer.bagFullAlert:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    footer.bagFullAlert:Hide()
+
     footer.slots = footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     footer.slots:SetPoint("LEFT", 6, 0)
     footer.slots:SetText("0/0")
@@ -1566,18 +1772,34 @@ local SEP_SLOT_WIDTH     = 1 + FOOTER_SEP_GAP * 2
 local MONEY_SAFETY_GAP   = 8
 local OVERFLOW_SLOT_COST = FOOTER_BTN_SIZE + FOOTER_BTN_GAP
 
+local function SyncBagFullAlertHitBox(footer)
+    local b = footer.bagFullAlert
+    if not b or not b.label then return end
+    local lw = b.label:GetStringWidth() or 8
+    b:SetWidth(math.max(14, lw + 6))
+end
+
+local function GetFooterSlotsBlockWidth(footer)
+    local w = (footer.slots and footer.slots:GetStringWidth()) or 0
+    if footer.bagFullAlert and footer.bagFullAlert:IsShown() then
+        w = w + 1 + ((footer.bagFullAlert:GetWidth()) or 14)
+    end
+    return w
+end
+
 local function ComputeRibbonAvailableWidth(footer)
     local footerWidth = footer:GetWidth()
     if not footerWidth or footerWidth <= 0 then
         return math.huge
     end
 
+    local slotsBlock = GetFooterSlotsBlockWidth(footer)
     local leftEdge
     if footer.attuneHelperHost and footer.attuneHelperHost:IsShown() then
         local hostW = footer.attuneHelperHost:GetWidth() or 0
-        leftEdge = 6 + (footer.slots:GetStringWidth() or 0) + 8 + hostW
+        leftEdge = 6 + slotsBlock + 8 + hostW
     else
-        leftEdge = 6 + (footer.slots:GetStringWidth() or 0)
+        leftEdge = 6 + slotsBlock
     end
 
     local moneyReserve = (footer.money:GetStringWidth() or 0) + 6 + MONEY_SAFETY_GAP
@@ -1920,6 +2142,13 @@ end
 function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
 
+    -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
+    -- remembered pre-bag view -- otherwise a later bag toggle could
+    -- restore to a view the user has since moved past. ✿ ʕ •ᴥ•ʔ
+    if currentView ~= "bag" then
+        preBagViewMode = nil
+    end
+
     if mainFrame and mainFrame.header and mainFrame.header.viewBtn then
         local labels = { grid = "Grid", flow = "Flow", list = "List", bag = "Bag" }
         mainFrame.header.viewBtn.text:SetText(labels[currentView] or "Grid")
@@ -2125,26 +2354,50 @@ function Frame:UpdateLayout(changedBags)
         items = filtered
     end
 
-    -- Apply quick filter (dim non-matching items)
+    -- ʕ •ᴥ•ʔ✿ Collect the set of categories actually present so the
+    -- dynamic tab bar below only shows filters that would return
+    -- something. Do this AFTER the bag filter so tabs reflect the
+    -- currently-viewed scope. ✿ ʕ •ᴥ•ʔ
+    local presentCategories = {}
+    for _, item in ipairs(items) do
+        if item.category then
+            presentCategories[item.category] = true
+        end
+    end
+    self:RebuildFilterTabs(presentCategories)
+
+    -- ʕ •ᴥ•ʔ✿ Quick filter handling.
+    --
+    -- Out of combat, a category tab doesn't dim non-matches anymore --
+    -- it re-orders the layout so the selected category pins to the
+    -- top-left and everything else flows below it (handled in
+    -- RenderFlowView via the `pinnedLaneTop` hint). Clicking the tab
+    -- again toggles the filter off and the bag sorts back to normal.
+    --
+    -- In combat we can't restructure the layout safely, so we fall
+    -- back to the dim-only behavior. The NEW_ITEMS special filter
+    -- spans multiple categories, so it always uses dimming.
+    --
+    -- Exact equality matches stop "Attunable" from catching
+    -- "Account Attunable" via substring. ✿ ʕ •ᴥ•ʔ
+    -- ʕ •ᴥ•ʔ✿ When a filter tab is active, always dim the non-matching
+    -- items so the selection pops. In flow mode OOC we ALSO re-order
+    -- (the selected category gets pinned top-left by RenderFlowView's
+    -- LPT block), so the user sees the filter both promoted and the
+    -- rest grayed out in place. If the category later empties out,
+    -- RebuildFilterTabs clears activeFilter and the dim goes with it. ✿ ʕ •ᴥ•ʔ
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
         for _, item in ipairs(items) do
             local matches = false
-
-            -- Special filter: NEW_ITEMS - filter by isNew flag
             if quickFilter == "NEW_ITEMS" then
                 matches = item.isNew == true
-            else
-                -- Normal filter: match by category
-                if item.category and string.find(item.category, quickFilter) then
-                    matches = true
-                end
+            elseif item.category == quickFilter then
+                matches = true
             end
-
             item.isQuickFiltered = not matches
         end
     else
-        -- No filter active - clear all filter flags
         for _, item in ipairs(items) do
             item.isQuickFiltered = false
         end
@@ -2218,7 +2471,6 @@ function Frame:RenderFlowView(items)
     local yLeft = -ITEM_SPACING
     local yRight = -ITEM_SPACING
     local yOffset = -ITEM_SPACING
-    local renderedSectionCount = 0
 
     -- Group items
     local categories = {}
@@ -2284,19 +2536,130 @@ function Frame:RenderFlowView(items)
     local boeAnchor = nil
     local flowMode = (currentView ~= "grid" and currentView ~= "bag")
 
+    -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
+    -- flow mode. We predict each section's height, sort categories by
+    -- height descending, and greedily assign each to the currently
+    -- shorter lane. That places the tallest sections at the top of each
+    -- lane and folds smaller categories into whichever side still has
+    -- room -- otherwise a single giant category (e.g. Attunable with 50
+    -- items) sinks one lane entirely while everything else stacks on
+    -- the other, wasting half the frame.
+    --
+    -- BoE is included in the LPT partition (so its own size balances
+    -- correctly), then bubbled to the end of whichever lane it landed
+    -- on so the overflow strip still anchors at the bottom of BoE's
+    -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
+    local laneAssignment = nil
+    if flowMode and dualCategoryLanes and #categoryOrder > 1 then
+        local laneColumns = columnsForLaneWidth((usableWidth - laneGap) * 0.5)
+        local function sectionHeight(catName)
+            local n = categories[catName] and #categories[catName] or 0
+            if n <= 0 then
+                return sectionHeaderHeight + sectionSpacing
+            end
+            local rows = math.ceil(n / laneColumns)
+            return sectionHeaderHeight + rows * (ITEM_SIZE + ITEM_SPACING) + sectionSpacing
+        end
+        local function categoryPriority(name)
+            if Omni.Categorizer then
+                local info = Omni.Categorizer:GetCategoryInfo(name)
+                return info and info.priority or 99
+            end
+            return 99
+        end
+
+        -- ʕ ◕ᴥ◕ ʔ✿ Active quick filter? Pin that category to the top of
+        -- the left lane and fold every other section around it using
+        -- greedy shortest-lane assignment (no LPT rebalance, so the
+        -- selected tab stays at top-left as the user requested). The
+        -- caller already suppresses item dimming OOC, so this re-order
+        -- is the entire "push the filter to top-left" behavior. ✿ ʕ ◕ᴥ◕ ʔ
+        local pinnedCategory = nil
+        if activeFilter and activeFilter ~= "NEW_ITEMS" and categories[activeFilter] then
+            pinnedCategory = activeFilter
+        end
+
+        local leftLane, rightLane = {}, {}
+        local leftH, rightH = 0, 0
+        laneAssignment = {}
+
+        if pinnedCategory then
+            table.insert(leftLane, pinnedCategory)
+            laneAssignment[pinnedCategory] = "left"
+            leftH = sectionHeight(pinnedCategory)
+
+            local rest = {}
+            for _, name in ipairs(categoryOrder) do
+                if name ~= pinnedCategory then table.insert(rest, name) end
+            end
+            table.sort(rest, function(a, b)
+                return categoryPriority(a) < categoryPriority(b)
+            end)
+            for _, name in ipairs(rest) do
+                if rightH < leftH then
+                    table.insert(rightLane, name)
+                    rightH = rightH + sectionHeight(name)
+                    laneAssignment[name] = "right"
+                else
+                    table.insert(leftLane, name)
+                    leftH = leftH + sectionHeight(name)
+                    laneAssignment[name] = "left"
+                end
+            end
+        else
+            -- ʕ •ᴥ•ʔ✿ LPT: sort by predicted height descending, greedy
+            -- into shorter lane for balance. Tallest sections land at
+            -- the top of each lane. ✿ ʕ •ᴥ•ʔ
+            local byHeight = {}
+            for _, name in ipairs(categoryOrder) do table.insert(byHeight, name) end
+            table.sort(byHeight, function(a, b)
+                local ha, hb = sectionHeight(a), sectionHeight(b)
+                if ha ~= hb then return ha > hb end
+                return categoryPriority(a) < categoryPriority(b)
+            end)
+            for _, name in ipairs(byHeight) do
+                if rightH < leftH then
+                    table.insert(rightLane, name)
+                    rightH = rightH + sectionHeight(name)
+                    laneAssignment[name] = "right"
+                else
+                    table.insert(leftLane, name)
+                    leftH = leftH + sectionHeight(name)
+                    laneAssignment[name] = "left"
+                end
+            end
+        end
+
+        -- ʕ •ᴥ•ʔ✿ Render order: left lane top-to-bottom, then right lane
+        -- top-to-bottom. Each section's lane is fixed by laneAssignment
+        -- below so the render loop ignores live y-based greedy. ✿ ʕ •ᴥ•ʔ
+        local final = {}
+        for _, n in ipairs(leftLane) do table.insert(final, n) end
+        for _, n in ipairs(rightLane) do table.insert(final, n) end
+        categoryOrder = final
+    end
+
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         local isBoeAnchor = (flowMode and catName == "BoE")
         if catItems and (#catItems > 0 or isBoeAnchor) then
-            renderedSectionCount = renderedSectionCount + 1
-
             local laneX, laneY, columns, laneW
+            local useRight = false
             if dualCategoryLanes then
                 laneW = (usableWidth - laneGap) * 0.5
                 local edgePad = hInset * 0.5
                 local leftX = edgePad + ITEM_SPACING
                 local rightX = edgePad + laneW + laneGap + ITEM_SPACING
-                local useRight = (renderedSectionCount % 2 == 0)
+                -- ʕ •ᴥ•ʔ✿ Prefer the pre-computed LPT lane assignment
+                -- (flow mode). If we don't have one (bag mode), fall
+                -- back to a live greedy shortest-lane check: y values
+                -- grow more negative as content stacks, so the larger
+                -- (less negative) y has more room. Ties go left. ✿ ʕ •ᴥ•ʔ
+                if laneAssignment and laneAssignment[catName] then
+                    useRight = (laneAssignment[catName] == "right")
+                else
+                    useRight = (yRight > yLeft)
+                end
                 laneX = useRight and rightX or leftX
                 laneY = useRight and yRight or yLeft
                 columns = columnsForLaneWidth(laneW)
@@ -2389,19 +2752,22 @@ function Frame:RenderFlowView(items)
             laneY = itemsBottomY - sectionSpacing
 
             if isBoeAnchor then
-                -- ʕ •ᴥ•ʔ✿ Remember BoE's lane geometry so the overflow
-                -- strip below slots in at BoE's x/width and continues the
-                -- lane directly under its last item row. ✿ ʕ •ᴥ•ʔ
+                -- ʕ •ᴥ•ʔ✿ Remember BoE's lane geometry. The overflow
+                -- strip anchors to BoE's x/columns (same half-width
+                -- column) but uses the lane's final bottom y (captured
+                -- after the loop), so BoE can sit at the top of its
+                -- lane per LPT without the overflow grid overlapping
+                -- the sections rendered below it. ✿ ʕ •ᴥ•ʔ
                 boeAnchor = {
                     x = laneX,
-                    y = itemsBottomY,
                     columns = columns,
                     laneW = laneW,
+                    lane = useRight and "right" or "left",
                 }
             end
 
             if dualCategoryLanes then
-                if (renderedSectionCount % 2 == 0) then
+                if useRight then
                     yRight = laneY
                 else
                     yLeft = laneY
@@ -2441,7 +2807,13 @@ function Frame:RenderFlowView(items)
     if boeAnchor then
         overflowX = boeAnchor.x
         overflowColumns = boeAnchor.columns
-        overflowTop = boeAnchor.y - OVERFLOW_ROW_GAP
+        -- ʕ •ᴥ•ʔ✿ Park overflow at the bottom of BoE's entire lane (not
+        -- directly below BoE's item rows) so sections rendered under
+        -- BoE in the same lane aren't overlapped by the pre-parked
+        -- grid when combat pops a new item into a previously empty
+        -- slot. ✿ ʕ •ᴥ•ʔ
+        local laneBottomY = (boeAnchor.lane == "right") and yRight or yLeft
+        overflowTop = laneBottomY - OVERFLOW_ROW_GAP
     else
         overflowX = ITEM_SPACING
         overflowColumns = columnsForLaneWidth(usableWidth)
@@ -2476,8 +2848,14 @@ function Frame:RenderFlowView(items)
 
     -- Scroll height has to accommodate the deepest point on the page,
     -- which is either the deepest lane (mainBottomY) or the bottom of
-    -- the overflow strip anchored at BoE's lane.
-    local overflowBottom = boeAnchor and (boeAnchor.y - overflowExtent) or (mainBottomY - overflowExtent)
+    -- the overflow strip anchored at the bottom of BoE's lane.
+    local overflowAnchorY
+    if boeAnchor then
+        overflowAnchorY = (boeAnchor.lane == "right") and yRight or yLeft
+    else
+        overflowAnchorY = mainBottomY
+    end
+    local overflowBottom = overflowAnchorY - overflowExtent
     local deepestY = math.min(mainBottomY, overflowBottom)
     scrollChild:SetHeight(math.abs(deepestY) + ITEM_SPACING)
 end
@@ -2776,10 +3154,18 @@ function Frame:RefreshFooterMoneyStyle()
     if emphasize then
         footer.money:SetFont(path, size, "OUTLINE")
         footer.slots:SetFont(path, size, "OUTLINE")
+        if footer.bagFullAlert and footer.bagFullAlert.label then
+            footer.bagFullAlert.label:SetFont(path, size + 2, "OUTLINE")
+        end
     else
         footer.money:SetFontObject(GameFontNormalSmall)
         footer.slots:SetFontObject(GameFontNormalSmall)
+        if footer.bagFullAlert and footer.bagFullAlert.label then
+            local ap, as = GameFontNormal:GetFont()
+            footer.bagFullAlert.label:SetFont(ap, (as or 12) + 2, "OUTLINE")
+        end
     end
+    SyncBagFullAlertHitBox(footer)
     if self.UpdateFooterCustomButtons then
         self:UpdateFooterCustomButtons()
     end
@@ -2798,8 +3184,24 @@ function Frame:UpdateSlotCount()
     end
 
     local used = total - free
-    local slots = mainFrame.footer.slots
+    local footer = mainFrame.footer
+    local slots = footer.slots
     slots:SetText(string.format("%d/%d", used, total))
+
+    local bagsFull = total > 0 and free == 0
+    local alert = footer.bagFullAlert
+    if alert then
+        if bagsFull then
+            alert:Show()
+            SyncBagFullAlertHitBox(footer)
+            slots:ClearAllPoints()
+            slots:SetPoint("LEFT", alert, "RIGHT", 1, 0)
+        else
+            alert:Hide()
+            slots:ClearAllPoints()
+            slots:SetPoint("LEFT", footer, "LEFT", 6, 0)
+        end
+    end
 
     local emphasize = Omni.Data and Omni.Data:Get("footerMoneyEmphasis") == true
     if emphasize then
@@ -2814,6 +3216,9 @@ function Frame:UpdateSlotCount()
         slots:SetTextColor(1, 1, 1, 1)
     end
 
+    if self.UpdateFooterCustomButtons then
+        self:UpdateFooterCustomButtons()
+    end
     if self.UpdateEmbeddedAttuneHelper then
         self:UpdateEmbeddedAttuneHelper()
     end
@@ -2911,13 +3316,24 @@ end
 function Frame:ToggleBagPreview(bagID)
     if not IsValidBagID(bagID) then return end
 
-    if currentView ~= "bag" then
-        self:SetView("bag")
-    end
+    local clickedActive = (selectedBagID == bagID)
 
-    if selectedBagID == bagID then
+    if clickedActive then
+        -- Unselect: restore the prior view only if we remembered one.
+        -- If the user chose bag view themselves (via the View button),
+        -- leave them in bag view on unselect instead of forcing flow.
         self:SetBagFilter(nil)
+        if currentView == "bag" and preBagViewMode then
+            local restoreTo = preBagViewMode
+            preBagViewMode = nil
+            self:SetView(restoreTo)
+        end
     else
+        -- Select: capture the non-bag view once, then switch to bag view
+        if currentView ~= "bag" then
+            preBagViewMode = currentView
+            self:SetView("bag")
+        end
         self:SetBagFilter(bagID)
     end
 end

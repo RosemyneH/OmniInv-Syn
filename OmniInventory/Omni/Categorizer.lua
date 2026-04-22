@@ -22,6 +22,7 @@ local CATEGORY_COLORS = {
     ["Perishable"]      = { r = 1.0, g = 0.3, b = 0.3 },
     ["Quest Items"]     = { r = 1.0, g = 0.82, b = 0.0 },
     ["Attunable"]       = { r = 0.0, g = 0.9, b = 0.5 },
+    ["Account Attunable"] = { r = 0.85, g = 0.45, b = 1.0 },
     ["BoE"]             = { r = 0.4, g = 0.9, b = 1.0 },
     ["Equipment"]       = { r = 0.0, g = 0.8, b = 0.0 },
     ["Equipment Sets"]  = { r = 0.4, g = 0.8, b = 1.0 },
@@ -286,6 +287,60 @@ local function IsBoEItem(itemInfo)
     return IsEquipmentItem(itemInfo)
 end
 
+-- ʕ ◕ᴥ◕ ʔ✿ Account Attunable: BoE equipment that THIS character cannot
+-- attune but some OTHER character on the account can, and that isn't
+-- already fully attuned. Helps surface gear to mail off to alts instead
+-- of vendoring it alongside regular BoE drops. ✿ ʕ ◕ᴥ◕ ʔ
+local function IsAccountAttunableItem(itemInfo)
+    if not IsBoEItem(itemInfo) then
+        return false
+    end
+
+    local itemID = GetItemID(itemInfo)
+    if not itemID then
+        return false
+    end
+
+    -- Current character must NOT be able to attune it
+    if _G.CanAttuneItemHelper and CanAttuneItemHelper(itemID) >= 1 then
+        return false
+    end
+
+    -- SOMEONE on the account must be able to attune it
+    local isAttunableForAccount = itemInfo.isAttunable
+    if isAttunableForAccount == nil and _G.IsAttunableBySomeone then
+        local check = IsAttunableBySomeone(itemID)
+        isAttunableForAccount = check ~= nil and check ~= 0 and check ~= false
+    end
+    if not isAttunableForAccount then
+        return false
+    end
+
+    -- ʕ •ᴥ•ʔ✿ Progress < 100%: prefer link-based API so affix variants
+    -- resolve correctly (matches IsAttunableItem's resolve chain). ✿ ʕ •ᴥ•ʔ
+    local progress
+    if _G.GetItemLinkAttuneProgress and itemInfo.hyperlink then
+        progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
+    end
+    if type(progress) ~= "number" then
+        local API = Omni.API
+        if API and API.GetHighestAttunePct then
+            progress = API:GetHighestAttunePct(itemID, -1)
+        end
+    end
+    if type(progress) ~= "number" and _G.GetItemAttuneProgress then
+        progress = GetItemAttuneProgress(itemID)
+    end
+
+    -- Unknown progress on an account-attunable BoE is still worth
+    -- surfacing (it's something an alt could use), so fail open here.
+    if type(progress) ~= "number" then
+        return true
+    end
+
+    return progress < 100
+end
+
 -- =============================================================================
 -- Heuristic Classification
 -- =============================================================================
@@ -401,6 +456,11 @@ function Categorizer:GetCategory(itemInfo)
         return "Equipment Sets"
     end
 
+    -- Priority 4.5: Account Attunable (BoE that an alt can attune)
+    if IsAccountAttunableItem(itemInfo) then
+        return "Account Attunable"
+    end
+
     -- Priority 5: BoE equipment
     if IsBoEItem(itemInfo) then
         return "BoE"
@@ -511,6 +571,7 @@ function Categorizer:Init()
     self:RegisterCategory("Quest Items", 2, nil, CATEGORY_COLORS["Quest Items"])
     self:RegisterCategory("Attunable", 3, nil, CATEGORY_COLORS["Attunable"])
     self:RegisterCategory("Equipment Sets", 4, nil, CATEGORY_COLORS["Equipment Sets"])
+    self:RegisterCategory("Account Attunable", 4.5, nil, CATEGORY_COLORS["Account Attunable"])
     self:RegisterCategory("BoE", 5, nil, CATEGORY_COLORS["BoE"])
     self:RegisterCategory("New Items", 6, nil, CATEGORY_COLORS["New Items"])
     self:RegisterCategory("Equipment", 10, nil, CATEGORY_COLORS["Equipment"])
