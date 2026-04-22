@@ -31,6 +31,7 @@ UI\FlowView.lua
 UI\ListView.lua
 UI\Frame.lua
 UI\BankFrame.lua
+UI\GuildBankFrame.lua
 UI\Options.lua
 # UI\CategoryEditor.lua     -- disabled alongside Omni\Rules.lua; do not re-enable without a rewrite
 

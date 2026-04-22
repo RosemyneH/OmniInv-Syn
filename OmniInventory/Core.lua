@@ -174,6 +174,45 @@ local function SuppressBlizzardBagFrames()
     blizzardSuppressionDone = true
 end
 
+-- ʕ •ᴥ•ʔ✿ Blizzard_GuildBankUI is a load-on-demand addon, so it may not
+-- exist yet when the rest of the bag suppression runs. Force-load it and
+-- strip its OnShow/OnEvent once it's actually loaded, and again on the
+-- ADDON_LOADED sink below in case something else triggers the load first. ✿ ʕ •ᴥ•ʔ
+local guildBankSuppressionDone = false
+
+local function SuppressBlizzardGuildBank()
+    if guildBankSuppressionDone then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+
+    if IsAddOnLoaded and not IsAddOnLoaded("Blizzard_GuildBankUI") then
+        pcall(LoadAddOn, "Blizzard_GuildBankUI")
+    end
+
+    if Omni.GuildBankFrame and Omni.GuildBankFrame.InstallSetGuildBankTabInfoShim then
+        Omni.GuildBankFrame:InstallSetGuildBankTabInfoShim()
+    end
+
+    local gb = _G.GuildBankFrame
+    if not gb then return end
+
+    -- ʕ •ᴥ•ʔ✿ Keep GuildBankFrame logically shown (off-screen, alpha 0) so
+    -- UseContainerItem / bag right-click deposit and engine guild-bank state
+    -- still work. Hiding it entirely breaks deposit-from-bags. ✿ ʕ •ᴥ•ʔ
+    pcall(gb.Hide, gb)
+    pcall(gb.SetScript, gb, "OnShow", function(self)
+        if InCombatLockdown and InCombatLockdown() then return end
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -12000, -12000)
+        self:SetSize(1, 1)
+        self:SetAlpha(0)
+        self:SetScale(0.01)
+        self:EnableMouse(false)
+        self:Show()
+    end)
+
+    guildBankSuppressionDone = true
+end
+
 local function OverrideBags()
     ToggleAllBags  = OmniToggleAll
     OpenAllBags    = OmniOpenAll
@@ -186,11 +225,20 @@ local function OverrideBags()
     CloseBag       = OmniCloseBag
 
     SuppressBlizzardBagFrames()
+    SuppressBlizzardGuildBank()
 end
 
 Omni._OverrideBags = OverrideBags
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == "Blizzard_GuildBankUI" then
+        SuppressBlizzardGuildBank()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame.InstallSetGuildBankTabInfoShim then
+            Omni.GuildBankFrame:InstallSetGuildBankTabInfoShim()
+        end
+        return
+    end
+
     if event == "ADDON_LOADED" and arg1 == addonName then
         OmniInventoryDB = OmniInventoryDB or {}
 
@@ -212,6 +260,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
         if Omni.Frame then Omni.Frame:Init() end
         if Omni.BankFrame then Omni.BankFrame:Init() end
+        if Omni.GuildBankFrame then Omni.GuildBankFrame:Init() end
         if Omni.Settings then Omni.Settings:Init() end
 
         OverrideBags()

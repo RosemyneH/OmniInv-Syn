@@ -980,4 +980,12 @@ function ItemButton:Reset(button)
     pcall(button.Hide, button)
 end
 
+-- ʕ •ᴥ•ʔ✿ Guild bank uses plain Buttons; create attune/forge layers via
+-- GuildBankFrame.EnsureGuildSlotDecorationFrames then call here. ✿ ʕ •ᴥ•ʔ
+function ItemButton:UpdateGuildBankSlotDecorations(button, itemInfo)
+    if not button then return end
+    UpdateAttuneDisplay(button, itemInfo or {})
+    UpdateForgeDisplay(button, itemInfo or {})
+end
+
 print("|cFF00FF00OmniInventory|r: ItemButton loaded")

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Guild Bank Frame** (`docs/Features/guild-bank-frame.md`): Complete Omni
+  override of Blizzard's guild bank UI, event-driven on
+  `GUILDBANKFRAME_OPENED` / `GUILDBANKFRAME_CLOSED`. Renders a left-side
+  column of custom tab buttons and a 7×14 slot grid, supports left-click
+  pickup / place, shift-click link, split-stack, tooltip compare, and
+  search-dim. Right-click any tab for a context menu with rename, info-text
+  edit, and Smart Deposit category assignment (Weapons / Armor / Jewelry).
+  Guild masters see a "Buy Tab N" button. Footer hosts deposit / withdraw
+  money dialogs and a one-click Smart Deposit that scans your bags and moves
+  every BoE or account-attunable weapon, armor, or jewelry piece into its
+  mapped tab. Default `GuildBankFrame` is suppressed via `Blizzard_GuildBankUI`
+  ADDON_LOADED hook.
 - **Combat-Safe Slot Buttons** (`docs/Features/combat-safe-bags.md`): Every
   physical bag slot now has a persistent `ItemButton` pre-parented and
   `SetID`'d out of combat. Items that appear mid-combat (loot, quest

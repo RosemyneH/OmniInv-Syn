@@ -193,6 +193,58 @@ function Events:Init()
         end
     end)
 
+    -- ʕ •ᴥ•ʔ✿ Guild bank events drive the Omni.GuildBankFrame override ✿ ʕ •ᴥ•ʔ
+    self:RegisterEvent("GUILDBANKFRAME_OPENED", function()
+        if Omni.GuildBankFrame then
+            Omni.GuildBankFrame:Show()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANKFRAME_CLOSED", function()
+        if Omni.GuildBankFrame then
+            Omni.GuildBankFrame:Hide()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANKBAGSLOTS_CHANGED", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateLayout()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANK_UPDATE_TABS", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            if Omni.GuildBankFrame.QueryAllTabs then
+                Omni.GuildBankFrame:QueryAllTabs()
+            end
+            Omni.GuildBankFrame:UpdateLayout()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANK_UPDATE_MONEY", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateMoney()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANK_UPDATE_WITHDRAWMONEY", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateMoney()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANK_UPDATE_TEXT", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateInfoText()
+        end
+    end)
+
+    self:RegisterEvent("GUILDBANK_ITEM_LOCK_CHANGED", function()
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateLayout()
+        end
+    end)
+
     -- Player money changed
     self:RegisterEvent("PLAYER_MONEY", function()
         if Omni.Frame then
@@ -211,6 +263,10 @@ function Events:Init()
                 and Omni.BankFrame:IsShown() then
             pcall(Omni.BankFrame.UpdateLayout, Omni.BankFrame)
         end
+        if Omni.GuildBankFrame and Omni.GuildBankFrame.UpdateLayout
+                and Omni.GuildBankFrame:IsShown() then
+            pcall(Omni.GuildBankFrame.UpdateLayout, Omni.GuildBankFrame)
+        end
     end)
 
     -- Item info received (async data load)
@@ -221,6 +277,9 @@ function Events:Init()
         end
         if Omni.BankFrame and Omni.BankFrame:IsShown() then
             Omni.BankFrame:UpdateLayout()
+        end
+        if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
+            Omni.GuildBankFrame:UpdateLayout()
         end
     end)
 

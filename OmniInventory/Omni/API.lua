@@ -132,6 +132,32 @@ local function ScanTooltipForBinding(bag, slot)
     return false, "BoE"
 end
 
+--- Tooltip scan on an item hyperlink (guild bank, inspect, etc.).
+---@param itemLink string
+---@return boolean isBound
+---@return string bindType "BoP" | "BoE"
+function API:GetBindingFromHyperlink(itemLink)
+    if not itemLink then return true, "BoP" end
+    scanningTooltip:ClearLines()
+    scanningTooltip:SetHyperlink(itemLink)
+
+    for i = 2, math.min(8, scanningTooltip:NumLines()) do
+        local textFrame = _G["OmniScanningTooltipTextLeft" .. i]
+        if textFrame then
+            local line = textFrame:GetText()
+            if line then
+                if line == SOULBOUND_TEXT or line == BOP_TEXT or line == BOA_TEXT then
+                    return true, "BoP"
+                elseif line == BOE_TEXT then
+                    return false, "BoE"
+                end
+            end
+        end
+    end
+
+    return false, "BoE"
+end
+
 -- =============================================================================
 -- ＼ʕ •ᴥ•ʔ／ Native Extended API Wrappers ＼ʕ •ᴥ•ʔ／
 -- =============================================================================
