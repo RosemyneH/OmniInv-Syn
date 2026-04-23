@@ -422,6 +422,7 @@ local TOOLS_ITEMS = {
     [44050] = true,
     [45991] = true,
     [45858] = true,
+    [15846] = true,
     [45992] = true,
     [19970] = true,
     [7005] = true,
