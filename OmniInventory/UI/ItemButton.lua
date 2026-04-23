@@ -262,6 +262,38 @@ local function HideAttuneDisplay(button)
     button:SetScript("OnUpdate", nil)
 end
 
+local function GetButtonRenderSize(button)
+    if not button then
+        return BUTTON_SIZE
+    end
+    local w = button.GetWidth and button:GetWidth() or BUTTON_SIZE
+    local h = button.GetHeight and button:GetHeight() or BUTTON_SIZE
+    local size = math.min(w or BUTTON_SIZE, h or BUTTON_SIZE)
+    if not size or size <= 0 then
+        size = BUTTON_SIZE
+    end
+    return size
+end
+
+local function ApplyAttuneBarMetrics(button)
+    if not button or not button.attuneBarBG or not button.attuneBarFill then
+        return
+    end
+
+    local buttonSize = GetButtonRenderSize(button)
+    local inset = math.max(1, math.floor(buttonSize * 0.06 + 0.5))
+    local fillWidth = math.max(3, math.floor(buttonSize * 0.16 + 0.5))
+    local border = 1
+
+    button.attuneBarBG:ClearAllPoints()
+    button.attuneBarBG:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", inset, inset)
+    button.attuneBarBG:SetWidth(fillWidth + border * 2)
+
+    button.attuneBarFill:ClearAllPoints()
+    button.attuneBarFill:SetPoint("BOTTOMLEFT", button.attuneBarBG, "BOTTOMLEFT", border, border)
+    button.attuneBarFill:SetWidth(fillWidth)
+end
+
 -- ʕ •ᴥ•ʔ✿ Forge letter indicator (T/W/L) derived from item link ✿ ʕ •ᴥ•ʔ
 local function UpdateForgeDisplay(button, itemInfo)
     if not button or not button.forgeText then
@@ -471,6 +503,7 @@ function ItemButton:Create(parent)
     button.attuneBarFill:SetWidth(ATTUNE_BAR_WIDTH)
     button.attuneBarFill:SetHeight(0)
     button.attuneBarFill:Hide()
+    ApplyAttuneBarMetrics(button)
 
     button.attuneText = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     button.attuneText:SetPoint("BOTTOM", button, "BOTTOM", 0, 2)
@@ -574,6 +607,9 @@ end
 -- =============================================================================
 
 local function UpdateAttuneDisplay(button, itemInfo)
+    ApplyAttuneBarMetrics(button)
+    local buttonSize = GetButtonRenderSize(button)
+
     local settings = GetAttuneSettings()
     if not settings or not settings.enabled then
         HideAttuneDisplay(button)
@@ -656,8 +692,8 @@ local function UpdateAttuneDisplay(button, itemInfo)
     end
 
     local targetHeight = math.max(
-        BUTTON_SIZE * ATTUNE_MIN_HEIGHT_PERCENT + (progress / 100) * (BUTTON_SIZE * (ATTUNE_MAX_HEIGHT_PERCENT - ATTUNE_MIN_HEIGHT_PERCENT)),
-        BUTTON_SIZE * ATTUNE_MIN_HEIGHT_PERCENT
+        buttonSize * ATTUNE_MIN_HEIGHT_PERCENT + (progress / 100) * (buttonSize * (ATTUNE_MAX_HEIGHT_PERCENT - ATTUNE_MIN_HEIGHT_PERCENT)),
+        buttonSize * ATTUNE_MIN_HEIGHT_PERCENT
     )
 
     if barColor and barColor.r then

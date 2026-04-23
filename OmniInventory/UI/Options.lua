@@ -20,6 +20,18 @@ local function RefreshAllInventory()
     end
 end
 
+local function FormatScalePercent(value)
+    return string.format("%d%%", math.floor((value or 1) * 100 + 0.5))
+end
+
+local function FormatGapPixels(value)
+    return string.format("%d px", math.floor((value or 0) + 0.5))
+end
+
+local function IsSettingEditLocked()
+    return InCombatLockdown and InCombatLockdown()
+end
+
 local colorPickerCloseRefreshPending = false
 
 local function RegisterColorPickerCloseRefresh()
@@ -148,6 +160,13 @@ function Settings:CreateOptionsFrame()
     optionsFrame:EnableMouse(true)
     optionsFrame:SetMovable(true)
     optionsFrame:SetClampedToScreen(true)
+    optionsFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    optionsFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    optionsFrame:SetScript("OnEvent", function()
+        if optionsFrame:IsShown() then
+            self:UpdateValues()
+        end
+    end)
 
     -- Backdrop
     optionsFrame:SetBackdrop({
@@ -224,8 +243,9 @@ function Settings:CreateControls(parent)
     local SECTION_GAP = 18
     local HEADER_GAP = 22
     self.colorSwatches = {}
+    self._syncingScaleControls = false
 
-    -- 1. Scale Slider
+    -- 1. Frame Scale Slider
     local scaleSlider = CreateFrame("Slider", "OmniScaleSlider", parent, "OptionsSliderTemplate")
     scaleSlider:SetPoint("TOP", 0, yOffset)
     scaleSlider:SetMinMaxValues(0.5, 2.0)
@@ -236,19 +256,93 @@ function Settings:CreateControls(parent)
     _G[scaleSlider:GetName() .. "Low"]:SetText("50%")
     _G[scaleSlider:GetName() .. "High"]:SetText("200%")
     _G[scaleSlider:GetName() .. "Text"]:SetText("Frame Scale")
+    local scaleValueText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    scaleValueText:SetPoint("TOP", scaleSlider, "BOTTOM", 0, 2)
+    scaleValueText:SetText("Current: 100%")
 
     scaleSlider:SetScript("OnValueChanged", function(self, value)
+        if Settings._syncingScaleControls then return end
         -- Round to 1 decimal
         value = math.floor(value * 10 + 0.5) / 10
+        if IsSettingEditLocked() then
+            Settings:UpdateValues()
+            print("|cFFFF4040OmniInventory|r: Scale settings can only be changed out of combat.")
+            return
+        end
+        scaleValueText:SetText("Current: " .. FormatScalePercent(value))
         if Omni.Frame then
             Omni.Frame:SetScale(value)
         end
     end)
     self.scaleSlider = scaleSlider
+    self.scaleValueText = scaleValueText
+
+    yOffset = yOffset - SPACING
+
+    -- 2. Item Scale Slider
+    local itemScaleSlider = CreateFrame("Slider", "OmniItemScaleSlider", parent, "OptionsSliderTemplate")
+    itemScaleSlider:SetPoint("TOP", 0, yOffset)
+    itemScaleSlider:SetMinMaxValues(0.5, 2.0)
+    itemScaleSlider:SetValueStep(0.1)
+    itemScaleSlider:SetWidth(200)
+
+    _G[itemScaleSlider:GetName() .. "Low"]:SetText("50%")
+    _G[itemScaleSlider:GetName() .. "High"]:SetText("200%")
+    _G[itemScaleSlider:GetName() .. "Text"]:SetText("Item Scale")
+    local itemScaleValueText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    itemScaleValueText:SetPoint("TOP", itemScaleSlider, "BOTTOM", 0, 2)
+    itemScaleValueText:SetText("Current: 100%")
+
+    itemScaleSlider:SetScript("OnValueChanged", function(self, value)
+        if Settings._syncingScaleControls then return end
+        value = math.floor(value * 10 + 0.5) / 10
+        if IsSettingEditLocked() then
+            Settings:UpdateValues()
+            print("|cFFFF4040OmniInventory|r: Scale settings can only be changed out of combat.")
+            return
+        end
+        itemScaleValueText:SetText("Current: " .. FormatScalePercent(value))
+        if Omni.Frame and Omni.Frame.SetItemScale then
+            Omni.Frame:SetItemScale(value)
+        end
+    end)
+    self.itemScaleSlider = itemScaleSlider
+    self.itemScaleValueText = itemScaleValueText
+
+    yOffset = yOffset - SPACING
+
+    local itemGapSlider = CreateFrame("Slider", "OmniItemGapSlider", parent, "OptionsSliderTemplate")
+    itemGapSlider:SetPoint("TOP", 0, yOffset)
+    itemGapSlider:SetMinMaxValues(0, 20)
+    itemGapSlider:SetValueStep(1)
+    itemGapSlider:SetWidth(200)
+
+    _G[itemGapSlider:GetName() .. "Low"]:SetText("0px")
+    _G[itemGapSlider:GetName() .. "High"]:SetText("20px")
+    _G[itemGapSlider:GetName() .. "Text"]:SetText("Item Gap")
+    local itemGapValueText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    itemGapValueText:SetPoint("TOP", itemGapSlider, "BOTTOM", 0, 2)
+    itemGapValueText:SetText("Current: 4 px")
+
+    itemGapSlider:SetScript("OnValueChanged", function(self, value)
+        if Settings._syncingScaleControls then return end
+        value = math.floor(value + 0.5)
+        if IsSettingEditLocked() then
+            Settings:UpdateValues()
+            print("|cFFFF4040OmniInventory|r: Scale settings can only be changed out of combat.")
+            return
+        end
+        itemGapValueText:SetText("Current: " .. FormatGapPixels(value))
+        if Omni.Frame and Omni.Frame.SetItemGap then
+            Omni.Frame:SetItemGap(value)
+        end
+    end)
+    self.itemGapSlider = itemGapSlider
+    self.itemGapValueText = itemGapValueText
 
     yOffset = yOffset - SPACING - 20
 
-    -- 2. View Mode (Grid, Flow, List)
+    -- 3. View Mode (Grid, Flow, List)
     CreateSectionHeader(parent, "View Mode", yOffset, SECTION_COLORS.view)
     yOffset = yOffset - 20
 
@@ -263,7 +357,7 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - SPACING
 
-    -- 3. Sort Mode
+    -- 4. Sort Mode
     CreateSectionHeader(parent, "Sort Mode (Default)", yOffset, SECTION_COLORS.sort)
     yOffset = yOffset - 20
 
@@ -337,7 +431,7 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - SPACING - 4
 
-    -- 5. Reset Button
+    -- 6. Reset Button
     local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     resetBtn:SetSize(160, 24)
     resetBtn:SetPoint("TOP", 0, yOffset)
@@ -346,6 +440,8 @@ function Settings:CreateControls(parent)
         if Omni.Frame then
             Omni.Frame:ResetPosition()
             if self.scaleSlider then self.scaleSlider:SetValue(1.0) end
+            if self.itemScaleSlider then self.itemScaleSlider:SetValue(1.0) end
+            if self.itemGapSlider then self.itemGapSlider:SetValue(4) end
         end
     end)
 
@@ -585,6 +681,8 @@ end
 function Settings:UpdateValues()
     if not optionsFrame then return end
 
+    self._syncingScaleControls = true
+
     if self.highlightNewItemsCb and Omni.Data then
         self.highlightNewItemsCb:SetChecked(Omni.Data:Get("highlightNewItems") == true)
     end
@@ -592,11 +690,36 @@ function Settings:UpdateValues()
         self.footerMoneyEmphasisCb:SetChecked(Omni.Data:Get("footerMoneyEmphasis") == true)
     end
 
-    -- Sync slider with current scale
-    if OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings then
-        local scale = OmniInventoryDB.char.settings.scale or 1
+    if Omni.Frame and self.scaleSlider then
+        local scale = Omni.Frame:GetScale()
         self.scaleSlider:SetValue(scale)
+        if self.scaleValueText then
+            self.scaleValueText:SetText("Current: " .. FormatScalePercent(scale))
+        end
     end
+    if Omni.Frame and self.itemScaleSlider and Omni.Frame.GetItemScale then
+        local itemScale = Omni.Frame:GetItemScale()
+        self.itemScaleSlider:SetValue(itemScale)
+        if self.itemScaleValueText then
+            self.itemScaleValueText:SetText("Current: " .. FormatScalePercent(itemScale))
+        end
+    end
+    if Omni.Frame and self.itemGapSlider and Omni.Frame.GetItemGap then
+        local itemGap = Omni.Frame:GetItemGap()
+        self.itemGapSlider:SetValue(itemGap)
+        if self.itemGapValueText then
+            self.itemGapValueText:SetText("Current: " .. FormatGapPixels(itemGap))
+        end
+    end
+    local scaleControlsEnabled = not IsSettingEditLocked()
+    local function SetSliderInteractive(slider, enabled)
+        if not slider then return end
+        slider:EnableMouse(enabled)
+        slider:SetAlpha(enabled and 1 or 0.55)
+    end
+    SetSliderInteractive(self.scaleSlider, scaleControlsEnabled)
+    SetSliderInteractive(self.itemScaleSlider, scaleControlsEnabled)
+    SetSliderInteractive(self.itemGapSlider, scaleControlsEnabled)
 
     local attune = GetAttuneSettings()
     if self.attuneEnabled then self.attuneEnabled:SetChecked(attune.enabled == true) end
@@ -628,6 +751,8 @@ function Settings:UpdateValues()
             end
         end
     end
+
+    self._syncingScaleControls = false
 end
 
 function Settings:Init()

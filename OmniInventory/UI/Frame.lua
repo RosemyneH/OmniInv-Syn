@@ -24,6 +24,10 @@ local SEARCH_HEIGHT = 24
 local PADDING = 8
 local ITEM_SIZE = 37
 local ITEM_SPACING = 4
+local ITEM_SCALE_MIN = 0.5
+local ITEM_SCALE_MAX = 2.0
+local ITEM_GAP_MIN = 0
+local ITEM_GAP_MAX = 20
 local DEFAULT_VIEW_MODE = "flow"
 local BAG_ICON_SIZE = 18
 local BAG_IDS = { 0, 1, 2, 3, 4 }
@@ -92,6 +96,19 @@ local function SetButtonItem(btn, itemInfo)
     if Omni.ItemButton and Omni.ItemButton.SetItem then
         Omni.ItemButton:SetItem(btn, itemInfo)
     end
+end
+
+local function ApplyItemButtonMetrics(btn, itemScale)
+    if not btn then return end
+    local scale = math.max(ITEM_SCALE_MIN, math.min(itemScale or 1, ITEM_SCALE_MAX))
+    local size = ITEM_SIZE * scale
+    pcall(function()
+        btn:SetScale(1)
+        btn:SetSize(size, size)
+        if btn.glow then
+            btn.glow:SetSize(size * 1.5, size * 1.5)
+        end
+    end)
 end
 
 local function NormalizeViewMode(mode)
@@ -274,6 +291,24 @@ end
 local function GetSavedViewMode()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     return NormalizeViewMode(settings and settings.viewMode)
+end
+
+local function GetSavedItemScale()
+    local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
+    local scale = settings and settings.itemScale
+    if type(scale) ~= "number" then
+        return 1
+    end
+    return math.max(ITEM_SCALE_MIN, math.min(scale, ITEM_SCALE_MAX))
+end
+
+local function GetSavedItemGap()
+    local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
+    local gap = settings and settings.itemGap
+    if type(gap) ~= "number" then
+        return ITEM_SPACING
+    end
+    return math.max(ITEM_GAP_MIN, math.min(gap, ITEM_GAP_MAX))
 end
 
 local function IsValidBagID(bagID)
@@ -1352,6 +1387,7 @@ local function CreateSlotButton(bagID, slotID)
             btn:SetParent(container)
         end
         if btn.SetID then btn:SetID(slotID) end
+        ApplyItemButtonMetrics(btn, GetSavedItemScale())
         btn:ClearAllPoints()
         btn:SetAlpha(0)
         btn:Show()
@@ -2128,6 +2164,52 @@ function Frame:SetScale(scale)
     OmniInventoryDB.char.settings.scale = scale
 end
 
+function Frame:GetScale()
+    if mainFrame and mainFrame.GetScale then
+        return mainFrame:GetScale()
+    end
+    local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
+    return settings and settings.scale or 1
+end
+
+function Frame:GetItemScale()
+    return GetSavedItemScale()
+end
+
+function Frame:SetItemScale(scale)
+    if InCombat() then return false end
+    scale = math.max(ITEM_SCALE_MIN, math.min(scale or 1, ITEM_SCALE_MAX))
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.char = OmniInventoryDB.char or {}
+    OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
+    OmniInventoryDB.char.settings.itemScale = scale
+
+    IterateSlotButtons(function(_, _, btn)
+        ApplyItemButtonMetrics(btn, scale)
+    end)
+
+    self:UpdateLayout()
+    return true
+end
+
+function Frame:GetItemGap()
+    return GetSavedItemGap()
+end
+
+function Frame:SetItemGap(gap)
+    if InCombat() then return false end
+    gap = math.max(ITEM_GAP_MIN, math.min(gap or ITEM_SPACING, ITEM_GAP_MAX))
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.char = OmniInventoryDB.char or {}
+    OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
+    OmniInventoryDB.char.settings.itemGap = gap
+
+    self:UpdateLayout()
+    return true
+end
+
 function Frame:ResetPosition()
     if not mainFrame then return end
     mainFrame:ClearAllPoints()
@@ -2458,20 +2540,24 @@ function Frame:RenderFlowView(items)
 
     local hInset = 8
     local usableWidth = mainFrame.content:GetWidth() - hInset
+    local itemGap = self:GetItemGap()
     local sectionHeaderHeight = (currentView == "grid") and 0 or 20 -- No headers in grid mode
-    local sectionSpacing = (currentView == "grid") and ITEM_SPACING or 8
+    local sectionSpacing = (currentView == "grid") and itemGap or 8
     local dualCategoryLanes = (currentView ~= "grid")
     local laneGap = 10
+    local itemScale = self:GetItemScale()
+    local itemSize = ITEM_SIZE * itemScale
+    local itemStep = itemSize + itemGap
 
     local function columnsForLaneWidth(laneW)
-        local inner = laneW - ITEM_SPACING
-        local c = math.floor(inner / (ITEM_SIZE + ITEM_SPACING))
+        local inner = laneW - itemGap
+        local c = math.floor(inner / itemStep)
         return math.max(c, 1)
     end
 
-    local yLeft = -ITEM_SPACING
-    local yRight = -ITEM_SPACING
-    local yOffset = -ITEM_SPACING
+    local yLeft = -itemGap
+    local yRight = -itemGap
+    local yOffset = -itemGap
 
     -- Group items
     local categories = {}
@@ -2605,7 +2691,7 @@ function Frame:RenderFlowView(items)
                 return sectionHeaderHeight + sectionSpacing
             end
             local rows = math.ceil(n / laneColumns)
-            return sectionHeaderHeight + rows * (ITEM_SIZE + ITEM_SPACING) + sectionSpacing
+            return sectionHeaderHeight + rows * itemStep + sectionSpacing
         end
         local function categoryPriority(name)
             if Omni.Categorizer then
@@ -2695,8 +2781,8 @@ function Frame:RenderFlowView(items)
             if dualCategoryLanes then
                 laneW = (usableWidth - laneGap) * 0.5
                 local edgePad = hInset * 0.5
-                local leftX = edgePad + ITEM_SPACING
-                local rightX = edgePad + laneW + laneGap + ITEM_SPACING
+                local leftX = edgePad + itemGap
+                local rightX = edgePad + laneW + laneGap + itemGap
                 -- ʕ •ᴥ•ʔ✿ Prefer the pre-computed LPT lane assignment
                 -- (flow mode). If we don't have one (bag mode), fall
                 -- back to a live greedy shortest-lane check: y values
@@ -2712,7 +2798,7 @@ function Frame:RenderFlowView(items)
                 columns = columnsForLaneWidth(laneW)
             else
                 laneW = usableWidth
-                laneX = ITEM_SPACING
+                laneX = itemGap
                 laneY = yOffset
                 columns = columnsForLaneWidth(usableWidth)
             end
@@ -2771,12 +2857,13 @@ function Frame:RenderFlowView(items)
                 if btn then
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
-                    local x = laneX + col * (ITEM_SIZE + ITEM_SPACING)
-                    local y = laneY - row * (ITEM_SIZE + ITEM_SPACING)
+                    local x = laneX + col * itemStep
+                    local y = laneY - row * itemStep
 
                     pcall(function()
                         btn:ClearAllPoints()
                         btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                        ApplyItemButtonMetrics(btn, itemScale)
                         btn:SetAlpha(1)
                     end)
 
@@ -2805,7 +2892,7 @@ function Frame:RenderFlowView(items)
             end
 
             local catRows = math.ceil(#catItems / columns)
-            local itemsBottomY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING))
+            local itemsBottomY = laneY - (catRows * itemStep)
             laneY = itemsBottomY - sectionSpacing
 
             if isBoeAnchor then
@@ -2872,7 +2959,7 @@ function Frame:RenderFlowView(items)
         local laneBottomY = (boeAnchor.lane == "right") and yRight or yLeft
         overflowTop = laneBottomY - OVERFLOW_ROW_GAP
     else
-        overflowX = ITEM_SPACING
+        overflowX = itemGap
         overflowColumns = columnsForLaneWidth(usableWidth)
         overflowTop = mainBottomY - OVERFLOW_ROW_GAP
     end
@@ -2884,12 +2971,13 @@ function Frame:RenderFlowView(items)
 
         local col = overflowIndex % overflowColumns
         local row = math.floor(overflowIndex / overflowColumns)
-        local x = overflowX + col * (ITEM_SIZE + ITEM_SPACING)
-        local y = overflowTop - row * (ITEM_SIZE + ITEM_SPACING)
+        local x = overflowX + col * itemStep
+        local y = overflowTop - row * itemStep
 
         pcall(function()
             btn:ClearAllPoints()
             btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+            ApplyItemButtonMetrics(btn, itemScale)
             btn:SetAlpha(0)
         end)
         pcall(SetButtonItem, btn, nil)
@@ -2900,7 +2988,7 @@ function Frame:RenderFlowView(items)
 
     local overflowRows = math.ceil(overflowIndex / math.max(overflowColumns, 1))
     local overflowExtent = overflowRows > 0
-        and (OVERFLOW_ROW_GAP + overflowRows * (ITEM_SIZE + ITEM_SPACING))
+        and (OVERFLOW_ROW_GAP + overflowRows * itemStep)
         or 0
 
     -- Scroll height has to accommodate the deepest point on the page,
@@ -2914,7 +3002,7 @@ function Frame:RenderFlowView(items)
     end
     local overflowBottom = overflowAnchorY - overflowExtent
     local deepestY = math.min(mainBottomY, overflowBottom)
-    scrollChild:SetHeight(math.abs(deepestY) + ITEM_SPACING)
+    scrollChild:SetHeight(math.abs(deepestY) + itemGap)
 end
 
 -- =============================================================================
