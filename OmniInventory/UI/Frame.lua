@@ -162,6 +162,34 @@ local function GetBagSlotStateKey(bagID, slotID)
     return BuildBagSlotStateKey(OmniC_Container.GetContainerItemInfo(bagID, slotID))
 end
 
+local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
+    if not previousInfo and not nextInfo then
+        return false
+    end
+
+    if not previousInfo or not nextInfo then
+        return true
+    end
+
+    if previousInfo.category ~= nextInfo.category then
+        return true
+    end
+
+    if previousInfo.itemID ~= nextInfo.itemID then
+        return true
+    end
+
+    if previousInfo.hyperlink ~= nextInfo.hyperlink then
+        return true
+    end
+
+    if previousInfo.quality ~= nextInfo.quality then
+        return true
+    end
+
+    return false
+end
+
 local function HasOptimisticFlowRefreshWatches()
     return next(optimisticFlowRefreshWatches) ~= nil
 end
@@ -2480,10 +2508,14 @@ function Frame:RefreshCombatContent(changedBags)
     -- that run during combat see every visible item, including ones that
     -- arrived after the last OOC render. ✿ ʕ •ᴥ•ʔ
     local refreshed = {}
+    local meta = {
+        requiresFlowRelayout = false,
+    }
 
     IterateSlotButtons(function(bagID, slotID, btn)
         local info
         if affected == nil or affected[bagID] then
+            local previousInfo = btn.itemInfo
             info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
             if info then
                 if Omni.Categorizer then
@@ -2493,10 +2525,20 @@ function Frame:RefreshCombatContent(changedBags)
                     end
                 end
                 info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
+                if currentView == "flow"
+                        and not meta.requiresFlowRelayout
+                        and DoesFlowSlotChangeRequireRelayout(previousInfo, info) then
+                    meta.requiresFlowRelayout = true
+                end
                 SetButtonItem(btn, info)
                 pcall(btn.SetAlpha, btn, 1)
                 table.insert(refreshed, btn)
             else
+                if currentView == "flow"
+                        and not meta.requiresFlowRelayout
+                        and DoesFlowSlotChangeRequireRelayout(previousInfo, nil) then
+                    meta.requiresFlowRelayout = true
+                end
                 SetButtonItem(btn, nil)
                 pcall(btn.SetAlpha, btn, 0)
             end
@@ -2511,6 +2553,8 @@ function Frame:RefreshCombatContent(changedBags)
 
     self:UpdateSlotCount()
     self:UpdateMoney()
+
+    return meta
 end
 
 function Frame:SnapshotBagSlotState(bagID, slotID)
@@ -2581,16 +2625,27 @@ function Frame:UpdateLayout(changedBags, opts)
             and hasRenderedOnce
             and HasBagChangeEntries(changedBags)
             and currentView ~= "list" then
-        self:RefreshCombatContent(changedBags)
-        local now = (GetTime and GetTime()) or 0
-        local suppressBurst = currentView == "flow"
-            and lastOptimisticFlowRefreshAt > 0
-            and now > 0
-            and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
-        if not suppressBurst then
-            RequestBurstFullRefresh()
+        local refreshMeta = self:RefreshCombatContent(changedBags)
+        local shouldForceFlowRelayout = currentView == "flow"
+            and refreshMeta
+            and refreshMeta.requiresFlowRelayout == true
+        if shouldForceFlowRelayout then
+            StopBurstFullRefresh()
+            lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
+            forceFull = true
         end
-        return
+
+        if not forceFull then
+            local now = (GetTime and GetTime()) or 0
+            local suppressBurst = currentView == "flow"
+                and lastOptimisticFlowRefreshAt > 0
+                and now > 0
+                and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
+            if not suppressBurst then
+                RequestBurstFullRefresh()
+            end
+            return
+        end
     end
 
     if mainFrame.combatHint then

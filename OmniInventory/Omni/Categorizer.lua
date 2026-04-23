@@ -893,30 +893,27 @@ function Categorizer:GetCategory(itemInfo)
             return "Account Attunable"
         end
 
-    -- Priority 5: BoE equipment
+    -- Prio 5 : Tools
+    if IsToolsItem(itemInfo) then
+        return "Tools"
+    end
+
+    -- Priority 6: BoE equipment
     if IsBoEItem(itemInfo) then
         return "BoE"
     end
 
-    -- Priority 6: Explicit upgradable-item allowlist
+    -- Priority 7: Explicit upgradable-item allowlist  6 7 6 7 6 7 6  7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7
     if IsUpgradableItem(itemInfo) then
         return "Upgradable Items"
     end
-    -- Priority 7: New Items (session-based)
-    if self:IsNewItem(itemInfo.itemID) then
-        -- Don't return here, just mark - new items also belong to a real category
-        -- We'll handle "New" as a special overlay, not a category
-    end
 
-    -- Priority 8: Check quality for junk
+    -- Priority 88: Check quality for junk
     if itemInfo.quality == 0 then
         return "Junk"
     end
 
-    -- Priority 9: Tools by explicit item ID list
-    if IsToolsItem(itemInfo) then
-        return "Tools"
-    end
+    
 
     -- Priority 10+: Heuristic classification
     return ClassifyByItemType(itemInfo)

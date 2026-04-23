@@ -18,7 +18,7 @@ The main frame is the primary window for OmniInventory, providing the container 
 3. Frame is movable and resizable
 4. ESC closes the frame
 5. B key toggles visibility
-6. Flow mode should re-pack categories as soon as the client reflects an item leaving a bag slot, even if the bucketed `BAG_UPDATE` refresh has not fired yet
+6. Flow mode should re-pack categories as soon as the client reflects an item entering or leaving a bag slot, even if the bucketed `BAG_UPDATE` refresh has not fired yet
 
 ---
 
@@ -101,6 +101,16 @@ Switch view mode: "grid", "flow", "list"
 3. Verify the next item slides into the lead slot as soon as the source bag slot changes, without waiting for the later bucketed refresh
 
 **Expected:** Flow layout feels immediate while still settling to the same final order after normal bag events finish
+
+### Positive Flow: Loot Item While Bags Stay Open
+
+**Precondition:** Main frame is in `flow` view with bags already open
+
+1. Loot, receive, or otherwise add a brand-new item to your bags while the frame stays open
+2. Watch where the new item appears
+3. Verify it lands in its proper category immediately after the bag slot fills, without waiting for the delayed burst refresh
+
+**Expected:** New acquisitions categorize into their final flow section as soon as the live bag contents change
 
 ### Positive Flow: Fast Merchant Sale In Flow Mode
 
