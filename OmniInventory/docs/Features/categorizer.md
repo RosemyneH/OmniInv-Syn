@@ -18,6 +18,7 @@ The Categorizer automatically assigns items to logical categories (Quest, Equipm
 3. User manual overrides take highest priority
 4. Categories are extensible (users can add custom categories)
 5. Default categories provide "Smart Defaults" out of the box
+6. Explicit item-ID registries can force items into a dedicated category before generic type-based heuristics run
 
 ---
 
@@ -27,40 +28,64 @@ The Categorizer automatically assigns items to logical categories (Quest, Equipm
 flowchart TD
     A[Item] --> B{Manual Override?}
     B -->|Yes| C[Return User Category]
-    B -->|No| D{Quest Item?}
-    D -->|Yes| E[Quest Items]
-    D -->|No| F{Equipment Set?}
-    F -->|Yes| G[Equipment Sets]
-    F -->|No| H{New Item?}
-    H -->|Yes| I[New Items]
-    H -->|No| J{Match Custom Rule?}
-    J -->|Yes| K[Custom Rule Category]
-    J -->|No| L[Heuristic Classification]
-    L --> M{ItemType}
-    M -->|Armor/Weapon| N[Equipment]
-    M -->|Consumable| O[Consumables]
-    M -->|Trade Goods| P[Trade Goods]
-    M -->|Quest| Q[Quest Items]
-    M -->|Misc| R[Miscellaneous]
+    B -->|No| D{Perishable?}
+    D -->|Yes| E[Perishable]
+    D -->|No| F{Upgradable Item?}
+    F -->|Yes| G[Upgradable Items]
+    F -->|No| H{Quest Item?}
+    H -->|Yes| I[Quest Items]
+    H -->|No| J{Attunable?}
+    J -->|Yes| K[Attunable]
+    J -->|No| L{Equipment Set?}
+    L -->|Yes| M[Equipment Sets]
+    L -->|No| N{Account Attunable?}
+    N -->|Yes| O[Account Attunable]
+    N -->|No| P{BoE Equipment?}
+    P -->|Yes| Q[BoE]
+    P -->|No| R{Poor Quality?}
+    R -->|Yes| S[Junk]
+    R -->|No| T{Explicit Tool?}
+    T -->|Yes| U[Tools]
+    T -->|No| V[Heuristic Classification]
+    V --> W{ItemType}
+    W -->|Armor/Weapon| X[Equipment]
+    W -->|Consumable| Y[Consumables]
+    W -->|Trade Goods| Z[Trade Goods]
+    W -->|Quest| AA[Quest Items]
+    W -->|Misc| AB[Miscellaneous]
 ```
 
 ---
 
 ## Default Categories
 
-| Priority | Category | Detection Method |
-|----------|----------|------------------|
-| 1 | Manual Override | SavedVariables lookup |
+| Registered Priority | Category | Detection Method |
+|---------------------|----------|------------------|
+| 1 | Perishable | Explicit itemID registry plus SavedVariables extension |
+| 1.8 | Upgradable Items | Explicit itemID allowlist for known upgradeable items |
 | 2 | Quest Items | `GetContainerItemQuestInfo()` |
-| 3 | Equipment Sets | `GetEquipmentSetItemIDs()` |
-| 4 | New Items | Session snapshot comparison |
-| 5 | Custom Rules | User-defined rule evaluation |
+| 3 | Attunable | Attune API and hyperlink progress resolution |
+| 4 | Equipment Sets | `GetEquipmentSetItemIDs()` |
+| 4.5 | Account Attunable | Account-wide attune availability checks |
+| 5 | BoE | Bind type plus equipment detection |
+| 6 | New Items | Session overlay for newly acquired items; does not replace the primary category |
 | 10 | Equipment | ItemType == "Armor" or "Weapon" |
 | 11 | Consumables | ItemType == "Consumable" |
 | 12 | Trade Goods | ItemType == "Trade Goods" |
-| 13 | Reagents | ItemSubType == "Reagent" |
-| 14 | Junk | Quality == 0 (Poor/Grey) |
+| 13 | Reagents | ItemType == "Reagent" or reagent subtype |
+| 14 | Tools | Explicit itemID registry |
+| 15 | Keys | ItemType == "Key" |
+| 16 | Bags | ItemType == "Container" or quiver-style bag |
+| 17 | Ammo | ItemType == "Projectile" |
+| 18 | Glyphs | ItemType == "Glyph" |
+| 90 | Junk | Quality == 0 (Poor/Grey) |
 | 99 | Miscellaneous | Fallback for unmatched items |
+
+Manual overrides sit above the registered categories and always win. `Tools` are checked before the final heuristic fallback even though they sort at registered priority `14`.
+
+### Upgradable Items
+
+The categorizer supports a dedicated `Upgradable Items` category backed by an explicit item-ID allowlist. This category is evaluated before quest, attune, and generic equipment heuristics so curated upgrade-path items stay grouped together instead of being scattered across broader buckets.
 
 ---
 
@@ -137,6 +162,16 @@ OmniInventoryDB.categoryOverrides = {
 
 **Expected:** Manual override takes priority
 
+### Positive Flow: Upgradable Item Allowlist
+
+**Precondition:** Character has a bag item whose item ID exists in the maintained Upgradable Items allowlist
+
+1. Get item info for the allowlisted item
+2. Call `Categorizer:GetCategory(itemInfo)`
+3. Verify returns `Upgradable Items`
+
+**Expected:** Explicitly tracked upgradeable items land in their dedicated category
+
 ### Negative Flow: Unknown Item
 
 **Precondition:** Item has no matching rules
@@ -156,6 +191,16 @@ OmniInventoryDB.categoryOverrides = {
 3. Verify returns "Equipment Sets"
 
 **Expected:** Equipment set detection works
+
+### Edge Case: Upgradable Quest or Equipment Item
+
+**Precondition:** Character has an item from the Upgradable Items allowlist that would otherwise match `Quest Items`, `Attunable`, or `Equipment`
+
+1. Get item info for the allowlisted item
+2. Call `Categorizer:GetCategory(itemInfo)`
+3. Verify returns `Upgradable Items`
+
+**Expected:** The explicit allowlist wins over broader automatic category heuristics
 
 ---
 

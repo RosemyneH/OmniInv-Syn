@@ -132,6 +132,41 @@ local function UpdateTooltipCompareState()
     end
 end
 
+local function GetTooltipSidePreference()
+    if Omni and Omni.Data and Omni.Data.Get then
+        local side = Omni.Data:Get("tooltipSide")
+        if side == "left" or side == "right" then
+            return side
+        end
+    end
+    return "right"
+end
+
+local function GetPreferredTooltipAnchor(button)
+    local preferred = GetTooltipSidePreference()
+    local anchor = preferred == "left" and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
+    if not button or not UIParent then
+        return anchor
+    end
+
+    local parentWidth = UIParent.GetWidth and UIParent:GetWidth() or 0
+    local buttonLeft = button.GetLeft and button:GetLeft() or nil
+    local buttonRight = button.GetRight and button:GetRight() or nil
+    local REQUIRED_TOOLTIP_GAP = 320
+
+    if preferred == "right" and parentWidth > 0 and buttonRight then
+        if (parentWidth - buttonRight) < REQUIRED_TOOLTIP_GAP then
+            return "ANCHOR_LEFT"
+        end
+    elseif preferred == "left" and buttonLeft then
+        if buttonLeft < REQUIRED_TOOLTIP_GAP then
+            return "ANCHOR_RIGHT"
+        end
+    end
+
+    return anchor
+end
+
 local modifierTooltipFrame = CreateFrame("Frame")
 modifierTooltipFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierTooltipFrame:SetScript("OnEvent", function()
@@ -579,6 +614,10 @@ function ItemButton:Create(parent)
     -- modified-clicks) and standard tooltip handler still run; ours adds
     -- the OmniInventory pin-toggle on shift+rclick and our richer tooltip
     -- compare logic on top. The template owns drag in combat too. ✿ ʕ •ᴥ•ʔ
+    button:HookScript("OnMouseDown", function(self)
+        ItemButton:OnMouseDown(self)
+    end)
+
     button:HookScript("OnClick", function(self, mouseButton)
         ItemButton:OnClick(self, mouseButton)
     end)
@@ -948,6 +987,40 @@ ConfigureSecureItemUse = function(button)
     button.secureUseConfigured = true
 end
 
+local function QueueOptimisticFlowRefresh(button, waitForCursorClear)
+    if not button or not Omni.Frame or not Omni.Frame.RequestOptimisticFlowRefresh then
+        return
+    end
+
+    local bagID = button.bagID
+    local slotID = button.slotID
+    if not bagID or not slotID or bagID < 0 or bagID > 4 or slotID < 1 then
+        button.__omniActionStateKey = nil
+        return
+    end
+
+    Omni.Frame:RequestOptimisticFlowRefresh(bagID, slotID, {
+        stateKey = button.__omniActionStateKey,
+        waitForCursorClear = waitForCursorClear == true,
+    })
+    button.__omniActionStateKey = nil
+end
+
+function ItemButton:OnMouseDown(button)
+    if not button or not button.itemInfo or not Omni.Frame or not Omni.Frame.SnapshotBagSlotState then
+        return
+    end
+
+    local bagID = button.bagID
+    local slotID = button.slotID
+    if not bagID or not slotID or bagID < 0 or bagID > 4 or slotID < 1 then
+        button.__omniActionStateKey = nil
+        return
+    end
+
+    button.__omniActionStateKey = Omni.Frame:SnapshotBagSlotState(bagID, slotID)
+end
+
 function ItemButton:OnPreClick() end
 
 -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate's XML OnClick already invokes
@@ -979,6 +1052,7 @@ function ItemButton:OnClick(button, mouseButton)
                 and not (InCombatLockdown and InCombatLockdown()) then
             Omni.BankFrame:UpdateLayout()
         end
+        button.__omniActionStateKey = nil
         return
     end
 
@@ -990,6 +1064,8 @@ function ItemButton:OnClick(button, mouseButton)
             Omni.Categorizer:ClearNewItem(button.itemInfo.itemID)
         end
     end
+
+    QueueOptimisticFlowRefresh(button, CursorHasItem and CursorHasItem())
 end
 
 function ItemButton:OnEnter(button)
@@ -998,7 +1074,7 @@ function ItemButton:OnEnter(button)
     local bagID = button.bagID
     local slotID = button.slotID
 
-    GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+    GameTooltip:SetOwner(button, GetPreferredTooltipAnchor(button))
 
     if bagID and bagID >= 0 then
         -- Standard online item
@@ -1044,7 +1120,9 @@ end
 -- OnReceiveDrag through its built-in scripts (PickupContainerItem on the
 -- template's own bag/slot resolution). Our hooks would double-pickup and
 -- swap the item with whatever the cursor still carries -- so they no-op. ✿ ʕ •ᴥ•ʔ
-function ItemButton:OnDragStart() end
+function ItemButton:OnDragStart(button)
+    QueueOptimisticFlowRefresh(button, true)
+end
 function ItemButton:OnReceiveDrag() end
 
 -- =============================================================================
@@ -1056,6 +1134,7 @@ function ItemButton:Reset(button)
 
     button.itemInfo = nil
     button.__lastRenderKey = nil
+    button.__omniActionStateKey = nil
     button.bagID = nil
     button.slotID = nil
     if button.icon then button.icon:SetTexture(nil) end

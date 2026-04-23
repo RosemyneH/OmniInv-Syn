@@ -277,6 +277,7 @@ If no new rule is detected → do not update the file.
 
 - User prefers "OmniInventory" as the definitive bag addon — aim for feature completeness
 - User values UX-first approach: conversion and convenience
+- Prefer immediate, optimistic inventory UI updates when item moves are obvious so deposit/sell flows feel instant
 - User mandated MCAF compliance — all work must follow MCAF framework
 - User mandated PRG compliance — all documentation must follow PRG guidelines
 - User prefers comprehensive documentation before coding
