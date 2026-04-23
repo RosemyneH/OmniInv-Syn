@@ -132,6 +132,41 @@ local function UpdateTooltipCompareState()
     end
 end
 
+local function GetTooltipSidePreference()
+    if Omni and Omni.Data and Omni.Data.Get then
+        local side = Omni.Data:Get("tooltipSide")
+        if side == "left" or side == "right" then
+            return side
+        end
+    end
+    return "right"
+end
+
+local function GetPreferredTooltipAnchor(button)
+    local preferred = GetTooltipSidePreference()
+    local anchor = preferred == "left" and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
+    if not button or not UIParent then
+        return anchor
+    end
+
+    local parentWidth = UIParent.GetWidth and UIParent:GetWidth() or 0
+    local buttonLeft = button.GetLeft and button:GetLeft() or nil
+    local buttonRight = button.GetRight and button:GetRight() or nil
+    local REQUIRED_TOOLTIP_GAP = 320
+
+    if preferred == "right" and parentWidth > 0 and buttonRight then
+        if (parentWidth - buttonRight) < REQUIRED_TOOLTIP_GAP then
+            return "ANCHOR_LEFT"
+        end
+    elseif preferred == "left" and buttonLeft then
+        if buttonLeft < REQUIRED_TOOLTIP_GAP then
+            return "ANCHOR_RIGHT"
+        end
+    end
+
+    return anchor
+end
+
 local modifierTooltipFrame = CreateFrame("Frame")
 modifierTooltipFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierTooltipFrame:SetScript("OnEvent", function()
@@ -145,6 +180,30 @@ local function GetAttuneSettings()
         return nil
     end
     return attune
+end
+
+local function BuildAttuneSettingsToken()
+    local settings = GetAttuneSettings()
+    if not settings then
+        return "attune:disabled"
+    end
+
+    local textColor = settings.textColor or {}
+    return table.concat({
+        settings.enabled and "1" or "0",
+        settings.showBountyIcons and "1" or "0",
+        settings.showAccountIcons and "1" or "0",
+        settings.showResistIcons and "1" or "0",
+        settings.showRedForNonAttunable and "1" or "0",
+        settings.showProgressText and "1" or "0",
+        settings.showAccountAttuneText and "1" or "0",
+        settings.faeMode and "1" or "0",
+        settings.forgeOutline == false and "0" or "1",
+        tostring(textColor.r or 1),
+        tostring(textColor.g or 1),
+        tostring(textColor.b or 1),
+        tostring(textColor.a or 1),
+    }, ":")
 end
 
 local function GetItemIDFromLink(itemLink)
@@ -201,19 +260,13 @@ local function IsAttunableByAccount(itemID)
     return false
 end
 
--- ʕ •ᴥ•ʔ✿ Prefer native GetHighestAttunePct (affix + forge aware) ✿ ʕ •ᴥ•ʔ
-local function GetAttuneProgress(itemLink, itemID, forge)
+-- ʕ •ᴥ•ʔ✿ Strictly use hyperlink attune progress API ✿ ʕ •ᴥ•ʔ
+local function GetAttuneProgress(itemLink)
     if itemLink and _G.GetItemLinkAttuneProgress then
         local progress = GetItemLinkAttuneProgress(itemLink)
         if type(progress) == "number" then
             return progress
         end
-    end
-    if itemID and Omni.API and Omni.API.hasHighestAttune then
-        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
-    end
-    if itemID and Omni.API then
-        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
     end
     return 0
 end
@@ -561,6 +614,10 @@ function ItemButton:Create(parent)
     -- modified-clicks) and standard tooltip handler still run; ours adds
     -- the OmniInventory pin-toggle on shift+rclick and our richer tooltip
     -- compare logic on top. The template owns drag in combat too. ✿ ʕ •ᴥ•ʔ
+    button:HookScript("OnMouseDown", function(self)
+        ItemButton:OnMouseDown(self)
+    end)
+
     button:HookScript("OnClick", function(self, mouseButton)
         ItemButton:OnClick(self, mouseButton)
     end)
@@ -665,7 +722,7 @@ local function UpdateAttuneDisplay(button, itemInfo)
     end
 
     local forgeLevel = GetForgeLevelFromLink(itemLink)
-    local progress = GetAttuneProgress(itemLink, itemID, forgeLevel) or 0
+    local progress = GetAttuneProgress(itemLink) or 0
     local showBar = true
     local barColor = nil
 
@@ -763,6 +820,32 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        button.__lastRenderKey = nil
+        return
+    end
+
+    local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
+    local attuneSettings = GetAttuneSettings()
+    local attuneEnabled = attuneSettings and attuneSettings.enabled
+    local attuneToken = BuildAttuneSettingsToken()
+    local renderKey = button.__lastRenderKey
+    if renderKey
+            and renderKey.hyperlink == itemInfo.hyperlink
+            and renderKey.iconFileID == itemInfo.iconFileID
+            and renderKey.stackCount == itemInfo.stackCount
+            and renderKey.quality == itemInfo.quality
+            and renderKey.isNew == itemInfo.isNew
+            and renderKey.isQuickFiltered == itemInfo.isQuickFiltered
+            and renderKey.itemID == itemInfo.itemID
+            and renderKey.bagID == itemInfo.bagID
+            and renderKey.slotID == itemInfo.slotID
+            and renderKey.isPinned == isPinned
+            and renderKey.attuneToken == attuneToken then
+        if attuneEnabled then
+            UpdateAttuneDisplay(button, itemInfo)
+            UpdateForgeDisplay(button, itemInfo)
+        end
+        self:UpdateCooldown(button)
         return
     end
 
@@ -841,7 +924,7 @@ function ItemButton:SetItem(button, itemInfo)
     end
 
     -- Show pin icon if item is pinned
-    if itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) then
+    if isPinned then
         button.pinIcon:Show()
     else
         button.pinIcon:Hide()
@@ -850,6 +933,20 @@ function ItemButton:SetItem(button, itemInfo)
     UpdateAttuneDisplay(button, itemInfo)
     UpdateForgeDisplay(button, itemInfo)
     self:UpdateCooldown(button)
+
+    button.__lastRenderKey = {
+        hyperlink = itemInfo.hyperlink,
+        iconFileID = itemInfo.iconFileID,
+        stackCount = itemInfo.stackCount,
+        quality = itemInfo.quality,
+        isNew = itemInfo.isNew,
+        isQuickFiltered = itemInfo.isQuickFiltered,
+        itemID = itemInfo.itemID,
+        bagID = itemInfo.bagID,
+        slotID = itemInfo.slotID,
+        isPinned = isPinned,
+        attuneToken = attuneToken,
+    }
 end
 
 -- =============================================================================
@@ -890,6 +987,40 @@ ConfigureSecureItemUse = function(button)
     button.secureUseConfigured = true
 end
 
+local function QueueOptimisticFlowRefresh(button, waitForCursorClear)
+    if not button or not Omni.Frame or not Omni.Frame.RequestOptimisticFlowRefresh then
+        return
+    end
+
+    local bagID = button.bagID
+    local slotID = button.slotID
+    if not bagID or not slotID or bagID < 0 or bagID > 4 or slotID < 1 then
+        button.__omniActionStateKey = nil
+        return
+    end
+
+    Omni.Frame:RequestOptimisticFlowRefresh(bagID, slotID, {
+        stateKey = button.__omniActionStateKey,
+        waitForCursorClear = waitForCursorClear == true,
+    })
+    button.__omniActionStateKey = nil
+end
+
+function ItemButton:OnMouseDown(button)
+    if not button or not button.itemInfo or not Omni.Frame or not Omni.Frame.SnapshotBagSlotState then
+        return
+    end
+
+    local bagID = button.bagID
+    local slotID = button.slotID
+    if not bagID or not slotID or bagID < 0 or bagID > 4 or slotID < 1 then
+        button.__omniActionStateKey = nil
+        return
+    end
+
+    button.__omniActionStateKey = Omni.Frame:SnapshotBagSlotState(bagID, slotID)
+end
+
 function ItemButton:OnPreClick() end
 
 -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate's XML OnClick already invokes
@@ -921,6 +1052,7 @@ function ItemButton:OnClick(button, mouseButton)
                 and not (InCombatLockdown and InCombatLockdown()) then
             Omni.BankFrame:UpdateLayout()
         end
+        button.__omniActionStateKey = nil
         return
     end
 
@@ -932,6 +1064,8 @@ function ItemButton:OnClick(button, mouseButton)
             Omni.Categorizer:ClearNewItem(button.itemInfo.itemID)
         end
     end
+
+    QueueOptimisticFlowRefresh(button, CursorHasItem and CursorHasItem())
 end
 
 function ItemButton:OnEnter(button)
@@ -940,7 +1074,7 @@ function ItemButton:OnEnter(button)
     local bagID = button.bagID
     local slotID = button.slotID
 
-    GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+    GameTooltip:SetOwner(button, GetPreferredTooltipAnchor(button))
 
     if bagID and bagID >= 0 then
         -- Standard online item
@@ -986,7 +1120,9 @@ end
 -- OnReceiveDrag through its built-in scripts (PickupContainerItem on the
 -- template's own bag/slot resolution). Our hooks would double-pickup and
 -- swap the item with whatever the cursor still carries -- so they no-op. ✿ ʕ •ᴥ•ʔ
-function ItemButton:OnDragStart() end
+function ItemButton:OnDragStart(button)
+    QueueOptimisticFlowRefresh(button, true)
+end
 function ItemButton:OnReceiveDrag() end
 
 -- =============================================================================
@@ -997,6 +1133,8 @@ function ItemButton:Reset(button)
     if not button then return end
 
     button.itemInfo = nil
+    button.__lastRenderKey = nil
+    button.__omniActionStateKey = nil
     button.bagID = nil
     button.slotID = nil
     if button.icon then button.icon:SetTexture(nil) end

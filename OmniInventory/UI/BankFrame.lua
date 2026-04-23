@@ -44,7 +44,7 @@ local isSearchActive = false
 local selectedBankBagID = nil
 local bankForceEmptyFrame = nil
 local bankForceEmptyJob = nil
-local BANK_FORCE_EMPTY_STEP = 0.12
+local BANK_FORCE_EMPTY_EVENT_TIMEOUT = 0.35
 local BANK_FORCE_EMPTY_MAX_LOCK = 20
 local BANK_FORCE_EMPTY_MAX_MOVE = 6
 
@@ -750,6 +750,10 @@ end
 local function StopBankForceEmptyJob()
     if bankForceEmptyFrame then
         bankForceEmptyFrame:SetScript("OnUpdate", nil)
+        bankForceEmptyFrame:SetScript("OnEvent", nil)
+        bankForceEmptyFrame:UnregisterEvent("BAG_UPDATE")
+        bankForceEmptyFrame:UnregisterEvent("ITEM_LOCK_CHANGED")
+        bankForceEmptyFrame:UnregisterEvent("PLAYERBANKSLOTS_CHANGED")
     end
     bankForceEmptyJob = nil
 end
@@ -821,6 +825,8 @@ local function RunBankForceEmptyStep()
         end
     else
         bankForceEmptyJob.movedCount = bankForceEmptyJob.movedCount + 1
+        bankForceEmptyJob.awaitingEvent = true
+        bankForceEmptyJob.awaitElapsed = 0
     end
 end
 
@@ -858,14 +864,36 @@ function BankFrame:ForceEmptyBankBag(sourceBagID)
         slots = slots,
         movedCount = 0,
         blockedCount = 0,
+        awaitingEvent = false,
+        awaitElapsed = 0,
     }
     bankForceEmptyFrame = bankForceEmptyFrame or CreateFrame("Frame")
-    bankForceEmptyFrame:SetScript("OnUpdate", function(self, elapsed)
-        self._elapsed = (self._elapsed or 0) + (elapsed or 0)
-        if self._elapsed < BANK_FORCE_EMPTY_STEP then
+    bankForceEmptyFrame:RegisterEvent("BAG_UPDATE")
+    bankForceEmptyFrame:RegisterEvent("ITEM_LOCK_CHANGED")
+    bankForceEmptyFrame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+    bankForceEmptyFrame:SetScript("OnEvent", function(_, event, arg1)
+        if not bankForceEmptyJob then
             return
         end
-        self._elapsed = 0
+        if event == "BAG_UPDATE" and arg1 ~= nil then
+            if arg1 ~= bankForceEmptyJob.sourceBagID then
+                bankForceEmptyJob.awaitingEvent = false
+            end
+            return
+        end
+        bankForceEmptyJob.awaitingEvent = false
+    end)
+    bankForceEmptyFrame:SetScript("OnUpdate", function(self, elapsed)
+        if not bankForceEmptyJob then
+            return
+        end
+        if bankForceEmptyJob.awaitingEvent then
+            bankForceEmptyJob.awaitElapsed = bankForceEmptyJob.awaitElapsed + (elapsed or 0)
+            if bankForceEmptyJob.awaitElapsed < BANK_FORCE_EMPTY_EVENT_TIMEOUT then
+                return
+            end
+            bankForceEmptyJob.awaitingEvent = false
+        end
         if CursorHasItem and CursorHasItem() then
             return
         end

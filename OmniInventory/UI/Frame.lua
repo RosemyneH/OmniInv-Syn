@@ -58,7 +58,7 @@ local selectedBagID = nil
 local preBagViewMode = nil
 local forceEmptyFrame = nil
 local forceEmptyJob = nil
-local FORCE_EMPTY_STEP_INTERVAL = 0.12
+local FORCE_EMPTY_EVENT_TIMEOUT = 0.35
 local FORCE_EMPTY_MAX_LOCK_RETRIES = 20
 local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 
@@ -80,9 +80,172 @@ local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 -- secure OnClick (use / pickup / equip / swap) still routes correctly.
 local hasRenderedOnce = false
 local pendingCombatRender = false
+local burstRefreshFrame = nil
+local burstRefreshElapsed = 0
+local burstRefreshPending = false
+local BURST_FULL_REFRESH_DELAY = 0.20
+local optimisticFlowRefreshFrame = nil
+local optimisticFlowRefreshWatches = {}
+local lastOptimisticFlowRefreshAt = 0
+local OPTIMISTIC_FLOW_REFRESH_TIMEOUT = 0.75
+local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
 
 local function InCombat()
     return InCombatLockdown and InCombatLockdown()
+end
+
+local function IsMerchantOpen()
+    return MerchantFrame and MerchantFrame:IsShown()
+end
+
+local function HasBagChangeEntries(changedBags)
+    if type(changedBags) ~= "table" then
+        return false
+    end
+    for bagID in pairs(changedBags) do
+        if type(bagID) == "number" then
+            return true
+        end
+    end
+    return false
+end
+
+local function StopBurstFullRefresh()
+    burstRefreshPending = false
+    burstRefreshElapsed = 0
+    if burstRefreshFrame then
+        burstRefreshFrame:SetScript("OnUpdate", nil)
+    end
+end
+
+local function RequestBurstFullRefresh()
+    burstRefreshPending = true
+    burstRefreshElapsed = 0
+
+    if not burstRefreshFrame then
+        burstRefreshFrame = CreateFrame("Frame")
+    end
+
+    burstRefreshFrame:SetScript("OnUpdate", function(self, elapsed)
+        burstRefreshElapsed = burstRefreshElapsed + (elapsed or 0)
+        if burstRefreshElapsed < BURST_FULL_REFRESH_DELAY then
+            return
+        end
+
+        self:SetScript("OnUpdate", nil)
+        burstRefreshPending = false
+        burstRefreshElapsed = 0
+        if Omni.Frame and Omni.Frame.UpdateLayout then
+            Omni.Frame:UpdateLayout(nil, { forceFull = true })
+        end
+    end)
+end
+
+local function BuildBagSlotStateKey(info)
+    if not info then
+        return "EMPTY"
+    end
+
+    return table.concat({
+        tostring(info.itemID or 0),
+        tostring(info.hyperlink or ""),
+        tostring(info.stackCount or 0),
+        tostring(info.iconFileID or ""),
+    }, "\031")
+end
+
+local function GetBagSlotStateKey(bagID, slotID)
+    if not OmniC_Container or not bagID or not slotID or bagID < 0 or slotID < 1 then
+        return nil
+    end
+
+    return BuildBagSlotStateKey(OmniC_Container.GetContainerItemInfo(bagID, slotID))
+end
+
+local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
+    if not previousInfo and not nextInfo then
+        return false
+    end
+
+    if not previousInfo or not nextInfo then
+        return true
+    end
+
+    if previousInfo.category ~= nextInfo.category then
+        return true
+    end
+
+    if previousInfo.itemID ~= nextInfo.itemID then
+        return true
+    end
+
+    if previousInfo.hyperlink ~= nextInfo.hyperlink then
+        return true
+    end
+
+    if previousInfo.quality ~= nextInfo.quality then
+        return true
+    end
+
+    return false
+end
+
+local function HasOptimisticFlowRefreshWatches()
+    return next(optimisticFlowRefreshWatches) ~= nil
+end
+
+local function StopOptimisticFlowRefreshWatcher()
+    optimisticFlowRefreshWatches = {}
+    if optimisticFlowRefreshFrame then
+        optimisticFlowRefreshFrame:SetScript("OnUpdate", nil)
+    end
+end
+
+local function StartOptimisticFlowRefreshWatcher()
+    if not optimisticFlowRefreshFrame then
+        optimisticFlowRefreshFrame = CreateFrame("Frame")
+    end
+
+    optimisticFlowRefreshFrame:SetScript("OnUpdate", function(self, elapsed)
+        if not mainFrame or not mainFrame:IsShown() or currentView ~= "flow" or InCombat() then
+            StopOptimisticFlowRefreshWatcher()
+            return
+        end
+
+        local slotChanged = false
+
+        for watchKey, watch in pairs(optimisticFlowRefreshWatches) do
+            watch.elapsed = (watch.elapsed or 0) + (elapsed or 0)
+            if watch.elapsed >= OPTIMISTIC_FLOW_REFRESH_TIMEOUT then
+                optimisticFlowRefreshWatches[watchKey] = nil
+            else
+                local waitingOnCursor = watch.waitForCursorClear
+                    and CursorHasItem
+                    and CursorHasItem()
+                if not waitingOnCursor then
+                    local currentKey = GetBagSlotStateKey(watch.bagID, watch.slotID)
+                    if currentKey and currentKey ~= watch.stateKey then
+                        slotChanged = true
+                        break
+                    end
+                end
+            end
+        end
+
+        if slotChanged then
+            lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
+            StopBurstFullRefresh()
+            StopOptimisticFlowRefreshWatcher()
+            if Omni.Frame and Omni.Frame.UpdateLayout then
+                Omni.Frame:UpdateLayout(nil, { forceFull = true })
+            end
+            return
+        end
+
+        if not HasOptimisticFlowRefreshWatches() then
+            self:SetScript("OnUpdate", nil)
+        end
+    end)
 end
 
 local function SetButtonItem(btn, itemInfo)
@@ -2345,10 +2508,14 @@ function Frame:RefreshCombatContent(changedBags)
     -- that run during combat see every visible item, including ones that
     -- arrived after the last OOC render. ✿ ʕ •ᴥ•ʔ
     local refreshed = {}
+    local meta = {
+        requiresFlowRelayout = false,
+    }
 
     IterateSlotButtons(function(bagID, slotID, btn)
         local info
         if affected == nil or affected[bagID] then
+            local previousInfo = btn.itemInfo
             info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
             if info then
                 if Omni.Categorizer then
@@ -2358,10 +2525,20 @@ function Frame:RefreshCombatContent(changedBags)
                     end
                 end
                 info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
+                if currentView == "flow"
+                        and not meta.requiresFlowRelayout
+                        and DoesFlowSlotChangeRequireRelayout(previousInfo, info) then
+                    meta.requiresFlowRelayout = true
+                end
                 SetButtonItem(btn, info)
                 pcall(btn.SetAlpha, btn, 1)
                 table.insert(refreshed, btn)
             else
+                if currentView == "flow"
+                        and not meta.requiresFlowRelayout
+                        and DoesFlowSlotChangeRequireRelayout(previousInfo, nil) then
+                    meta.requiresFlowRelayout = true
+                end
                 SetButtonItem(btn, nil)
                 pcall(btn.SetAlpha, btn, 0)
             end
@@ -2376,14 +2553,47 @@ function Frame:RefreshCombatContent(changedBags)
 
     self:UpdateSlotCount()
     self:UpdateMoney()
+
+    return meta
+end
+
+function Frame:SnapshotBagSlotState(bagID, slotID)
+    return GetBagSlotStateKey(bagID, slotID)
+end
+
+function Frame:RequestOptimisticFlowRefresh(bagID, slotID, options)
+    if not mainFrame or not mainFrame:IsShown() or InCombat() or currentView ~= "flow" then
+        return false
+    end
+    if not bagID or not slotID or bagID < 0 or bagID > 4 or slotID < 1 then
+        return false
+    end
+
+    local stateKey = options and options.stateKey or GetBagSlotStateKey(bagID, slotID)
+    if not stateKey then
+        return false
+    end
+
+    local watchKey = tostring(bagID) .. ":" .. tostring(slotID)
+    optimisticFlowRefreshWatches[watchKey] = {
+        bagID = bagID,
+        slotID = slotID,
+        stateKey = stateKey,
+        elapsed = 0,
+        waitForCursorClear = options and options.waitForCursorClear == true or false,
+    }
+
+    StartOptimisticFlowRefreshWatcher()
+    return true
 end
 
 -- =============================================================================
 -- Layout Update
 -- =============================================================================
 
-function Frame:UpdateLayout(changedBags)
+function Frame:UpdateLayout(changedBags, opts)
     if not mainFrame then return end
+    local forceFull = opts and opts.forceFull == true
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
     -- Structural ops on ContainerFrameItemButton children (SetParent,
@@ -2405,6 +2615,37 @@ function Frame:UpdateLayout(changedBags)
             mainFrame.combatHint:SetText("Bag contents will appear after combat.")
         end
         return
+    end
+
+    if burstRefreshPending and not (IsMerchantOpen() or HasBagChangeEntries(changedBags)) then
+        StopBurstFullRefresh()
+    end
+
+    if not forceFull
+            and hasRenderedOnce
+            and HasBagChangeEntries(changedBags)
+            and currentView ~= "list" then
+        local refreshMeta = self:RefreshCombatContent(changedBags)
+        local shouldForceFlowRelayout = currentView == "flow"
+            and refreshMeta
+            and refreshMeta.requiresFlowRelayout == true
+        if shouldForceFlowRelayout then
+            StopBurstFullRefresh()
+            lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
+            forceFull = true
+        end
+
+        if not forceFull then
+            local now = (GetTime and GetTime()) or 0
+            local suppressBurst = currentView == "flow"
+                and lastOptimisticFlowRefreshAt > 0
+                and now > 0
+                and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
+            if not suppressBurst then
+                RequestBurstFullRefresh()
+            end
+            return
+        end
     end
 
     if mainFrame.combatHint then
@@ -3517,6 +3758,9 @@ end
 local function StopForceEmptyJob()
     if forceEmptyFrame then
         forceEmptyFrame:SetScript("OnUpdate", nil)
+        forceEmptyFrame:SetScript("OnEvent", nil)
+        forceEmptyFrame:UnregisterEvent("BAG_UPDATE")
+        forceEmptyFrame:UnregisterEvent("ITEM_LOCK_CHANGED")
     end
     forceEmptyJob = nil
 end
@@ -3589,6 +3833,8 @@ local function RunForceEmptyStep()
         end
     else
         forceEmptyJob.movedCount = forceEmptyJob.movedCount + 1
+        forceEmptyJob.awaitingEvent = true
+        forceEmptyJob.awaitElapsed = 0
     end
 end
 
@@ -3628,19 +3874,38 @@ function Frame:ForceEmptyBag(sourceBagID)
         slots = slots,
         movedCount = 0,
         blockedCount = 0,
-        elapsed = 0,
+        awaitingEvent = false,
+        awaitElapsed = 0,
     }
 
     forceEmptyFrame = forceEmptyFrame or CreateFrame("Frame")
+    forceEmptyFrame:RegisterEvent("BAG_UPDATE")
+    forceEmptyFrame:RegisterEvent("ITEM_LOCK_CHANGED")
+    forceEmptyFrame:SetScript("OnEvent", function(_, event, arg1)
+        if not forceEmptyJob then
+            return
+        end
+        if event == "BAG_UPDATE" and arg1 ~= nil then
+            if arg1 ~= forceEmptyJob.sourceBagID then
+                forceEmptyJob.awaitingEvent = false
+            end
+            return
+        end
+        if event == "ITEM_LOCK_CHANGED" then
+            forceEmptyJob.awaitingEvent = false
+        end
+    end)
     forceEmptyFrame:SetScript("OnUpdate", function(_, elapsed)
         if not forceEmptyJob then
             return
         end
-        forceEmptyJob.elapsed = forceEmptyJob.elapsed + (elapsed or 0)
-        if forceEmptyJob.elapsed < FORCE_EMPTY_STEP_INTERVAL then
-            return
+        if forceEmptyJob.awaitingEvent then
+            forceEmptyJob.awaitElapsed = forceEmptyJob.awaitElapsed + (elapsed or 0)
+            if forceEmptyJob.awaitElapsed < FORCE_EMPTY_EVENT_TIMEOUT then
+                return
+            end
+            forceEmptyJob.awaitingEvent = false
         end
-        forceEmptyJob.elapsed = 0
         RunForceEmptyStep()
     end)
 end

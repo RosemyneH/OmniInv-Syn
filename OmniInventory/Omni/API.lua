@@ -290,8 +290,10 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
         return nil
     end
 
-    -- ʕ •ᴥ•ʔ✿ Prefer native link + id resolution when available ✿ ʕ •ᴥ•ʔ
-    if API.hasCustomLinkSlot and not itemLink then
+    -- ʕ •ᴥ•ʔ✿ Always attempt link backfill through shim (native first,
+    -- stock GetContainerItemLink fallback) so hyperlink-dependent systems
+    -- like attune progress can resolve correctly on every client. ✿ ʕ •ᴥ•ʔ
+    if not itemLink then
         itemLink = API:GetItemLinkBySlot(bagID, slotID)
     end
 

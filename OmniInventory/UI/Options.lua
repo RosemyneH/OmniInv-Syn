@@ -32,6 +32,27 @@ local function IsSettingEditLocked()
     return InCombatLockdown and InCombatLockdown()
 end
 
+local function GetTooltipSide()
+    if Omni and Omni.Data and Omni.Data.Get then
+        local side = Omni.Data:Get("tooltipSide")
+        if side == "left" or side == "right" then
+            return side
+        end
+    end
+    return "right"
+end
+
+local function SetTooltipSide(side)
+    local normalized = (side == "left") and "left" or "right"
+    if Omni and Omni.Data and Omni.Data.Set then
+        Omni.Data:Set("tooltipSide", normalized)
+    else
+        OmniInventoryDB = OmniInventoryDB or {}
+        OmniInventoryDB.global = OmniInventoryDB.global or {}
+        OmniInventoryDB.global.tooltipSide = normalized
+    end
+end
+
 local colorPickerCloseRefreshPending = false
 
 local function RegisterColorPickerCloseRefresh()
@@ -429,6 +450,27 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - 22
 
+    local tooltipSideBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    tooltipSideBtn:SetSize(200, 22)
+    tooltipSideBtn:SetPoint("TOP", 0, yOffset)
+    tooltipSideBtn:SetScript("OnClick", function(self)
+        local nextSide = GetTooltipSide() == "right" and "left" or "right"
+        SetTooltipSide(nextSide)
+        self:SetText("Tooltip Side: " .. (nextSide == "right" and "Prefer Right" or "Prefer Left"))
+    end)
+    tooltipSideBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Tooltip Side Preference", 1, 0.82, 0)
+        GameTooltip:AddLine("Choose whether item tooltips prefer opening to the right or left.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    tooltipSideBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    self.tooltipSideBtn = tooltipSideBtn
+
+    yOffset = yOffset - 24
+
     yOffset = yOffset - SPACING - 4
 
     -- 6. Reset Button
@@ -688,6 +730,10 @@ function Settings:UpdateValues()
     end
     if self.footerMoneyEmphasisCb and Omni.Data then
         self.footerMoneyEmphasisCb:SetChecked(Omni.Data:Get("footerMoneyEmphasis") == true)
+    end
+    if self.tooltipSideBtn then
+        local side = GetTooltipSide()
+        self.tooltipSideBtn:SetText("Tooltip Side: " .. (side == "right" and "Prefer Right" or "Prefer Left"))
     end
 
     if Omni.Frame and self.scaleSlider then
