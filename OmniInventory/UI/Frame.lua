@@ -1323,6 +1323,7 @@ Frame._GetItemContainer = GetItemContainer
 -- count) when combat fills or empties it.
 
 local OVERFLOW_ROW_GAP = 4
+local EMPTY_SLOT_ALPHA = 1
 
 local function GetSlotButton(bagID, slotID)
     local byBag = slotButtons[bagID]
@@ -2476,19 +2477,65 @@ function Frame:RenderFlowView(items)
     local categories = {}
     local categoryOrder = {}
 
+    local itemBySlot = nil
+    local bagSlotCounts = nil
+    local bagItemCounts = nil
+
     if currentView == "grid" then
-        -- GRID MODE: Everything in one bucket, sorted by user's preference (already sorted)
-        categories["All"] = items
+        -- ʕ •ᴥ•ʔ✿ Bagnon-like grid: keep physical slot order and render empty
+        -- slots inline so players always see full bag capacity. ✿ ʕ •ᴥ•ʔ
+        itemBySlot = {}
+        categories["All"] = {}
         categoryOrder = { "All" }
-    elseif currentView == "bag" then
+
+        for _, itemInfo in ipairs(items) do
+            if IsValidBagID(itemInfo.bagID) and itemInfo.slotID and itemInfo.slotID > 0 then
+                itemBySlot[itemInfo.bagID] = itemBySlot[itemInfo.bagID] or {}
+                itemBySlot[itemInfo.bagID][itemInfo.slotID] = itemInfo
+            end
+        end
+
         for _, bagID in ipairs(BAG_IDS) do
+            local numSlots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, numSlots do
+                local info = itemBySlot[bagID] and itemBySlot[bagID][slotID] or nil
+                table.insert(categories["All"], info or { bagID = bagID, slotID = slotID, __empty = true })
+            end
+        end
+    elseif currentView == "bag" then
+        itemBySlot = {}
+        bagSlotCounts = {}
+        bagItemCounts = {}
+        local bagScope = {}
+
+        if IsValidBagID(selectedBagID) then
+            table.insert(bagScope, selectedBagID)
+        else
+            for _, bagID in ipairs(BAG_IDS) do
+                table.insert(bagScope, bagID)
+            end
+        end
+
+        for _, bagID in ipairs(bagScope) do
             categories[bagID] = {}
             table.insert(categoryOrder, bagID)
+            bagSlotCounts[bagID] = GetContainerNumSlots(bagID) or 0
+            bagItemCounts[bagID] = 0
         end
 
         for _, item in ipairs(items) do
             if IsValidBagID(item.bagID) then
-                table.insert(categories[item.bagID], item)
+                itemBySlot[item.bagID] = itemBySlot[item.bagID] or {}
+                itemBySlot[item.bagID][item.slotID] = item
+                bagItemCounts[item.bagID] = (bagItemCounts[item.bagID] or 0) + 1
+            end
+        end
+
+        for _, bagID in ipairs(bagScope) do
+            local totalSlots = bagSlotCounts[bagID] or 0
+            for slotID = 1, totalSlots do
+                local info = itemBySlot[bagID] and itemBySlot[bagID][slotID] or nil
+                table.insert(categories[bagID], info or { bagID = bagID, slotID = slotID, __empty = true })
             end
         end
     else
@@ -2689,7 +2736,9 @@ function Frame:RenderFlowView(items)
                 end
                 header:SetTextColor(r, g, b)
                 if currentView == "bag" then
-                    header:SetText(GetBagDisplayName(catName) .. " (" .. #catItems .. ")")
+                    local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                    local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                    header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
                 else
                     header:SetText(catName .. " (" .. #catItems .. ")")
                 end
@@ -2731,8 +2780,13 @@ function Frame:RenderFlowView(items)
                         btn:SetAlpha(1)
                     end)
 
+                    local slotItem = itemInfo
+                    if itemInfo and itemInfo.__empty then
+                        slotItem = nil
+                    end
+
                     local success = pcall(function()
-                        SetButtonItem(btn, itemInfo)
+                        SetButtonItem(btn, slotItem)
                         btn:Show()
                     end)
                     if not success then
@@ -2743,6 +2797,9 @@ function Frame:RenderFlowView(items)
 
                     touched[bagID] = touched[bagID] or {}
                     touched[bagID][slotID] = true
+                    if not slotItem then
+                        pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
+                    end
                     table.insert(itemButtons, btn)
                 end
             end
