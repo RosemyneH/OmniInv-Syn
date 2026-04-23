@@ -205,18 +205,10 @@ local function IsAttunableItem(itemInfo)
         end
     end
 
-    -- ʕ •ᴥ•ʔ✿ Highest attune across forges/affixes via native C extension ✿ ʕ •ᴥ•ʔ
-    local API = Omni.API
+    -- ʕ •ᴥ•ʔ✿ Strict hyperlink-only progress resolution ✿ ʕ •ᴥ•ʔ
     local progress
     if _G.GetItemLinkAttuneProgress and itemInfo and itemInfo.hyperlink then
         progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
-    end
-
-    -- Legacy fallback when the shim or native API isn't available
-    if type(progress) ~= "number" then
-        if API then
-            progress = API:GetHighestAttunePct(itemID, -1)
-        end
     end
 
     if type(progress) ~= "number" then
@@ -321,12 +313,6 @@ local function IsAccountAttunableItem(itemInfo)
     local progress
     if _G.GetItemLinkAttuneProgress and itemInfo.hyperlink then
         progress = GetItemLinkAttuneProgress(itemInfo.hyperlink)
-    end
-    if type(progress) ~= "number" then
-        local API = Omni.API
-        if API and API.GetHighestAttunePct then
-            progress = API:GetHighestAttunePct(itemID, -1)
-        end
     end
     if type(progress) ~= "number" and _G.GetItemAttuneProgress then
         progress = GetItemAttuneProgress(itemID)

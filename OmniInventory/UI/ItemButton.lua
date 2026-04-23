@@ -147,6 +147,30 @@ local function GetAttuneSettings()
     return attune
 end
 
+local function BuildAttuneSettingsToken()
+    local settings = GetAttuneSettings()
+    if not settings then
+        return "attune:disabled"
+    end
+
+    local textColor = settings.textColor or {}
+    return table.concat({
+        settings.enabled and "1" or "0",
+        settings.showBountyIcons and "1" or "0",
+        settings.showAccountIcons and "1" or "0",
+        settings.showResistIcons and "1" or "0",
+        settings.showRedForNonAttunable and "1" or "0",
+        settings.showProgressText and "1" or "0",
+        settings.showAccountAttuneText and "1" or "0",
+        settings.faeMode and "1" or "0",
+        settings.forgeOutline == false and "0" or "1",
+        tostring(textColor.r or 1),
+        tostring(textColor.g or 1),
+        tostring(textColor.b or 1),
+        tostring(textColor.a or 1),
+    }, ":")
+end
+
 local function GetItemIDFromLink(itemLink)
     if not itemLink then
         return nil
@@ -201,19 +225,13 @@ local function IsAttunableByAccount(itemID)
     return false
 end
 
--- ʕ •ᴥ•ʔ✿ Prefer native GetHighestAttunePct (affix + forge aware) ✿ ʕ •ᴥ•ʔ
-local function GetAttuneProgress(itemLink, itemID, forge)
+-- ʕ •ᴥ•ʔ✿ Strictly use hyperlink attune progress API ✿ ʕ •ᴥ•ʔ
+local function GetAttuneProgress(itemLink)
     if itemLink and _G.GetItemLinkAttuneProgress then
         local progress = GetItemLinkAttuneProgress(itemLink)
         if type(progress) == "number" then
             return progress
         end
-    end
-    if itemID and Omni.API and Omni.API.hasHighestAttune then
-        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
-    end
-    if itemID and Omni.API then
-        return Omni.API:GetHighestAttunePct(itemID, forge or -1)
     end
     return 0
 end
@@ -665,7 +683,7 @@ local function UpdateAttuneDisplay(button, itemInfo)
     end
 
     local forgeLevel = GetForgeLevelFromLink(itemLink)
-    local progress = GetAttuneProgress(itemLink, itemID, forgeLevel) or 0
+    local progress = GetAttuneProgress(itemLink) or 0
     local showBar = true
     local barColor = nil
 
@@ -763,6 +781,32 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        button.__lastRenderKey = nil
+        return
+    end
+
+    local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
+    local attuneSettings = GetAttuneSettings()
+    local attuneEnabled = attuneSettings and attuneSettings.enabled
+    local attuneToken = BuildAttuneSettingsToken()
+    local renderKey = button.__lastRenderKey
+    if renderKey
+            and renderKey.hyperlink == itemInfo.hyperlink
+            and renderKey.iconFileID == itemInfo.iconFileID
+            and renderKey.stackCount == itemInfo.stackCount
+            and renderKey.quality == itemInfo.quality
+            and renderKey.isNew == itemInfo.isNew
+            and renderKey.isQuickFiltered == itemInfo.isQuickFiltered
+            and renderKey.itemID == itemInfo.itemID
+            and renderKey.bagID == itemInfo.bagID
+            and renderKey.slotID == itemInfo.slotID
+            and renderKey.isPinned == isPinned
+            and renderKey.attuneToken == attuneToken then
+        if attuneEnabled then
+            UpdateAttuneDisplay(button, itemInfo)
+            UpdateForgeDisplay(button, itemInfo)
+        end
+        self:UpdateCooldown(button)
         return
     end
 
@@ -841,7 +885,7 @@ function ItemButton:SetItem(button, itemInfo)
     end
 
     -- Show pin icon if item is pinned
-    if itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) then
+    if isPinned then
         button.pinIcon:Show()
     else
         button.pinIcon:Hide()
@@ -850,6 +894,20 @@ function ItemButton:SetItem(button, itemInfo)
     UpdateAttuneDisplay(button, itemInfo)
     UpdateForgeDisplay(button, itemInfo)
     self:UpdateCooldown(button)
+
+    button.__lastRenderKey = {
+        hyperlink = itemInfo.hyperlink,
+        iconFileID = itemInfo.iconFileID,
+        stackCount = itemInfo.stackCount,
+        quality = itemInfo.quality,
+        isNew = itemInfo.isNew,
+        isQuickFiltered = itemInfo.isQuickFiltered,
+        itemID = itemInfo.itemID,
+        bagID = itemInfo.bagID,
+        slotID = itemInfo.slotID,
+        isPinned = isPinned,
+        attuneToken = attuneToken,
+    }
 end
 
 -- =============================================================================
@@ -997,6 +1055,7 @@ function ItemButton:Reset(button)
     if not button then return end
 
     button.itemInfo = nil
+    button.__lastRenderKey = nil
     button.bagID = nil
     button.slotID = nil
     if button.icon then button.icon:SetTexture(nil) end

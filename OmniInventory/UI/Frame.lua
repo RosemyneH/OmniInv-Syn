@@ -80,9 +80,52 @@ local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 -- secure OnClick (use / pickup / equip / swap) still routes correctly.
 local hasRenderedOnce = false
 local pendingCombatRender = false
+local burstRefreshFrame = nil
+local burstRefreshElapsed = 0
+local burstRefreshPending = false
+local BURST_FULL_REFRESH_DELAY = 0.20
 
 local function InCombat()
     return InCombatLockdown and InCombatLockdown()
+end
+
+local function IsMerchantOpen()
+    return MerchantFrame and MerchantFrame:IsShown()
+end
+
+local function HasBagChangeEntries(changedBags)
+    if type(changedBags) ~= "table" then
+        return false
+    end
+    for bagID in pairs(changedBags) do
+        if type(bagID) == "number" then
+            return true
+        end
+    end
+    return false
+end
+
+local function RequestBurstFullRefresh()
+    burstRefreshPending = true
+    burstRefreshElapsed = 0
+
+    if not burstRefreshFrame then
+        burstRefreshFrame = CreateFrame("Frame")
+    end
+
+    burstRefreshFrame:SetScript("OnUpdate", function(self, elapsed)
+        burstRefreshElapsed = burstRefreshElapsed + (elapsed or 0)
+        if burstRefreshElapsed < BURST_FULL_REFRESH_DELAY then
+            return
+        end
+
+        self:SetScript("OnUpdate", nil)
+        burstRefreshPending = false
+        burstRefreshElapsed = 0
+        if Omni.Frame and Omni.Frame.UpdateLayout then
+            Omni.Frame:UpdateLayout(nil, { forceFull = true })
+        end
+    end)
 end
 
 local function SetButtonItem(btn, itemInfo)
@@ -2382,8 +2425,9 @@ end
 -- Layout Update
 -- =============================================================================
 
-function Frame:UpdateLayout(changedBags)
+function Frame:UpdateLayout(changedBags, opts)
     if not mainFrame then return end
+    local forceFull = opts and opts.forceFull == true
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
     -- Structural ops on ContainerFrameItemButton children (SetParent,
@@ -2404,6 +2448,23 @@ function Frame:UpdateLayout(changedBags)
             mainFrame.combatHint:Show()
             mainFrame.combatHint:SetText("Bag contents will appear after combat.")
         end
+        return
+    end
+
+    if burstRefreshPending and not (IsMerchantOpen() or HasBagChangeEntries(changedBags)) then
+        burstRefreshPending = false
+        burstRefreshElapsed = 0
+        if burstRefreshFrame then
+            burstRefreshFrame:SetScript("OnUpdate", nil)
+        end
+    end
+
+    if not forceFull
+            and hasRenderedOnce
+            and HasBagChangeEntries(changedBags)
+            and currentView ~= "list" then
+        self:RefreshCombatContent(changedBags)
+        RequestBurstFullRefresh()
         return
     end
 
