@@ -59,6 +59,31 @@ local function SetButtonItem(btn, itemInfo)
     end
 end
 
+local function GetSharedItemScale()
+    if Omni.Frame and Omni.Frame.GetItemScale then
+        return Omni.Frame:GetItemScale()
+    end
+    return 1
+end
+
+local function GetSharedItemGap()
+    if Omni.Frame and Omni.Frame.GetItemGap then
+        return Omni.Frame:GetItemGap()
+    end
+    return ITEM_SPACING
+end
+
+local function ApplyBankItemMetrics(btn, itemSize)
+    if not btn then return end
+    pcall(function()
+        btn:SetScale(1)
+        btn:SetSize(itemSize, itemSize)
+        if btn.glow then
+            btn.glow:SetSize(itemSize * 1.5, itemSize * 1.5)
+        end
+    end)
+end
+
 local function IsValidBankBagID(bagID)
     if bagID == nil then return false end
     if bagID == -1 then return true end
@@ -870,20 +895,24 @@ function BankFrame:RenderFlowView(items)
 
     local hInset = 8
     local usableWidth = bankFrame.content:GetWidth() - 20
+    local itemScale = GetSharedItemScale()
+    local itemGap = GetSharedItemGap()
+    local itemSize = ITEM_SIZE * itemScale
+    local itemStep = itemSize + itemGap
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
     local dualCategoryLanes = true
     local laneGap = 10
 
     local function columnsForLaneWidth(laneW)
-        local inner = laneW - ITEM_SPACING
-        local c = math.floor(inner / (ITEM_SIZE + ITEM_SPACING))
+        local inner = laneW - itemGap
+        local c = math.floor(inner / itemStep)
         return math.max(c, 1)
     end
 
-    local yLeft = -ITEM_SPACING
-    local yRight = -ITEM_SPACING
-    local yOffset = -ITEM_SPACING
+    local yLeft = -itemGap
+    local yRight = -itemGap
+    local yOffset = -itemGap
     local renderedSectionCount = 0
 
     local categories = {}
@@ -915,14 +944,14 @@ function BankFrame:RenderFlowView(items)
             if dualCategoryLanes then
                 local laneW = (usableWidth - laneGap) * 0.5
                 local edgePad = hInset * 0.5
-                local leftX = edgePad + ITEM_SPACING
-                local rightX = edgePad + laneW + laneGap + ITEM_SPACING
+                local leftX = edgePad + itemGap
+                local rightX = edgePad + laneW + laneGap + itemGap
                 local useRight = (renderedSectionCount % 2 == 0)
                 laneX = useRight and rightX or leftX
                 laneY = useRight and yRight or yLeft
                 columns = columnsForLaneWidth(laneW)
             else
-                laneX = ITEM_SPACING
+                laneX = itemGap
                 laneY = yOffset
                 columns = columnsForLaneWidth(usableWidth)
             end
@@ -958,14 +987,15 @@ function BankFrame:RenderFlowView(items)
                 if btn then
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
-                    local x = laneX + col * (ITEM_SIZE + ITEM_SPACING)
-                    local y = laneY - row * (ITEM_SIZE + ITEM_SPACING)
+                    local x = laneX + col * itemStep
+                    local y = laneY - row * itemStep
 
                     local container = GetBankItemContainer(itemInfo.bagID or -1) or scrollChild
                     pcall(function()
                         if btn:GetParent() ~= container then
                             btn:SetParent(container)
                         end
+                        ApplyBankItemMetrics(btn, itemSize)
                         btn:ClearAllPoints()
                         btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
                     end)
@@ -985,7 +1015,7 @@ function BankFrame:RenderFlowView(items)
             end
 
             local catRows = math.ceil(#catItems / columns)
-            laneY = laneY - (catRows * (ITEM_SIZE + ITEM_SPACING)) - sectionSpacing
+            laneY = laneY - (catRows * itemStep) - sectionSpacing
 
             if dualCategoryLanes then
                 if (renderedSectionCount % 2 == 0) then
@@ -1000,7 +1030,7 @@ function BankFrame:RenderFlowView(items)
     end
 
     local bottomY = dualCategoryLanes and math.min(yLeft, yRight) or yOffset
-    scrollChild:SetHeight(math.abs(bottomY) + ITEM_SPACING)
+    scrollChild:SetHeight(math.abs(bottomY) + itemGap)
 end
 
 function BankFrame:UpdateLayout()

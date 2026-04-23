@@ -294,6 +294,15 @@ local function ApplyAttuneBarMetrics(button)
     button.attuneBarFill:SetWidth(fillWidth)
 end
 
+local function ApplyResistIconMetrics(button)
+    if not button or not button.resistIcon then
+        return
+    end
+    local buttonSize = GetButtonRenderSize(button)
+    local iconSize = math.max(10, math.floor(buttonSize * 0.43 + 0.5))
+    button.resistIcon:SetSize(iconSize, iconSize)
+end
+
 -- ʕ •ᴥ•ʔ✿ Forge letter indicator (T/W/L) derived from item link ✿ ʕ •ᴥ•ʔ
 local function UpdateForgeDisplay(button, itemInfo)
     if not button or not button.forgeText then
@@ -639,6 +648,7 @@ local function UpdateAttuneDisplay(button, itemInfo)
 
     local resistSchool = settings.showResistIcons and GetItemResistSchool(itemLink, itemID) or nil
     if resistSchool then
+        ApplyResistIconMetrics(button)
         button.resistIcon:SetTexture(RESIST_ICON_TEXTURES[resistSchool] or RESIST_ICON_FALLBACK)
         button.resistIcon:Show()
     else

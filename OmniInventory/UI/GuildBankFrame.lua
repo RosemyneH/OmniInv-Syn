@@ -606,6 +606,35 @@ end
 local GB_ATTUNE_BAR = 6
 local GB_RESIST_FALLBACK = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
+local function GetSharedItemScale()
+    if Omni.Frame and Omni.Frame.GetItemScale then
+        return Omni.Frame:GetItemScale()
+    end
+    return 1
+end
+
+local function GetSharedItemGap()
+    if Omni.Frame and Omni.Frame.GetItemGap then
+        return Omni.Frame:GetItemGap()
+    end
+    return SLOT_SPACING
+end
+
+local function GetGuildSlotSize()
+    return SLOT_SIZE * GetSharedItemScale()
+end
+
+local function GetGuildSlotStep()
+    return GetGuildSlotSize() + GetSharedItemGap()
+end
+
+local function ApplyGuildSlotMetrics(btn)
+    if not btn then return end
+    local size = GetGuildSlotSize()
+    pcall(btn.SetScale, btn, 1)
+    pcall(btn.SetSize, btn, size, size)
+end
+
 local function EnsureGuildSlotDecorationFrames(btn)
     if btn.attuneBarBG then return end
 
@@ -736,7 +765,7 @@ end
 
 local function CreateSlotButton(parent, slotIndex)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+    ApplyGuildSlotMetrics(btn)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn.slotIndex = slotIndex
 
@@ -1252,8 +1281,8 @@ function GuildBankFrame:RenderFlowView(items)
         h:Hide()
     end
 
-    local ITEM_SIZE = SLOT_SIZE
-    local ITEM_SPACING = SLOT_SPACING
+    local ITEM_SIZE = GetGuildSlotSize()
+    local ITEM_SPACING = GetSharedItemGap()
     local hInset = 8
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
@@ -1338,6 +1367,7 @@ function GuildBankFrame:RenderFlowView(items)
                     btn = CreateSlotButton(scrollChild, flowBtnCount)
                     flowItemButtons[flowBtnCount] = btn
                 end
+                ApplyGuildSlotMetrics(btn)
                 btn.gbTab = itemInfo.guildBankTab
                 btn.gbSlot = itemInfo.guildBankSlot
                 if btn.SetID and itemInfo.guildBankSlot then
@@ -1486,9 +1516,10 @@ function GuildBankFrame:CreateMainFrame()
         local col = (i - 1) % SLOTS_PER_ROW
         local row = math.floor((i - 1) / SLOTS_PER_ROW)
         local btn = CreateSlotButton(frame.gridContainer, i)
+        local slotStep = GetGuildSlotStep()
         btn:SetPoint("TOPLEFT", frame.gridContainer, "TOPLEFT",
-            col * (SLOT_SIZE + SLOT_SPACING),
-            -(row * (SLOT_SIZE + SLOT_SPACING)))
+            col * slotStep,
+            -(row * slotStep))
         slotButtons[i] = btn
     end
 
@@ -1544,9 +1575,19 @@ function GuildBankFrame:UpdateTabs()
 end
 
 function GuildBankFrame:UpdateSlots()
+    local slotStep = GetGuildSlotStep()
     for i = 1, SLOTS_PER_TAB do
         local btn = slotButtons[i]
-        if btn then UpdateSlotButton(btn) end
+        if btn then
+            local col = (i - 1) % SLOTS_PER_ROW
+            local row = math.floor((i - 1) / SLOTS_PER_ROW)
+            ApplyGuildSlotMetrics(btn)
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", frame.gridContainer, "TOPLEFT",
+                col * slotStep,
+                -(row * slotStep))
+            UpdateSlotButton(btn)
+        end
     end
 end
 
