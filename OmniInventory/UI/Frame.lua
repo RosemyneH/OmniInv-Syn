@@ -592,6 +592,56 @@ local RIBBON_SEP_GAP = 5
 local KEYRING_BAG_ID = -2
 local SETTINGS_ICON = "Interface\\Icons\\Trade_Engineering"
 local KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03"
+local FIND_DUNGEON_ICON = "Interface\\Icons\\INV_Misc_Map_01"
+local FIND_DUNGEON_BASE_COMMAND = ".finddungeon"
+local FIND_DUNGEON_POPUP_WIDTH = 372
+local FIND_DUNGEON_POPUP_HEIGHT = 308
+local FIND_DUNGEON_POPUP_PAD = 10
+local FIND_DUNGEON_POPUP_HEADER = 22
+local FIND_DUNGEON_SECTION_WIDTH = 112
+local FIND_DUNGEON_SECTION_GAP = 8
+local FIND_DUNGEON_BUTTON_HEIGHT = 20
+local FIND_DUNGEON_BUTTON_GAP = 4
+local FIND_DUNGEON_SECTION_TITLE_GAP = 16
+local FIND_DUNGEON_CUSTOM_ROW_HEIGHT = 22
+local FIND_DUNGEON_CUSTOM_RUN_WIDTH = 60
+local FIND_DUNGEON_STATUS_HEIGHT = 26
+local FIND_DUNGEON_STATUS_DEFAULT = "Rare+ unattuned loot, minus the slash-command archaeology."
+local FIND_DUNGEON_SUBTITLE_TEXT = "Pick a preset, or type your own filters below."
+local FIND_DUNGEON_MYTHIC_COLOR = { 0.35, 0.65, 1.00 }
+
+local FIND_DUNGEON_PRESETS = {
+    {
+        title = "Vanilla",
+        titleColor = { 1.00, 0.82, 0.00 },
+        buttons = {
+            { label = "Dungeons", filters = "vanilla notraid" },
+            { label = "Raids", filters = "vanilla raid" },
+        },
+    },
+    {
+        title = "TBC",
+        titleColor = { 0.28, 0.85, 0.55 },
+        buttons = {
+            { label = "Normal", filters = "tbc notheroic notmythic notraid" },
+            { label = "Heroic", filters = "tbc heroic" },
+            { label = "Raids", filters = "tbc raid" },
+            { label = "Mythic", filters = "tbc mythic", accentColor = FIND_DUNGEON_MYTHIC_COLOR },
+        },
+    },
+    {
+        title = "WotLK",
+        titleColor = { 0.45, 0.78, 1.00 },
+        buttons = {
+            { label = "Normal", filters = "wotlk notheroic notraid notmythic" },
+            { label = "Heroic", filters = "wotlk heroic notraid" },
+            { label = "Raids", filters = "wotlk raid" },
+            { label = "10M", filters = "wotlk raid not25-man" },
+            { label = "25M", filters = "wotlk raid 25-man" },
+            { label = "Mythic", filters = "wotlk mythic", accentColor = FIND_DUNGEON_MYTHIC_COLOR },
+        },
+    },
+}
 
 local function StyleRibbonButton(btn)
     btn:SetBackdrop({
@@ -653,6 +703,100 @@ local function CreateRibbonIconButton(parent, iconTexture, tooltipTitle, tooltip
     return btn
 end
 
+local function ApplyFindDungeonPopupButtonAccent(btn, hovered)
+    if not btn or not btn._accentColor then
+        return
+    end
+
+    local r = btn._accentColor[1] or 1
+    local g = btn._accentColor[2] or 1
+    local b = btn._accentColor[3] or 1
+
+    if btn.text then
+        btn.text:SetTextColor(r, g, b, 1)
+    end
+
+    if hovered then
+        btn:SetBackdropColor(r * 0.18, g * 0.18, b * 0.18, 1)
+        btn:SetBackdropBorderColor(r, g, b, 1)
+    else
+        btn:SetBackdropColor(0.12, 0.12, 0.12, 1)
+        btn:SetBackdropBorderColor(r * 0.75, g * 0.75, b * 0.75, 0.9)
+    end
+end
+
+local function CreateFindDungeonPopupButton(parent, width, label, tooltipTitle, tooltipSub, onClick, accentColor)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(width, FIND_DUNGEON_BUTTON_HEIGHT)
+    StyleRibbonButton(btn)
+    btn._accentColor = accentColor
+
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.text:SetPoint("CENTER")
+    btn.text:SetText(label)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+
+    if accentColor then
+        btn:HookScript("OnEnter", function(self)
+            ApplyFindDungeonPopupButtonAccent(self, true)
+        end)
+        btn:HookScript("OnLeave", function(self)
+            ApplyFindDungeonPopupButtonAccent(self, false)
+        end)
+        ApplyFindDungeonPopupButtonAccent(btn, false)
+    end
+
+    return btn
+end
+
+local function TrimText(text)
+    return (string.gsub(text or "", "^%s*(.-)%s*$", "%1"))
+end
+
+local function NormalizeFindDungeonFilters(filters)
+    local normalized = TrimText(filters)
+    normalized = string.gsub(normalized, "^%.finddungeon%s*", "")
+    normalized = string.gsub(normalized, "^finddungeon%s*", "")
+    return TrimText(normalized)
+end
+
+local function BuildFindDungeonCommand(filters)
+    local normalized = NormalizeFindDungeonFilters(filters)
+    if normalized == "" then
+        return FIND_DUNGEON_BASE_COMMAND
+    end
+    return FIND_DUNGEON_BASE_COMMAND .. " " .. normalized
+end
+
+local function PrepareChatCommand(command)
+    if not ChatFrame_OpenChat then
+        return false, nil
+    end
+
+    local chatFrame = DEFAULT_CHAT_FRAME or SELECTED_CHAT_FRAME or _G.ChatFrame1
+    if not chatFrame then
+        return false, nil
+    end
+
+    local ok = pcall(ChatFrame_OpenChat, command, chatFrame)
+    if not ok then
+        return false, nil
+    end
+
+    local editBox = chatFrame.editBox or _G.ChatFrameEditBox
+    if editBox and editBox.SetText then
+        editBox:SetText(command)
+        if editBox.HighlightText then
+            editBox:HighlightText(0, 0)
+        end
+    end
+
+    return true, editBox
+end
+
 -- ʕノ•ᴥ•ʔノ Drag-drop landing zone for bag-slot icons in the ribbon ノʕ•ᴥ•ʔ
 function Frame:EquipBagFromCursor(bagID)
     if not IsValidBagID(bagID) then return end
@@ -687,6 +831,7 @@ function Frame:CreateHeader()
 
     header.title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header.title:SetPoint("LEFT", 6, 0)
+    header.title:SetJustifyH("LEFT")
     header.title:SetText("|cFF00FF00Omni|r Inventory")
 
     header.closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
@@ -737,6 +882,13 @@ function Frame:CreateHeader()
     header.bagBar = CreateFrame("Frame", nil, header)
     header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BAG_IDS, BAG_ICON_SIZE)
     header.bagBar:SetPoint("RIGHT", header.ribbonSep, "LEFT", -RIBBON_SEP_GAP, 0)
+
+    header.findDungeonBtn = CreateRibbonIconButton(header, FIND_DUNGEON_ICON,
+        "Dungeon Radar",
+        "Sniff out attunable dungeons without typing dot commands like a cave scribe.",
+        function() Frame:ToggleFindDungeonPopup() end)
+    header.findDungeonBtn:SetPoint("RIGHT", header.bagBar, "LEFT", -RIBBON_GAP, 0)
+    header.title:SetPoint("RIGHT", header.findDungeonBtn, "LEFT", -6, 0)
 
     for index, bagID in ipairs(BAG_IDS) do
         local bagBtn = CreateFrame("Button", nil, header.bagBar)
@@ -852,6 +1004,241 @@ function Frame:UpdateBagIconVisuals()
             if bagBtn.borderRight then bagBtn.borderRight:SetVertexColor(r, g, b, 1) end
             bagBtn:SetAlpha(1)
         end
+    end
+end
+
+-- =============================================================================
+-- Find Dungeon Popup
+-- =============================================================================
+
+function Frame:SetFindDungeonStatus(message, r, g, b)
+    if not mainFrame or not mainFrame.findDungeonPopup or not mainFrame.findDungeonPopup.status then
+        return
+    end
+
+    local status = mainFrame.findDungeonPopup.status
+    status:SetText(message or FIND_DUNGEON_STATUS_DEFAULT)
+    status:SetTextColor(r or 0.78, g or 0.78, b or 0.78, 1)
+end
+
+function Frame:ExecuteFindDungeonCommand(filters)
+    if InCombat() then
+        print("|cFF00FF00OmniInventory|r: Dungeon Radar is unavailable during combat.")
+        self:SetFindDungeonStatus("Combat lockdown says the radar can wait a second.", 1.0, 0.25, 0.25)
+        return false
+    end
+
+    local command = BuildFindDungeonCommand(filters)
+    local prepared, editBox = PrepareChatCommand(command)
+    if prepared and editBox and ChatEdit_SendText then
+        local ok = pcall(ChatEdit_SendText, editBox, 0)
+        if ok then
+            if editBox.ClearFocus then
+                editBox:ClearFocus()
+            end
+            self:SetFindDungeonStatus("Scanning: " .. command, 0.45, 0.95, 0.55)
+            return true
+        end
+    end
+
+    if prepared then
+        self:SetFindDungeonStatus("Queued in chat: " .. command, 1.0, 0.82, 0.0)
+        print("|cFF00FF00OmniInventory|r: Ready in chat - press Enter to run " .. command)
+        return false
+    end
+
+    self:SetFindDungeonStatus("Could not open chat for " .. command, 1.0, 0.25, 0.25)
+    print("|cFF00FF00OmniInventory|r: Unable to open chat for " .. command)
+    return false
+end
+
+function Frame:RunFindDungeonPreset(filters)
+    return self:ExecuteFindDungeonCommand(filters)
+end
+
+function Frame:RunCustomFindDungeonFilters()
+    if not mainFrame or not mainFrame.findDungeonPopup or not mainFrame.findDungeonPopup.customBox then
+        return false
+    end
+
+    local filters = mainFrame.findDungeonPopup.customBox:GetText() or ""
+    return self:ExecuteFindDungeonCommand(filters)
+end
+
+function Frame:CreateFindDungeonPopup()
+    if not mainFrame then return nil end
+    if mainFrame.findDungeonPopup then return mainFrame.findDungeonPopup end
+
+    local popup = CreateFrame("Frame", "OmniFindDungeonPopup", mainFrame)
+    popup:SetFrameStrata("DIALOG")
+    popup:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
+    popup:SetPoint("TOPRIGHT", mainFrame, "TOPLEFT", -6, 0)
+    popup:SetSize(FIND_DUNGEON_POPUP_WIDTH, FIND_DUNGEON_POPUP_HEIGHT)
+    popup:SetClampedToScreen(true)
+    popup:EnableMouse(true)
+    popup:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    popup:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+    popup:SetBackdropBorderColor(0.45, 0.38, 0.15, 1)
+
+    popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    popup.title:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -6)
+    popup.title:SetText("|cFFFFCC00Dungeon Radar|r")
+
+    popup.subtitle = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    popup.subtitle:SetPoint("TOPLEFT", popup.title, "BOTTOMLEFT", 0, -4)
+    popup.subtitle:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -FIND_DUNGEON_POPUP_PAD - 18, -4)
+    popup.subtitle:SetWidth(FIND_DUNGEON_POPUP_WIDTH - (FIND_DUNGEON_POPUP_PAD * 2) - 18)
+    popup.subtitle:SetJustifyH("LEFT")
+    popup.subtitle:SetJustifyV("TOP")
+    popup.subtitle:SetTextColor(0.78, 0.78, 0.78, 1)
+    popup.subtitle:SetText(FIND_DUNGEON_SUBTITLE_TEXT)
+
+    popup.closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    popup.closeBtn:SetSize(18, 18)
+    popup.closeBtn:SetPoint("TOPRIGHT", -2, -2)
+    popup.closeBtn:SetScript("OnClick", function() popup:Hide() end)
+
+    popup.sections = {}
+    for index, section in ipairs(FIND_DUNGEON_PRESETS) do
+        local sectionFrame = CreateFrame("Frame", nil, popup)
+        sectionFrame:SetSize(FIND_DUNGEON_SECTION_WIDTH, 150)
+        sectionFrame:SetPoint(
+            "TOPLEFT",
+            popup,
+            "TOPLEFT",
+            FIND_DUNGEON_POPUP_PAD + (index - 1) * (FIND_DUNGEON_SECTION_WIDTH + FIND_DUNGEON_SECTION_GAP),
+            -(FIND_DUNGEON_POPUP_HEADER + 26)
+        )
+
+        sectionFrame.title = sectionFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sectionFrame.title:SetPoint("TOPLEFT", 0, 0)
+        sectionFrame.title:SetText(section.title)
+        sectionFrame.title:SetTextColor(
+            section.titleColor[1],
+            section.titleColor[2],
+            section.titleColor[3],
+            1
+        )
+
+        sectionFrame.buttons = {}
+        local yOffset = -FIND_DUNGEON_SECTION_TITLE_GAP
+        for _, def in ipairs(section.buttons) do
+            local command = BuildFindDungeonCommand(def.filters)
+            local btn = CreateFindDungeonPopupButton(
+                sectionFrame,
+                FIND_DUNGEON_SECTION_WIDTH,
+                def.label,
+                section.title .. " " .. def.label,
+                command,
+                function() Frame:RunFindDungeonPreset(def.filters) end,
+                def.accentColor
+            )
+            btn:SetPoint("TOPLEFT", 0, yOffset)
+            table.insert(sectionFrame.buttons, btn)
+            yOffset = yOffset - (FIND_DUNGEON_BUTTON_HEIGHT + FIND_DUNGEON_BUTTON_GAP)
+        end
+
+        popup.sections[index] = sectionFrame
+    end
+
+    popup.divider = popup:CreateTexture(nil, "OVERLAY")
+    popup.divider:SetTexture("Interface\\Buttons\\WHITE8X8")
+    popup.divider:SetVertexColor(0.35, 0.35, 0.35, 1)
+    popup.divider:SetHeight(1)
+    popup.divider:SetPoint("LEFT", FIND_DUNGEON_POPUP_PAD, 0)
+    popup.divider:SetPoint("RIGHT", -FIND_DUNGEON_POPUP_PAD, 0)
+    popup.divider:SetPoint("TOP", popup, "TOP", 0, -212)
+
+    popup.customLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    popup.customLabel:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -224)
+    popup.customLabel:SetText("Custom filters")
+
+    popup.customHint = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    popup.customHint:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -224)
+    popup.customHint:SetTextColor(0.65, 0.65, 0.65, 1)
+    popup.customHint:SetText("Omni adds .finddungeon for you")
+
+    popup.customRow = CreateFrame("Frame", nil, popup)
+    popup.customRow:SetHeight(FIND_DUNGEON_CUSTOM_ROW_HEIGHT)
+    popup.customRow:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -242)
+    popup.customRow:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -242)
+
+    popup.customInput = CreateFrame("Frame", nil, popup.customRow)
+    popup.customInput:SetPoint("TOPLEFT", 0, 0)
+    popup.customInput:SetPoint("BOTTOMRIGHT", -FIND_DUNGEON_CUSTOM_RUN_WIDTH - 6, 0)
+    popup.customInput:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    popup.customInput:SetBackdropColor(0.10, 0.10, 0.10, 1)
+    popup.customInput:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+
+    popup.customPrefix = popup.customInput:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    popup.customPrefix:SetPoint("LEFT", 6, 0)
+    popup.customPrefix:SetText(".finddungeon")
+    popup.customPrefix:SetTextColor(1.0, 0.82, 0.0, 1)
+
+    popup.customBox = CreateFrame("EditBox", nil, popup.customInput)
+    popup.customBox:SetAutoFocus(false)
+    popup.customBox:SetFontObject(ChatFontNormal)
+    popup.customBox:SetTextColor(1, 1, 1, 1)
+    popup.customBox:SetHeight(16)
+    popup.customBox:SetPoint("LEFT", popup.customPrefix, "RIGHT", 6, 0)
+    popup.customBox:SetPoint("RIGHT", -6, 0)
+    popup.customBox:SetTextInsets(0, 0, 0, 0)
+    popup.customBox:SetScript("OnEnterPressed", function(self)
+        Frame:RunCustomFindDungeonFilters()
+        self:ClearFocus()
+    end)
+    popup.customBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+
+    popup.customRunBtn = CreateFindDungeonPopupButton(
+        popup.customRow,
+        FIND_DUNGEON_CUSTOM_RUN_WIDTH,
+        "Run",
+        "Custom .finddungeon",
+        "Run the filters typed on the left.",
+        function() Frame:RunCustomFindDungeonFilters() end
+    )
+    popup.customRunBtn:SetPoint("TOPRIGHT", 0, 0)
+
+    popup.status = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    popup.status:SetHeight(FIND_DUNGEON_STATUS_HEIGHT)
+    popup.status:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -272)
+    popup.status:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -272)
+    popup.status:SetJustifyH("LEFT")
+    popup.status:SetJustifyV("TOP")
+    popup.status:SetTextColor(0.78, 0.78, 0.78, 1)
+    popup.status:SetText(FIND_DUNGEON_STATUS_DEFAULT)
+
+    popup:Hide()
+    mainFrame.findDungeonPopup = popup
+
+    popup:SetScript("OnShow", function()
+        Frame:SetFindDungeonStatus(FIND_DUNGEON_STATUS_DEFAULT, 0.78, 0.78, 0.78)
+    end)
+
+    tinsert(UISpecialFrames, "OmniFindDungeonPopup")
+
+    return popup
+end
+
+function Frame:ToggleFindDungeonPopup()
+    local popup = mainFrame and mainFrame.findDungeonPopup or self:CreateFindDungeonPopup()
+    if not popup then return end
+
+    if popup:IsShown() then
+        popup:Hide()
+    else
+        popup:Show()
     end
 end
 

@@ -19,6 +19,7 @@ The main frame is the primary window for OmniInventory, providing the container 
 4. ESC closes the frame
 5. B key toggles visibility
 6. Flow mode should re-pack categories as soon as the client reflects an item entering or leaving a bag slot, even if the bucketed `BAG_UPDATE` refresh has not fired yet
+7. The header includes a left-of-bag helper button that opens the `.finddungeon` popup wrapper
 
 ---
 
@@ -75,6 +76,23 @@ Switch view mode: "grid", "flow", "list"
 
 ---
 
+## Dungeon Radar Presets
+
+- Vanilla Dungeons: `.finddungeon vanilla notraid`
+- Vanilla Raids: `.finddungeon vanilla raid`
+- TBC Normal Dungeons: `.finddungeon tbc notheroic notmythic notraid`
+- TBC Heroic Dungeons: `.finddungeon tbc heroic`
+- TBC Raids: `.finddungeon tbc raid`
+- TBC Mythic Dungeons: `.finddungeon tbc mythic`
+- WotLK Normal Dungeons: `.finddungeon wotlk notheroic notraid notmythic`
+- WotLK Heroic Dungeons: `.finddungeon wotlk heroic notraid`
+- WotLK Raids: `.finddungeon wotlk raid`
+- WotLK 10-Man Raids: `.finddungeon wotlk raid not25-man`
+- WotLK 25-Man Raids: `.finddungeon wotlk raid 25-man`
+- WotLK Mythic Dungeons: `.finddungeon wotlk mythic`
+
+---
+
 ## Test Flows
 
 ### Positive Flow: Open/Close
@@ -91,6 +109,18 @@ Switch view mode: "grid", "flow", "list"
 3. Verify matching items highlighted
 4. Press ESC
 5. Verify search cleared
+
+### Positive Flow: Find Dungeon Helper
+
+**Precondition:** Main frame is open and the player is out of combat
+
+1. Hover the helper button to the left of the bag icons
+2. Verify the tooltip explains the dungeon helper in a playful way
+3. Click the helper button
+4. Verify the popup opens to the left of the main frame with Vanilla, TBC, and WotLK presets plus a custom filter row
+5. Verify the Mythic buttons are blue and sit at the bottom of the TBC and WotLK columns
+
+**Expected:** The main frame exposes `.finddungeon` through an Omni-styled popup without requiring manual command typing
 
 ### Positive Flow: Fast Bank Deposit In Flow Mode
 
