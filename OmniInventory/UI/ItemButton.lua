@@ -810,6 +810,7 @@ function ItemButton:SetItem(button, itemInfo)
         button.icon:SetTexture(nil)
         button.count:SetText("")
         button.count:Hide()
+        pcall(button.EnableMouse, button, false)
         local grey = 0.3
         if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
@@ -823,6 +824,8 @@ function ItemButton:SetItem(button, itemInfo)
         button.__lastRenderKey = nil
         return
     end
+
+    pcall(button.EnableMouse, button, true)
 
     local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
     local attuneSettings = GetAttuneSettings()

@@ -52,6 +52,7 @@ local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
+local IsValidBagID
 -- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
 -- bag icon forced bag view. ToggleBagPreview uses it to restore the
 -- prior view (flow/grid/list) when the bag is unselected. ✿ ʕ •ᴥ•ʔ
@@ -94,6 +95,7 @@ local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
 local flowLayoutCache = nil
 local vendorFlowLayoutFreeze = nil
 local wasMerchantOpen = false
+local lastRenderedShowSignature = nil
 local renderScratch = {
     categories = {},
     categoryOrder = {},
@@ -196,7 +198,12 @@ local function ItemRenderKey(itemInfo)
     end
     return table.concat({
         tostring(itemInfo.itemID or 0),
+        tostring(itemInfo.bagID or -1),
+        tostring(itemInfo.slotID or -1),
+        tostring(itemInfo.hyperlink or ""),
+        tostring(itemInfo.iconFileID or ""),
         tostring(itemInfo.stackCount or 1),
+        tostring(itemInfo.quality or 0),
         tostring(itemInfo.category or "Miscellaneous"),
         tostring(itemInfo.isQuickFiltered == true),
     }, ":")
@@ -221,6 +228,45 @@ local function GetBagSlotStateKey(bagID, slotID)
     end
 
     return BuildBagSlotStateKey(OmniC_Container.GetContainerItemInfo(bagID, slotID))
+end
+
+local function ComputeBagContentSignature()
+    local parts = {}
+    for _, bagID in ipairs(BAG_IDS) do
+        local numSlots = GetContainerNumSlots(bagID) or 0
+        parts[#parts + 1] = "b" .. tostring(bagID) .. ":" .. tostring(numSlots)
+        for slotID = 1, numSlots do
+            local texture, count = GetContainerItemInfo(bagID, slotID)
+            if texture then
+                parts[#parts + 1] = tostring(texture) .. ":" .. tostring(count or 1)
+            end
+        end
+    end
+    return table.concat(parts, "|")
+end
+
+local function ComputeShowSignature()
+    local parts = {
+        tostring(currentView or "flow"),
+        tostring(activeFilter or "none"),
+        tostring(selectedBagID or "all"),
+    }
+    if mainFrame then
+        local w, h = mainFrame:GetSize()
+        local s = mainFrame:GetScale() or 1
+        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
+    end
+    parts[#parts + 1] = ComputeBagContentSignature()
+    return table.concat(parts, "|")
+end
+
+local function RebuildPopulatedItemButtonList()
+    ClearArray(itemButtons)
+    IterateSlotButtons(function(_, _, btn)
+        if btn and btn.itemInfo and not (btn.itemInfo and btn.itemInfo.__empty) then
+            itemButtons[#itemButtons + 1] = btn
+        end
+    end)
 end
 
 local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
@@ -249,6 +295,25 @@ local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
     end
 
     return false
+end
+
+local function NarrowChangedBagsToSelectedScope(changedBags)
+    if type(changedBags) ~= "table" then
+        return changedBags
+    end
+    if currentView ~= "bag" then
+        return changedBags
+    end
+    if not IsValidBagID(selectedBagID) then
+        return changedBags
+    end
+    if changedBags._trigger then
+        return changedBags
+    end
+    if changedBags[selectedBagID] then
+        return { [selectedBagID] = true }
+    end
+    return {}
 end
 
 local function HasOptimisticFlowRefreshWatches()
@@ -383,6 +448,12 @@ local function GetAttuneHelperAddon()
     return nil
 end
 
+local function IsAttuneHelperAvailable()
+    return _G.AttuneHelperMiniFrame ~= nil
+        or _G.AttuneHelperFrame ~= nil
+        or GetAttuneHelperAddon() ~= nil
+end
+
 local function RebindEmbeddedDragHandlers()
     local AH = GetAttuneHelperAddon()
 
@@ -510,6 +581,75 @@ function Frame:HideAttuneHelperUntilOpened()
     end)
 end
 
+function Frame:StopEmbeddedAttuneHelperRetry()
+    local watcher = self._embedRetryWatcher
+    if watcher then
+        watcher:SetScript("OnUpdate", nil)
+        watcher.__elapsed = 0
+        watcher.__totalElapsed = 0
+    end
+end
+
+function Frame:EnsureEmbeddedAttuneHelperRetry()
+    if not self._embedRetryWatcher then
+        self._embedRetryWatcher = CreateFrame("Frame")
+        self._embedRetryWatcher.__elapsed = 0
+        self._embedRetryWatcher.__totalElapsed = 0
+    end
+    local watcher = self._embedRetryWatcher
+    if watcher:GetScript("OnUpdate") then
+        return
+    end
+
+    watcher:SetScript("OnUpdate", function(frameWatcher, elapsed)
+        frameWatcher.__elapsed = (frameWatcher.__elapsed or 0) + elapsed
+        frameWatcher.__totalElapsed = (frameWatcher.__totalElapsed or 0) + elapsed
+        if frameWatcher.__elapsed < 0.2 then return end
+        frameWatcher.__elapsed = 0
+
+        if not mainFrame or not mainFrame.footer or not mainFrame:IsShown() or not IsAttuneHelperEmbedEnabled() then
+            Frame:StopEmbeddedAttuneHelperRetry()
+            return
+        end
+
+        Frame:UpdateEmbeddedAttuneHelper()
+
+        local host = mainFrame.footer.attuneHelperHost
+        local miniFrame = _G.AttuneHelperMiniFrame
+        local embedded = host and host:IsShown()
+            and miniFrame and miniFrame:IsShown()
+            and miniFrame:GetParent() == host
+        if embedded and frameWatcher.__totalElapsed > 1.0 then
+            Frame:StopEmbeddedAttuneHelperRetry()
+            return
+        end
+
+        if frameWatcher.__totalElapsed > 4 then
+            Frame:StopEmbeddedAttuneHelperRetry()
+        end
+    end)
+end
+
+function Frame:RefreshEmbeddedAttuneHelperButtons(miniFrame)
+    if not miniFrame then return end
+
+    local function EnsureButton(button, fallbackAnchor)
+        if not button then return end
+        if button:GetParent() ~= miniFrame then
+            button:SetParent(miniFrame)
+        end
+        if button.GetNumPoints and button:GetNumPoints() == 0 and fallbackAnchor then
+            button:SetPoint(unpack(fallbackAnchor))
+        end
+        button:SetFrameStrata(miniFrame:GetFrameStrata())
+        button:SetFrameLevel((miniFrame:GetFrameLevel() or 1) + 2)
+        button:Show()
+    end
+
+    EnsureButton(_G.AttuneHelperMiniEquipButton, { "LEFT", miniFrame, "LEFT", 4, 0 })
+    EnsureButton(_G.AttuneHelperMiniVendorButton, { "LEFT", miniFrame, "LEFT", 36, 0 })
+end
+
 local function GetSavedViewMode()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     return NormalizeViewMode(settings and settings.viewMode)
@@ -533,7 +673,7 @@ local function GetSavedItemGap()
     return math.max(ITEM_GAP_MIN, math.min(gap, ITEM_GAP_MAX))
 end
 
-local function IsValidBagID(bagID)
+IsValidBagID = function(bagID)
     return type(bagID) == "number" and bagID >= 0 and bagID <= 4
 end
 
@@ -2282,6 +2422,220 @@ local function CreateFooterMiniButton(parent, def)
     return btn
 end
 
+local HONOR_PER_ARENA_POINT = 62
+local STONE_KEEPER_SHARDS_PER_100K_HONOR = 300
+local STONE_KEEPER_SHARD_ITEM_ID = 43228
+local WINTERGRASP_MARK_OF_HONOR_ITEM_ID = 43589
+
+local TRACKED_TOOLTIP_CURRENCIES = {
+    { key = "frost",      label = "Emblem of Frost",            itemID = 49426, color = { 0.70, 0.95, 1.00 } },
+    { key = "triumph",    label = "Emblem of Triumph",          itemID = 47241, color = { 1.00, 0.90, 0.45 } },
+    { key = "conquest",   label = "Emblem of Conquest",         itemID = 45624, color = { 1.00, 0.78, 0.42 } },
+    { key = "valor",      label = "Emblem of Valor",            itemID = 40753, color = { 1.00, 0.70, 0.30 } },
+    { key = "heroism",    label = "Emblem of Heroism",          itemID = 40752, color = { 0.90, 0.85, 0.80 } },
+    { key = "justice",    label = "Badge of Justice",           itemID = 29434, color = { 0.95, 0.95, 0.95 } },
+    { key = "seal",       label = "Champion's Seal",            itemID = 24131, color = { 0.95, 0.82, 0.35 } },
+    { key = "venture",    label = "Venture Coin",               itemID = 37836, color = { 0.40, 1.00, 0.70 } },
+    { key = "wgMark",     label = "Wintergrasp Mark of Honor",  itemID = WINTERGRASP_MARK_OF_HONOR_ITEM_ID, color = { 0.65, 0.90, 1.00 } },
+}
+
+local function AddThousandsSeparators(value)
+    local str = tostring(math.floor(tonumber(value) or 0))
+    local sign = ""
+    if string.sub(str, 1, 1) == "-" then
+        sign = "-"
+        str = string.sub(str, 2)
+    end
+    local left, count = str, 0
+    repeat
+        left, count = string.gsub(left, "^(-?%d+)(%d%d%d)", "%1,%2")
+    until count == 0
+    return sign .. left
+end
+
+local function FormatTooltipNumber(value)
+    value = tonumber(value) or 0
+    local absValue = math.abs(value)
+    if absValue >= 1000000 then
+        return string.format("%.1fM", value / 1000000)
+    end
+    if absValue >= 1000 then
+        return AddThousandsSeparators(value)
+    end
+    return tostring(math.floor(value))
+end
+
+local function FormatTooltipLabelIcon(itemID, fallbackIcon, label)
+    local icon = fallbackIcon
+    if itemID and GetItemIcon then
+        icon = GetItemIcon(itemID) or icon
+    end
+    if icon then
+        return string.format("|T%s:13:13:0:0|t %s", icon, label)
+    end
+    return label
+end
+
+local function FormatTooltipIconLabel(iconPath, label)
+    if iconPath and iconPath ~= "" then
+        return string.format("|T%s:13:13:0:0|t %s", iconPath, label)
+    end
+    return label
+end
+
+local function GetCurrentHonorPoints()
+    if GetHonorCurrency then
+        local honor = select(1, GetHonorCurrency())
+        if type(honor) == "number" then
+            return honor
+        end
+    end
+    return 0
+end
+
+local function GetCurrentArenaPoints()
+    if GetArenaCurrency then
+        local a, b, c = GetArenaCurrency()
+        if type(a) == "number" and a >= 0 then
+            return a
+        end
+        if type(b) == "number" and b >= 0 then
+            return b
+        end
+        if type(c) == "number" and c >= 0 then
+            return c
+        end
+    end
+    if GetArenaPoints then
+        local arena = GetArenaPoints()
+        if type(arena) == "number" and arena >= 0 then
+            return arena
+        end
+    end
+    return 0
+end
+
+local function GetStoneKeeperShardCount()
+    if GetCurrencyInfo then
+        local _, amount = GetCurrencyInfo(161)
+        if type(amount) == "number" and amount > 0 then
+            return amount
+        end
+    end
+    if GetItemCount then
+        return GetItemCount(STONE_KEEPER_SHARD_ITEM_ID, true) or 0
+    end
+    return 0
+end
+
+local function GetTrackedItemCurrencyCount(itemID)
+    if not itemID or not GetItemCount then
+        return 0
+    end
+    return GetItemCount(itemID, true) or 0
+end
+
+local function CollectTooltipCurrencies()
+    local rows = {
+        {
+            key = "honor",
+            label = "Honor Points",
+            value = GetCurrentHonorPoints(),
+            color = { 0.95, 0.35, 0.35 },
+            icon = "Interface\\Icons\\inv_bannerpvp_01",
+        },
+        {
+            key = "arena",
+            label = "Arena Points",
+            value = GetCurrentArenaPoints(),
+            color = { 0.45, 0.85, 1.00 },
+            icon = "Interface\\Icons\\achievement_pvp_h_14",
+        },
+    }
+
+    for i = 1, #TRACKED_TOOLTIP_CURRENCIES do
+        local entry = TRACKED_TOOLTIP_CURRENCIES[i]
+        rows[#rows + 1] = {
+            key = entry.key,
+            label = entry.label,
+            value = GetTrackedItemCurrencyCount(entry.itemID),
+            itemID = entry.itemID,
+            color = entry.color,
+        }
+    end
+
+    rows[#rows + 1] = {
+        key = "stoneKeeperShard",
+        label = "Stone Keeper's Shard",
+        value = GetStoneKeeperShardCount(),
+        itemID = STONE_KEEPER_SHARD_ITEM_ID,
+        color = { 0.80, 0.80, 1.00 },
+    }
+
+    return rows
+end
+
+local function ShowFooterMoneyTooltip(owner)
+    if not owner then
+        return
+    end
+
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:SetText("Money", 1, 0.85, 0.25)
+    GameTooltip:AddLine(
+        FormatTooltipIconLabel("Interface\\MoneyFrame\\UI-GoldIcon", (owner._moneyText and owner._moneyText ~= "") and owner._moneyText or "0"),
+        1, 1, 1
+    )
+
+    local currencies = CollectTooltipCurrencies()
+    if #currencies > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Currencies", 0.6, 0.85, 1)
+        for i = 1, #currencies do
+            local row = currencies[i]
+            local value = tonumber(row.value) or 0
+            if value > 0 then
+                local color = row.color or { 0.9, 0.9, 0.9 }
+                local leftLabel = FormatTooltipLabelIcon(row.itemID, row.icon, row.label)
+                local rightValue = FormatTooltipNumber(value)
+                GameTooltip:AddDoubleLine(leftLabel, rightValue, color[1], color[2], color[3], 1, 1, 1)
+            end
+        end
+
+        local honor = GetCurrentHonorPoints()
+        local stoneKeeperShards = GetStoneKeeperShardCount()
+        local honorFromShards = math.floor(stoneKeeperShards * (100000 / STONE_KEEPER_SHARDS_PER_100K_HONOR))
+        local totalHonor = honor + honorFromShards
+        local arenaFromTotalHonor = math.floor(totalHonor / HONOR_PER_ARENA_POINT)
+
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Conversions", 0.8, 0.7, 1)
+        if arenaFromTotalHonor > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\achievement_pvp_h_14", "Arena from Total Honor (62:1)"),
+                FormatTooltipNumber(arenaFromTotalHonor),
+                0.45, 0.85, 1.00, 1, 1, 1
+            )
+        end
+        if honorFromShards > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\inv_bannerpvp_01", "Honor from Shards"),
+                FormatTooltipNumber(honorFromShards),
+                0.95, 0.35, 0.35, 1, 1, 1
+            )
+        end
+        if honorFromShards > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\inv_bannerpvp_01", "Total Honor (current+shards)"),
+                FormatTooltipNumber(totalHonor),
+                0.95, 0.55, 0.55, 1, 1, 1
+            )
+        end
+    end
+
+    GameTooltip:Show()
+end
+
 function Frame:CreateFooter()
     local footer = CreateFrame("Frame", nil, mainFrame)
     footer:SetHeight(FOOTER_HEIGHT)
@@ -2369,6 +2723,19 @@ function Frame:CreateFooter()
     footer.money:SetPoint("RIGHT", -6, 0)
     footer.money:SetText("0g 0s 0c")
 
+    footer.moneyHitBox = CreateFrame("Button", nil, footer)
+    footer.moneyHitBox:SetPoint("RIGHT", footer.money, "RIGHT", 2, 0)
+    footer.moneyHitBox:SetHeight(FOOTER_HEIGHT)
+    footer.moneyHitBox:SetWidth(90)
+    footer.moneyHitBox:EnableMouse(true)
+    footer.moneyHitBox:SetScript("OnEnter", function(self)
+        ShowFooterMoneyTooltip(self)
+    end)
+    footer.moneyHitBox:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    footer.moneyHitBox._moneyText = footer.money:GetText() or "0"
+
     -- ʕ •ᴥ•ʔ✿ Overflow flyout: when ribbon + money can't fit, extra buttons
     -- are re-parented here and revealed above the footer on demand ✿ ʕ •ᴥ•ʔ
     footer.overflowPopup = CreateFrame("Frame", nil, footer)
@@ -2422,6 +2789,18 @@ local function SyncBagFullAlertHitBox(footer)
     if not b or not b.label then return end
     local lw = b.label:GetStringWidth() or 8
     b:SetWidth(math.max(14, lw + 6))
+end
+
+local function SyncFooterMoneyHitBox(footer)
+    local hitBox = footer and footer.moneyHitBox
+    local money = footer and footer.money
+    if not hitBox or not money then
+        return
+    end
+    local width = (money:GetStringWidth() or 0) + 10
+    hitBox:SetWidth(math.max(45, width))
+    hitBox:ClearAllPoints()
+    hitBox:SetPoint("RIGHT", money, "RIGHT", 2, 0)
 end
 
 local function GetFooterSlotsBlockWidth(footer)
@@ -2613,22 +2992,31 @@ function Frame:UpdateEmbeddedAttuneHelper()
         return
     end
 
+    _G.AttuneHelperDB = _G.AttuneHelperDB or {}
+    local miniModeWasEnabled = (_G.AttuneHelperDB["Mini Mode"] == 1)
+    if not miniModeWasEnabled then
+        _G.AttuneHelperDB["Mini Mode"] = 1
+    end
+
+    if _G.AttuneHelper_UpdateDisplayMode and not miniModeWasEnabled then
+        _G.AttuneHelper_UpdateDisplayMode()
+    elseif _G.AttuneHelperFrame then
+        _G.AttuneHelperFrame:Hide()
+    end
+
     local miniFrame = _G.AttuneHelperMiniFrame
+    if not miniFrame then
+        -- ʕ •ᴥ•ʔ✿ Some AttuneHelper builds instantiate MiniFrame lazily.
+        -- Force one more display-mode sync after setting Mini Mode. ✿ ʕ •ᴥ•ʔ
+        if _G.AttuneHelper_UpdateDisplayMode then
+            pcall(_G.AttuneHelper_UpdateDisplayMode)
+            miniFrame = _G.AttuneHelperMiniFrame
+        end
+    end
     if not miniFrame then
         host:Hide()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
         return
-    end
-
-    _G.AttuneHelperDB = _G.AttuneHelperDB or {}
-    if _G.AttuneHelperDB["Mini Mode"] ~= 1 then
-        _G.AttuneHelperDB["Mini Mode"] = 1
-    end
-
-    if _G.AttuneHelper_UpdateDisplayMode then
-        _G.AttuneHelper_UpdateDisplayMode()
-    elseif _G.AttuneHelperFrame then
-        _G.AttuneHelperFrame:Hide()
     end
 
     if not miniFrame.__OmniEmbedHooked then
@@ -2649,6 +3037,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
             ApplyEmbeddedMiniBorderStyle(frame)
             embedHost:SetSize(frame:GetWidth(), frame:GetHeight())
             embedHost:Show()
+            Frame:RefreshEmbeddedAttuneHelperButtons(frame)
             RebindEmbeddedDragHandlers()
             if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
         end)
@@ -2666,6 +3055,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
 
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
+    self:RefreshEmbeddedAttuneHelperButtons(miniFrame)
 
     RebindEmbeddedDragHandlers()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
@@ -2927,6 +3317,7 @@ function Frame:UpdateBankTabState() end
 -- those are protected on ContainerFrameItemButtonTemplate children.
 function Frame:RefreshCombatContent(changedBags)
     if not mainFrame or not OmniC_Container then return end
+    changedBags = NarrowChangedBagsToSelectedScope(changedBags)
 
     -- ʕ •ᴥ•ʔ✿ List view parks all slot buttons at alpha 0 and drives its
     -- own insecure row widgets -- which are OOC-only anyway (list row
@@ -2944,6 +3335,11 @@ function Frame:RefreshCombatContent(changedBags)
     if type(changedBags) == "table" then
         local hasEntries = false
         for _ in pairs(changedBags) do hasEntries = true break end
+        if not hasEntries then
+            self:UpdateSlotCount()
+            self:UpdateMoney()
+            return { requiresFlowRelayout = false }
+        end
         if hasEntries and not changedBags._trigger then
             affected = changedBags
         end
@@ -2957,7 +3353,14 @@ function Frame:RefreshCombatContent(changedBags)
         requiresFlowRelayout = false,
     }
 
+    local selectedScopeBagID = IsValidBagID(selectedBagID) and selectedBagID or nil
+
     IterateSlotButtons(function(bagID, slotID, btn)
+        if selectedScopeBagID and bagID ~= selectedScopeBagID then
+            SetButtonItem(btn, nil)
+            pcall(btn.SetAlpha, btn, 0)
+            return
+        end
         local info
         if affected == nil or affected[bagID] then
             local previousInfo = btn.itemInfo
@@ -3038,6 +3441,24 @@ function Frame:UpdateLayout(changedBags, opts)
     local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.total")
     local forceFull = opts and opts.forceFull == true
     local updateReason = (opts and opts.reason) or "layout"
+    changedBags = NarrowChangedBagsToSelectedScope(changedBags)
+    if not forceFull and type(changedBags) == "table" then
+        local hasEntries = false
+        for _ in pairs(changedBags) do
+            hasEntries = true
+            break
+        end
+        if not hasEntries then
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                    skipped = "irrelevant_bag",
+                    reason = updateReason,
+                    view = currentView or "unknown",
+                })
+            end
+            return
+        end
+    end
     if not forceFull and mainFrame.IsShown and not mainFrame:IsShown() then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("frame.UpdateLayout.total", perfTotal, { skipped = "hidden", reason = updateReason })
@@ -3086,12 +3507,18 @@ function Frame:UpdateLayout(changedBags, opts)
         end
 
         if not forceFull then
+            -- ʕ •ᴥ•ʔ✿ Burst full relayouts are expensive and mainly needed
+            -- for flow-lane/category reconstruction. In bag/grid modes the
+            -- incremental slot refresh is already sufficient, especially
+            -- during mass operations like disenchant/vendor spam. ✿ ʕ •ᴥ•ʔ
+            local allowBurstFull = (currentView == "flow")
+                and (updateReason ~= "bag_update_chunk")
             local now = (GetTime and GetTime()) or 0
-            local suppressBurst = currentView == "flow"
+            local suppressBurst = allowBurstFull
                 and lastOptimisticFlowRefreshAt > 0
                 and now > 0
                 and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
-            if not suppressBurst then
+            if allowBurstFull and not suppressBurst then
                 RequestBurstFullRefresh()
             end
             return
@@ -3215,6 +3642,7 @@ function Frame:UpdateLayout(changedBags, opts)
 
     hasRenderedOnce = true
     pendingCombatRender = false
+    lastRenderedShowSignature = ComputeShowSignature()
     if Omni._perfEnabled and Omni.Perf then
         Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
             itemCount = #items,
@@ -3301,6 +3729,7 @@ function Frame:RenderFlowView(items)
     local itemBySlot = nil
     local bagSlotCounts = nil
     local bagItemCounts = nil
+    local bagPreviewScopeSet = nil
 
     if currentView == "grid" then
         -- ʕ •ᴥ•ʔ✿ Bagnon-like grid: keep physical slot order and render empty
@@ -3330,12 +3759,15 @@ function Frame:RenderFlowView(items)
         bagSlotCounts = {}
         bagItemCounts = {}
         local bagScope = {}
+        bagPreviewScopeSet = {}
 
         if IsValidBagID(selectedBagID) then
             table.insert(bagScope, selectedBagID)
+            bagPreviewScopeSet[selectedBagID] = true
         else
             for _, bagID in ipairs(BAG_IDS) do
                 table.insert(bagScope, bagID)
+                bagPreviewScopeSet[bagID] = true
             end
         end
 
@@ -3842,6 +4274,14 @@ function Frame:RenderFlowView(items)
 
     local overflowIndex = 0
     IterateSlotButtons(function(bagID, slotID, btn)
+        if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
+            pcall(btn.SetAlpha, btn, 0)
+            if btn._oiRenderKey ~= "empty" then
+                pcall(SetButtonItem, btn, nil)
+                btn._oiRenderKey = "empty"
+            end
+            return
+        end
         local isTouched = touched[bagID] and touched[bagID][slotID]
         if isTouched then return end
 
@@ -4310,14 +4750,24 @@ function Frame:UpdateMoney()
 
     local money = GetMoney() or 0
     if Omni.Utils and Omni.Utils.FormatMoney then
-        mainFrame.footer.money:SetText(Omni.Utils:FormatMoney(money))
+        local text = Omni.Utils:FormatMoney(money)
+        mainFrame.footer.money:SetText(text)
+        if mainFrame.footer.moneyHitBox then
+            mainFrame.footer.moneyHitBox._moneyText = text
+            SyncFooterMoneyHitBox(mainFrame.footer)
+        end
         return
     end
 
     local gold = math.floor(money / 10000)
     local silver = math.floor((money % 10000) / 100)
     local copper = money % 100
-    mainFrame.footer.money:SetText(string.format("%dg %ds %dc", gold, silver, copper))
+    local text = string.format("%dg %ds %dc", gold, silver, copper)
+    mainFrame.footer.money:SetText(text)
+    if mainFrame.footer.moneyHitBox then
+        mainFrame.footer.moneyHitBox._moneyText = text
+        SyncFooterMoneyHitBox(mainFrame.footer)
+    end
 end
 
 -- =============================================================================
@@ -4339,7 +4789,26 @@ function Frame:Show()
     -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
     pcall(mainFrame.Show, mainFrame)
 
-    self:UpdateLayout()
+    local sig = ComputeShowSignature()
+    local forceFullShowForAttune = IsAttuneHelperEmbedEnabled() and IsAttuneHelperAvailable()
+    local canFastShow = hasRenderedOnce
+        and not pendingCombatRender
+        and lastRenderedShowSignature ~= nil
+        and sig == lastRenderedShowSignature
+        and not forceFullShowForAttune
+
+    if canFastShow then
+        RebuildPopulatedItemButtonList()
+        self:UpdateBagIconTextures()
+        self:UpdateBagIconVisuals()
+        self:UpdateSlotCount()
+        self:UpdateMoney()
+        if searchText and searchText ~= "" then
+            self:ApplySearch(searchText)
+        end
+    else
+        self:UpdateLayout(nil, { reason = "show_open" })
+    end
     self:UpdateEmbeddedAttuneHelper()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
@@ -4348,7 +4817,18 @@ function Frame:Hide()
     if not mainFrame then return end
 
     pcall(mainFrame.Hide, mainFrame)
-    RestoreEmbeddedAttuneHelper()
+    if not IsAttuneHelperEmbedEnabled() then
+        RestoreEmbeddedAttuneHelper()
+    elseif mainFrame.footer and mainFrame.footer.attuneHelperHost then
+        -- ʕ •ᴥ•ʔ✿ Keep mini frame parented to the embed host across hide/show
+        -- cycles so repeated bag toggles do not lose embedded AH controls. ✿ ʕ •ᴥ•ʔ
+        local host = mainFrame.footer.attuneHelperHost
+        local miniFrame = _G.AttuneHelperMiniFrame
+        if miniFrame and miniFrame:GetParent() == host then
+            miniFrame:Hide()
+        end
+        host:Hide()
+    end
     flowLayoutCache = nil
     vendorFlowLayoutFreeze = nil
     wasMerchantOpen = false
