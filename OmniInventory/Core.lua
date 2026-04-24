@@ -58,7 +58,8 @@ blockedSink:SetScript("OnEvent", function(_, ev, addon, func)
 end)
 
 -- Masque Support
-local Masque = LibStub("Masque", true)
+local libStub = _G.LibStub
+local Masque = libStub and libStub("Masque", true)
 if Masque then
     Omni.MasqueGroup = Masque:Group("OmniInventory")
 end
