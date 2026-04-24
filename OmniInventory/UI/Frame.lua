@@ -94,6 +94,26 @@ local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
 local flowLayoutCache = nil
 local vendorFlowLayoutFreeze = nil
 local wasMerchantOpen = false
+local renderScratch = {
+    categories = {},
+    categoryOrder = {},
+    touched = {},
+    usedCategoryKeys = {},
+    usedTouchedBags = {},
+    headerByCategory = {},
+}
+
+local function ClearArray(t)
+    for i = #t, 1, -1 do
+        t[i] = nil
+    end
+end
+
+local function ClearMap(t)
+    for k in pairs(t) do
+        t[k] = nil
+    end
+end
 
 local function InCombat()
     return InCombatLockdown and InCombatLockdown()
@@ -3221,8 +3241,35 @@ function Frame:RenderFlowView(items)
     -- needing a protected structural call. ✿ ʕ •ᴥ•ʔ
     EnsureSlotButtons()
 
-    itemButtons = {}
-    local touched = {}  -- [bagID][slotID] = true for slots rendered with an item
+    ClearArray(itemButtons)
+
+    local categories = renderScratch.categories
+    local categoryOrder = renderScratch.categoryOrder
+    local touched = renderScratch.touched
+    local usedCategoryKeys = renderScratch.usedCategoryKeys
+    local usedTouchedBags = renderScratch.usedTouchedBags
+    local headerByCategory = renderScratch.headerByCategory
+    local seenCategoryThisPass = {}
+    local seenTouchedBagsThisPass = {}
+
+    for i = 1, #usedCategoryKeys do
+        local key = usedCategoryKeys[i]
+        local bucket = categories[key]
+        if bucket then
+            ClearArray(bucket)
+        end
+    end
+    ClearArray(usedCategoryKeys)
+    for i = 1, #usedTouchedBags do
+        local bagID = usedTouchedBags[i]
+        local bagTouched = touched[bagID]
+        if bagTouched then
+            ClearMap(bagTouched)
+        end
+    end
+    ClearArray(usedTouchedBags)
+    ClearArray(categoryOrder)
+    ClearMap(headerByCategory)
 
     local freezeHeadersForVendor = false
     -- Hide existing headers and list rows
@@ -3251,10 +3298,6 @@ function Frame:RenderFlowView(items)
     local yRight = -itemGap
     local yOffset = -itemGap
 
-    -- Group items
-    local categories = {}
-    local categoryOrder = {}
-
     local itemBySlot = nil
     local bagSlotCounts = nil
     local bagItemCounts = nil
@@ -3263,8 +3306,10 @@ function Frame:RenderFlowView(items)
         -- ʕ •ᴥ•ʔ✿ Bagnon-like grid: keep physical slot order and render empty
         -- slots inline so players always see full bag capacity. ✿ ʕ •ᴥ•ʔ
         itemBySlot = {}
-        categories["All"] = {}
-        categoryOrder = { "All" }
+        categories["All"] = categories["All"] or {}
+        seenCategoryThisPass["All"] = true
+        usedCategoryKeys[#usedCategoryKeys + 1] = "All"
+        categoryOrder[1] = "All"
 
         for _, itemInfo in ipairs(items) do
             if IsValidBagID(itemInfo.bagID) and itemInfo.slotID and itemInfo.slotID > 0 then
@@ -3295,7 +3340,9 @@ function Frame:RenderFlowView(items)
         end
 
         for _, bagID in ipairs(bagScope) do
-            categories[bagID] = {}
+            categories[bagID] = categories[bagID] or {}
+            seenCategoryThisPass[bagID] = true
+            usedCategoryKeys[#usedCategoryKeys + 1] = bagID
             table.insert(categoryOrder, bagID)
             bagSlotCounts[bagID] = GetContainerNumSlots(bagID) or 0
             bagItemCounts[bagID] = 0
@@ -3320,8 +3367,10 @@ function Frame:RenderFlowView(items)
         -- FLOW MODE: Group by assigned category
         for _, item in ipairs(items) do
             local cat = item.category or "Miscellaneous"
-            if not categories[cat] then
-                categories[cat] = {}
+            if not seenCategoryThisPass[cat] then
+                categories[cat] = categories[cat] or {}
+                seenCategoryThisPass[cat] = true
+                usedCategoryKeys[#usedCategoryKeys + 1] = cat
                 table.insert(categoryOrder, cat)
             end
             table.insert(categories[cat], item)
@@ -3557,7 +3606,6 @@ function Frame:RenderFlowView(items)
         end
     end
 
-    local headerByCategory = {}
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
@@ -3707,6 +3755,10 @@ function Frame:RenderFlowView(items)
                     end
 
                     touched[bagID] = touched[bagID] or {}
+                    if not seenTouchedBagsThisPass[bagID] then
+                        seenTouchedBagsThisPass[bagID] = true
+                        usedTouchedBags[#usedTouchedBags + 1] = bagID
+                    end
                     touched[bagID][slotID] = true
                     if not slotItem then
                         pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
@@ -4297,6 +4349,24 @@ function Frame:Hide()
 
     pcall(mainFrame.Hide, mainFrame)
     RestoreEmbeddedAttuneHelper()
+    flowLayoutCache = nil
+    vendorFlowLayoutFreeze = nil
+    wasMerchantOpen = false
+    ClearMap(optimisticFlowRefreshWatches)
+    ClearArray(itemButtons)
+
+    for _, byBag in pairs(slotButtons) do
+        for _, btn in pairs(byBag) do
+            if btn then
+                btn._oiLayoutX = nil
+                btn._oiLayoutY = nil
+                btn._oiLayoutScale = nil
+                btn._oiRenderKey = nil
+                btn._cachedSearchName = nil
+                btn._cachedSearchNameLower = nil
+            end
+        end
+    end
 
     if not InCombat()
             and OmniInventoryDB and OmniInventoryDB.global
