@@ -84,18 +84,23 @@ local burstRefreshFrame = nil
 local burstRefreshElapsed = 0
 local burstRefreshPending = false
 local BURST_FULL_REFRESH_DELAY = 0.20
+local FORCED_FULL_REFRESH_COOLDOWN = 0.20
+local lastForcedFullRefreshAt = 0
 local optimisticFlowRefreshFrame = nil
 local optimisticFlowRefreshWatches = {}
 local lastOptimisticFlowRefreshAt = 0
 local OPTIMISTIC_FLOW_REFRESH_TIMEOUT = 0.75
 local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
+local flowLayoutCache = nil
+local vendorFlowLayoutFreeze = nil
+local wasMerchantOpen = false
 
 local function InCombat()
     return InCombatLockdown and InCombatLockdown()
 end
 
 local function IsMerchantOpen()
-    return MerchantFrame and MerchantFrame:IsShown()
+    return Omni and Omni._merchantOpen == true
 end
 
 local function HasBagChangeEntries(changedBags)
@@ -118,6 +123,19 @@ local function StopBurstFullRefresh()
     end
 end
 
+local function TryForceFullRefresh(reason)
+    local now = (GetTime and GetTime()) or 0
+    if now > 0 and lastForcedFullRefreshAt > 0 and (now - lastForcedFullRefreshAt) < FORCED_FULL_REFRESH_COOLDOWN then
+        return false
+    end
+    lastForcedFullRefreshAt = now
+    if Omni.Frame and Omni.Frame.UpdateLayout then
+        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "forced_full" })
+        return true
+    end
+    return false
+end
+
 local function RequestBurstFullRefresh()
     burstRefreshPending = true
     burstRefreshElapsed = 0
@@ -135,10 +153,33 @@ local function RequestBurstFullRefresh()
         self:SetScript("OnUpdate", nil)
         burstRefreshPending = false
         burstRefreshElapsed = 0
-        if Omni.Frame and Omni.Frame.UpdateLayout then
-            Omni.Frame:UpdateLayout(nil, { forceFull = true })
-        end
+        TryForceFullRefresh("burst_full")
     end)
+end
+
+local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep, filterName)
+    local parts = {
+        tostring(math.floor((usableWidth or 0) + 0.5)),
+        tostring(math.floor(((itemStep or 0) * 100) + 0.5)),
+        tostring(filterName or "none"),
+    }
+    for _, catName in ipairs(categoryOrder or {}) do
+        local count = categories and categories[catName] and #categories[catName] or 0
+        parts[#parts + 1] = tostring(catName) .. ":" .. tostring(count)
+    end
+    return table.concat(parts, "|")
+end
+
+local function ItemRenderKey(itemInfo)
+    if not itemInfo or itemInfo.__empty then
+        return "empty"
+    end
+    return table.concat({
+        tostring(itemInfo.itemID or 0),
+        tostring(itemInfo.stackCount or 1),
+        tostring(itemInfo.category or "Miscellaneous"),
+        tostring(itemInfo.isQuickFiltered == true),
+    }, ":")
 end
 
 local function BuildBagSlotStateKey(info)
@@ -236,9 +277,7 @@ local function StartOptimisticFlowRefreshWatcher()
             lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
             StopBurstFullRefresh()
             StopOptimisticFlowRefreshWatcher()
-            if Omni.Frame and Omni.Frame.UpdateLayout then
-                Omni.Frame:UpdateLayout(nil, { forceFull = true })
-            end
+            TryForceFullRefresh("optimistic_flow")
             return
         end
 
@@ -1478,7 +1517,6 @@ local activeFilter = nil  -- Current active filter
 -- present in the inventory (see RebuildFilterTabs). ✿ ʕ ◕ᴥ◕ ʔ
 local SPECIAL_FILTERS = {
     { name = "All", filter = nil, color = FILTER_NEUTRAL_COLOR },
-    { name = "New", filter = "NEW_ITEMS", isSpecial = true, categoryColorFor = "New Items" },
 }
 
 local function ApplyFilterButtonVisual(btn, hovered)
@@ -1692,7 +1730,7 @@ function Frame:RebuildFilterTabs(presentCategories)
     -- (e.g. vendored every Junk item), fall back to "All" so the user
     -- isn't stuck looking at an empty filtered view. Re-apply visuals
     -- afterward so the previously-active tab no longer reads active. ✿ ʕ •ᴥ•ʔ
-    if activeFilter and activeFilter ~= "NEW_ITEMS" then
+    if activeFilter then
         local stillPresent = false
         for _, def in ipairs(defs) do
             if def.filter == activeFilter then
@@ -1726,7 +1764,7 @@ function Frame:SetQuickFilter(filterName)
         end
     end
 
-    self:UpdateLayout()
+    self:UpdateLayout(nil, { reason = "filter_change" })
 end
 
 function Frame:GetActiveFilter()
@@ -2907,9 +2945,6 @@ function Frame:RefreshCombatContent(changedBags)
             if info then
                 if Omni.Categorizer then
                     info.category = info.category or Omni.Categorizer:GetCategory(info)
-                    if info.itemID and Omni.Categorizer.IsNewItem then
-                        info.isNew = Omni.Categorizer:IsNewItem(info.itemID)
-                    end
                 end
                 info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
                 if currentView == "flow"
@@ -2980,7 +3015,15 @@ end
 
 function Frame:UpdateLayout(changedBags, opts)
     if not mainFrame then return end
+    local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.total")
     local forceFull = opts and opts.forceFull == true
+    local updateReason = (opts and opts.reason) or "layout"
+    if not forceFull and mainFrame.IsShown and not mainFrame:IsShown() then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.total", perfTotal, { skipped = "hidden", reason = updateReason })
+        end
+        return
+    end
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
     -- Structural ops on ContainerFrameItemButton children (SetParent,
@@ -3040,18 +3083,22 @@ function Frame:UpdateLayout(changedBags, opts)
     end
 
     local items = {}
+    local perfCollect = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.collect")
     if OmniC_Container then
         items = OmniC_Container.GetAllBagItems()
     end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.UpdateLayout.collect", perfCollect, { itemCount = #items, reason = updateReason })
+    end
 
-    -- Categorize items and check for new items
+    -- Categorize items
     if Omni.Categorizer then
+        local perfCategorize = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.categorize")
         for _, item in ipairs(items) do
             item.category = item.category or Omni.Categorizer:GetCategory(item)
-            -- Check if this is a new item (acquired this session)
-            if item.itemID then
-                item.isNew = Omni.Categorizer:IsNewItem(item.itemID)
-            end
+        end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.categorize", perfCategorize, { reason = updateReason })
         end
     end
 
@@ -3086,9 +3133,6 @@ function Frame:UpdateLayout(changedBags, opts)
     -- again toggles the filter off and the bag sorts back to normal.
     --
     -- In combat we can't restructure the layout safely, so we fall
-    -- back to the dim-only behavior. The NEW_ITEMS special filter
-    -- spans multiple categories, so it always uses dimming.
-    --
     -- Exact equality matches stop "Attunable" from catching
     -- "Account Attunable" via substring. ✿ ʕ •ᴥ•ʔ
     -- ʕ •ᴥ•ʔ✿ When a filter tab is active, always dim the non-matching
@@ -3100,12 +3144,7 @@ function Frame:UpdateLayout(changedBags, opts)
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
         for _, item in ipairs(items) do
-            local matches = false
-            if quickFilter == "NEW_ITEMS" then
-                matches = item.isNew == true
-            elseif item.category == quickFilter then
-                matches = true
-            end
+            local matches = item.category == quickFilter
             item.isQuickFiltered = not matches
         end
     else
@@ -3116,15 +3155,27 @@ function Frame:UpdateLayout(changedBags, opts)
 
     -- Sort items
     if Omni.Sorter then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
         items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
+        end
     end
 
     -- Render based on view mode
     if currentView == "list" then
+        local perfRenderList = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderList")
         self:RenderListView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.renderList", perfRenderList, { reason = updateReason })
+        end
     else
         -- Combined Grid/Flow rendering
+        local perfRenderFlow = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderFlow")
         self:RenderFlowView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, { reason = updateReason })
+        end
     end
 
     -- Update footer
@@ -3135,11 +3186,23 @@ function Frame:UpdateLayout(changedBags, opts)
 
     -- Apply search if active
     if searchText and searchText ~= "" then
+        local perfSearch = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.search")
         self:ApplySearch(searchText)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.search", perfSearch, { reason = updateReason })
+        end
     end
 
     hasRenderedOnce = true
     pendingCombatRender = false
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+            itemCount = #items,
+            view = currentView or "unknown",
+            quickFilter = self:GetActiveFilter() or "none",
+            reason = updateReason,
+        })
+    end
 end
 
 -- =============================================================================
@@ -3161,6 +3224,7 @@ function Frame:RenderFlowView(items)
     itemButtons = {}
     local touched = {}  -- [bagID][slotID] = true for slots rendered with an item
 
+    local freezeHeadersForVendor = false
     -- Hide existing headers and list rows
     for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
@@ -3288,6 +3352,38 @@ function Frame:RenderFlowView(items)
         categories["BoE"] = categories["BoE"] or {}
         table.insert(reordered, "BoE")
         categoryOrder = reordered
+
+        if IsMerchantOpen() then
+            if not vendorFlowLayoutFreeze then
+                local frozenOrder = {}
+                local seedOrder = (flowLayoutCache and flowLayoutCache.order) or categoryOrder
+                for _, catName in ipairs(seedOrder) do
+                    frozenOrder[#frozenOrder + 1] = catName
+                end
+                vendorFlowLayoutFreeze = {
+                    order = frozenOrder,
+                    laneAssignment = flowLayoutCache and flowLayoutCache.laneAssignment or nil,
+                }
+            else
+                local frozenSeen = {}
+                local finalOrder = {}
+                for _, catName in ipairs(vendorFlowLayoutFreeze.order or {}) do
+                    finalOrder[#finalOrder + 1] = catName
+                    frozenSeen[catName] = true
+                    categories[catName] = categories[catName] or {}
+                end
+                for _, catName in ipairs(categoryOrder) do
+                    if not frozenSeen[catName] then
+                        finalOrder[#finalOrder + 1] = catName
+                        frozenSeen[catName] = true
+                    end
+                end
+                vendorFlowLayoutFreeze.order = finalOrder
+                categoryOrder = finalOrder
+            end
+        else
+            vendorFlowLayoutFreeze = nil
+        end
     end
 
     local headerIndex = 0
@@ -3296,6 +3392,39 @@ function Frame:RenderFlowView(items)
     -- BoE's own half-width. ✿ ʕ •ᴥ•ʔ
     local boeAnchor = nil
     local flowMode = (currentView ~= "grid" and currentView ~= "bag")
+    local merchantOpen = IsMerchantOpen()
+    if not flowMode then
+        vendorFlowLayoutFreeze = nil
+    end
+    if flowMode and merchantOpen and not wasMerchantOpen and flowLayoutCache then
+        local seededOrder = {}
+        local cachedOrder = flowLayoutCache.order or categoryOrder
+        for _, catName in ipairs(cachedOrder or {}) do
+            seededOrder[#seededOrder + 1] = catName
+        end
+        vendorFlowLayoutFreeze = {
+            order = seededOrder,
+            laneAssignment = flowLayoutCache.laneAssignment or nil,
+        }
+    end
+    local compositionSignature = nil
+    local canReuseLaneAssignment = false
+
+    if flowMode then
+        compositionSignature = BuildFlowCompositionSignature(
+            categories,
+            categoryOrder,
+            usableWidth,
+            itemStep,
+            activeFilter
+        )
+        freezeHeadersForVendor = merchantOpen
+            and flowLayoutCache ~= nil
+            and flowLayoutCache.signature == compositionSignature
+        canReuseLaneAssignment = flowLayoutCache
+            and flowLayoutCache.signature == compositionSignature
+            and flowLayoutCache.laneAssignment ~= nil
+    end
 
     -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
     -- flow mode. We predict each section's height, sort categories by
@@ -3311,7 +3440,17 @@ function Frame:RenderFlowView(items)
     -- on so the overflow strip still anchors at the bottom of BoE's
     -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
     local laneAssignment = nil
+    local forceVendorFrozenLanes = flowMode
+        and merchantOpen
+        and vendorFlowLayoutFreeze ~= nil
+        and vendorFlowLayoutFreeze.laneAssignment ~= nil
     if flowMode and dualCategoryLanes and #categoryOrder > 1 then
+        if forceVendorFrozenLanes then
+            laneAssignment = vendorFlowLayoutFreeze.laneAssignment
+            canReuseLaneAssignment = true
+        elseif canReuseLaneAssignment then
+            laneAssignment = flowLayoutCache.laneAssignment
+        end
         local laneColumns = columnsForLaneWidth((usableWidth - laneGap) * 0.5)
         local function sectionHeight(catName)
             local n = categories[catName] and #categories[catName] or 0
@@ -3336,15 +3475,17 @@ function Frame:RenderFlowView(items)
         -- caller already suppresses item dimming OOC, so this re-order
         -- is the entire "push the filter to top-left" behavior. ✿ ʕ ◕ᴥ◕ ʔ
         local pinnedCategory = nil
-        if activeFilter and activeFilter ~= "NEW_ITEMS" and categories[activeFilter] then
+        if activeFilter and categories[activeFilter] then
             pinnedCategory = activeFilter
         end
 
         local leftLane, rightLane = {}, {}
         local leftH, rightH = 0, 0
-        laneAssignment = {}
+        if not laneAssignment then
+            laneAssignment = {}
+        end
 
-        if pinnedCategory then
+        if not canReuseLaneAssignment and pinnedCategory then
             table.insert(leftLane, pinnedCategory)
             laneAssignment[pinnedCategory] = "left"
             leftH = sectionHeight(pinnedCategory)
@@ -3367,7 +3508,7 @@ function Frame:RenderFlowView(items)
                     laneAssignment[name] = "left"
                 end
             end
-        else
+        elseif not canReuseLaneAssignment then
             -- ʕ •ᴥ•ʔ✿ LPT: sort by predicted height descending, greedy
             -- into shorter lane for balance. Tallest sections land at
             -- the top of each lane. ✿ ʕ •ᴥ•ʔ
@@ -3394,11 +3535,29 @@ function Frame:RenderFlowView(items)
         -- ʕ •ᴥ•ʔ✿ Render order: left lane top-to-bottom, then right lane
         -- top-to-bottom. Each section's lane is fixed by laneAssignment
         -- below so the render loop ignores live y-based greedy. ✿ ʕ •ᴥ•ʔ
-        local final = {}
-        for _, n in ipairs(leftLane) do table.insert(final, n) end
-        for _, n in ipairs(rightLane) do table.insert(final, n) end
-        categoryOrder = final
+        if canReuseLaneAssignment then
+            local leftOrdered = {}
+            local rightOrdered = {}
+            for _, name in ipairs(categoryOrder) do
+                if laneAssignment[name] == "right" then
+                    table.insert(rightOrdered, name)
+                else
+                    table.insert(leftOrdered, name)
+                end
+            end
+            local final = {}
+            for _, n in ipairs(leftOrdered) do table.insert(final, n) end
+            for _, n in ipairs(rightOrdered) do table.insert(final, n) end
+            categoryOrder = final
+        else
+            local final = {}
+            for _, n in ipairs(leftLane) do table.insert(final, n) end
+            for _, n in ipairs(rightLane) do table.insert(final, n) end
+            categoryOrder = final
+        end
     end
+
+    local headerByCategory = {}
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
@@ -3432,29 +3591,49 @@ function Frame:RenderFlowView(items)
             end
 
             if currentView ~= "grid" then
-                headerIndex = headerIndex + 1
-                local header = categoryHeaders[headerIndex]
+                local header
+                local reusedHeader = false
+                local headerSlotIndex = nil
+                if freezeHeadersForVendor and flowLayoutCache and flowLayoutCache.headerByCategory then
+                    local cachedIdx = flowLayoutCache.headerByCategory[catName]
+                    if cachedIdx then
+                        header = categoryHeaders[cachedIdx]
+                        if header then
+                            reusedHeader = true
+                            headerSlotIndex = cachedIdx
+                            headerIndex = math.max(headerIndex, cachedIdx)
+                        end
+                    end
+                end
                 if not header then
-                    header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    categoryHeaders[headerIndex] = header
+                    headerIndex = headerIndex + 1
+                    header = categoryHeaders[headerIndex]
+                    if not header then
+                        header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        categoryHeaders[headerIndex] = header
+                    end
+                    headerSlotIndex = headerIndex
                 end
 
-                header:ClearAllPoints()
-                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
+                headerByCategory[catName] = headerSlotIndex
+                if not reusedHeader then
+                    header:ClearAllPoints()
+                    header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
 
-                local r, g, b = 1, 1, 1
-                if currentView == "bag" then
-                    r, g, b = 0.9, 0.8, 0.4
-                elseif Omni.Categorizer then
-                    r, g, b = Omni.Categorizer:GetCategoryColor(catName)
-                end
-                header:SetTextColor(r, g, b)
-                if currentView == "bag" then
-                    local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
-                    local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                    header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
-                else
-                    header:SetText(catName .. " (" .. #catItems .. ")")
+                    local r, g, b = 1, 1, 1
+                    if currentView == "bag" then
+                        r, g, b = 0.9, 0.8, 0.4
+                    elseif Omni.Categorizer then
+                        r, g, b = Omni.Categorizer:GetCategoryColor(catName)
+                    end
+                    header:SetTextColor(r, g, b)
+                    if currentView == "bag" then
+                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                    else
+                        header:SetText(catName .. " (" .. #catItems .. ")")
+                    end
                 end
                 header:Show()
 
@@ -3488,10 +3667,19 @@ function Frame:RenderFlowView(items)
                     local x = laneX + col * itemStep
                     local y = laneY - row * itemStep
 
+                    local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+                    local needsMetrics = (btn._oiLayoutScale ~= itemScale)
                     pcall(function()
-                        btn:ClearAllPoints()
-                        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                        ApplyItemButtonMetrics(btn, itemScale)
+                        if needsReposition then
+                            btn:ClearAllPoints()
+                            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                            btn._oiLayoutX = x
+                            btn._oiLayoutY = y
+                        end
+                        if needsMetrics then
+                            ApplyItemButtonMetrics(btn, itemScale)
+                            btn._oiLayoutScale = itemScale
+                        end
                         btn:SetAlpha(1)
                     end)
 
@@ -3500,14 +3688,22 @@ function Frame:RenderFlowView(items)
                         slotItem = nil
                     end
 
-                    local success = pcall(function()
-                        SetButtonItem(btn, slotItem)
-                        btn:Show()
-                    end)
+                    local nextRenderKey = ItemRenderKey(slotItem)
+                    local success = true
+                    if btn._oiRenderKey ~= nextRenderKey then
+                        success = pcall(function()
+                            SetButtonItem(btn, slotItem)
+                            btn._oiRenderKey = nextRenderKey
+                            btn:Show()
+                        end)
+                    else
+                        pcall(btn.Show, btn)
+                    end
                     if not success then
                         pcall(SetButtonItem, btn, nil)
                         if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
                         pcall(btn.Show, btn)
+                        btn._oiRenderKey = "error"
                     end
 
                     touched[bagID] = touched[bagID] or {}
@@ -3602,13 +3798,25 @@ function Frame:RenderFlowView(items)
         local x = overflowX + col * itemStep
         local y = overflowTop - row * itemStep
 
+        local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+        local needsMetrics = (btn._oiLayoutScale ~= itemScale)
         pcall(function()
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-            ApplyItemButtonMetrics(btn, itemScale)
+            if needsReposition then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                btn._oiLayoutX = x
+                btn._oiLayoutY = y
+            end
+            if needsMetrics then
+                ApplyItemButtonMetrics(btn, itemScale)
+                btn._oiLayoutScale = itemScale
+            end
             btn:SetAlpha(0)
         end)
-        pcall(SetButtonItem, btn, nil)
+        if btn._oiRenderKey ~= "empty" then
+            pcall(SetButtonItem, btn, nil)
+            btn._oiRenderKey = "empty"
+        end
         pcall(btn.Show, btn)
 
         overflowIndex = overflowIndex + 1
@@ -3631,6 +3839,21 @@ function Frame:RenderFlowView(items)
     local overflowBottom = overflowAnchorY - overflowExtent
     local deepestY = math.min(mainBottomY, overflowBottom)
     scrollChild:SetHeight(math.abs(deepestY) + itemGap)
+
+    if flowMode then
+        flowLayoutCache = {
+            signature = compositionSignature,
+            laneAssignment = laneAssignment,
+            headerByCategory = headerByCategory,
+            order = categoryOrder,
+        }
+        if merchantOpen and vendorFlowLayoutFreeze and laneAssignment then
+            vendorFlowLayoutFreeze.laneAssignment = laneAssignment
+        end
+    else
+        flowLayoutCache = nil
+    end
+    wasMerchantOpen = merchantOpen
 end
 
 -- =============================================================================
@@ -3724,7 +3947,7 @@ function Frame:RenderListView(items)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     GameTooltip:SetBagItem(self.itemInfo.bagID, self.itemInfo.slotID)
                     GameTooltip:Show()
-                    if MerchantFrame and MerchantFrame:IsShown() and (not CursorHasItem or not CursorHasItem()) and ShowContainerSellCursor then
+                    if IsMerchantOpen() and (not CursorHasItem or not CursorHasItem()) and ShowContainerSellCursor then
                         ShowContainerSellCursor(self.itemInfo.bagID, self.itemInfo.slotID)
                     elseif CursorUpdate then
                         CursorUpdate(self)
@@ -3848,6 +4071,7 @@ end
 -- =============================================================================
 
 function Frame:ApplySearch(text)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.ApplySearch")
     searchText = text or ""
     isSearchActive = (searchText ~= "")
 
@@ -3869,6 +4093,7 @@ function Frame:ApplySearch(text)
     end
 
     local lowerSearch = string.lower(searchText)
+    local matchedButtons = 0
 
     -- Filter Grid/Flow view buttons
     for _, btn in ipairs(itemButtons) do
@@ -3876,8 +4101,17 @@ function Frame:ApplySearch(text)
         local isMatch = false
 
         if itemInfo and itemInfo.hyperlink then
-            local name = GetItemInfo(itemInfo.hyperlink)
-            if name and string.find(string.lower(name), lowerSearch, 1, true) then
+            local name = itemInfo.__cachedName
+            local lowerName = itemInfo.__cachedLowerName
+            if not name then
+                name = GetItemInfo(itemInfo.hyperlink)
+                itemInfo.__cachedName = name
+            end
+            if name and not lowerName then
+                lowerName = string.lower(name)
+                itemInfo.__cachedLowerName = lowerName
+            end
+            if lowerName and string.find(lowerName, lowerSearch, 1, true) then
                 isMatch = true
             end
         end
@@ -3885,17 +4119,30 @@ function Frame:ApplySearch(text)
         if Omni.ItemButton then
             Omni.ItemButton:SetSearchMatch(btn, isMatch)
         end
+        if isMatch then
+            matchedButtons = matchedButtons + 1
+        end
     end
 
     -- Filter List view rows
+    local matchedRows = 0
     for _, row in ipairs(listRows) do
         if row:IsShown() and row.itemInfo then
             local itemInfo = row.itemInfo
             local isMatch = false
 
             if itemInfo.hyperlink then
-                local name = GetItemInfo(itemInfo.hyperlink)
-                if name and string.find(string.lower(name), lowerSearch, 1, true) then
+                local name = itemInfo.__cachedName
+                local lowerName = itemInfo.__cachedLowerName
+                if not name then
+                    name = GetItemInfo(itemInfo.hyperlink)
+                    itemInfo.__cachedName = name
+                end
+                if name and not lowerName then
+                    lowerName = string.lower(name)
+                    itemInfo.__cachedLowerName = lowerName
+                end
+                if lowerName and string.find(lowerName, lowerSearch, 1, true) then
                     isMatch = true
                 end
             end
@@ -3903,11 +4150,20 @@ function Frame:ApplySearch(text)
             if isMatch then
                 row:SetAlpha(1)
                 if row.icon then row.icon:SetDesaturated(false) end
+                matchedRows = matchedRows + 1
             else
                 row:SetAlpha(0.3)
                 if row.icon then row.icon:SetDesaturated(true) end
             end
         end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.ApplySearch", perfToken, {
+            queryLen = string.len(searchText or ""),
+            visibleButtons = #itemButtons,
+            matchedButtons = matchedButtons,
+            matchedRows = matchedRows,
+        })
     end
 end
 
@@ -4301,7 +4557,12 @@ end
 -- Initialization
 -- =============================================================================
 
+function Frame:SetMerchantOpen(isOpen)
+    Omni._merchantOpen = (isOpen == true)
+end
+
 function Frame:Init()
+    Omni._merchantOpen = false
     currentView = GetSavedViewMode()
     selectedBagID = GetSavedBagFilter()
 

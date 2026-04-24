@@ -14,6 +14,7 @@
 # Core Architecture (Load Order Critical)
 # =============================================================================
 Omni\API.lua
+Omni\Perf.lua
 Omni\Events.lua
 Omni\Pool.lua
 Omni\Utils.lua

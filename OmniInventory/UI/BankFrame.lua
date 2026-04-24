@@ -588,22 +588,28 @@ end
 -- =============================================================================
 
 local function CollectBankItems()
+    local perfCollect = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.CollectBankItems.total")
     local items = {}
     if OmniC_Container and OmniC_Container.GetAllBankItems then
         items = OmniC_Container.GetAllBankItems() or {}
     end
 
     if Omni.Categorizer then
+        local perfCategorize = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.CollectBankItems.categorize")
         for _, item in ipairs(items) do
             item.category = item.category or Omni.Categorizer:GetCategory(item)
-            if item.itemID then
-                item.isNew = Omni.Categorizer:IsNewItem(item.itemID)
-            end
+        end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("bank.CollectBankItems.categorize", perfCategorize)
         end
     end
 
     if Omni.Sorter then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.CollectBankItems.sort")
         items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("bank.CollectBankItems.sort", perfSort, { itemCount = #items })
+        end
     end
 
     if IsValidBankBagID(selectedBankBagID) then
@@ -616,6 +622,9 @@ local function CollectBankItems()
         items = filtered
     end
 
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("bank.CollectBankItems.total", perfCollect, { itemCount = #items })
+    end
     return items
 end
 
@@ -1062,6 +1071,7 @@ function BankFrame:RenderFlowView(items)
 end
 
 function BankFrame:UpdateLayout()
+    local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.total")
     if not bankFrame or not bankFrame:IsShown() then return end
 
     -- ʕ •ᴥ•ʔ✿ Defer secure-button churn to PLAYER_REGEN_ENABLED ✿ ʕ •ᴥ•ʔ
@@ -1073,11 +1083,22 @@ function BankFrame:UpdateLayout()
     self:UpdateBankBagButtonVisuals()
 
     local items = CollectBankItems()
+    local perfRender = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.renderFlow")
     self:RenderFlowView(items)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("bank.UpdateLayout.renderFlow", perfRender, { itemCount = #items })
+    end
     self:UpdateSlotCount()
 
     if searchText and searchText ~= "" then
+        local perfSearch = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.search")
         self:ApplySearch(searchText)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("bank.UpdateLayout.search", perfSearch)
+        end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("bank.UpdateLayout.total", perfTotal, { itemCount = #items })
     end
 end
 
@@ -1102,6 +1123,7 @@ function BankFrame:UpdateSlotCount()
 end
 
 function BankFrame:ApplySearch(text)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.ApplySearch")
     searchText = text or ""
     isSearchActive = (searchText ~= "")
 
@@ -1115,18 +1137,38 @@ function BankFrame:ApplySearch(text)
     end
 
     local lowerSearch = string.lower(searchText)
+    local matchedButtons = 0
     for _, btn in ipairs(itemButtons) do
         local info = btn.itemInfo
         local isMatch = false
         if info and info.hyperlink then
-            local name = GetItemInfo(info.hyperlink)
-            if name and string.find(string.lower(name), lowerSearch, 1, true) then
+            local name = info.__cachedName
+            local lowerName = info.__cachedLowerName
+            if not name then
+                name = GetItemInfo(info.hyperlink)
+                info.__cachedName = name
+            end
+            if name and not lowerName then
+                lowerName = string.lower(name)
+                info.__cachedLowerName = lowerName
+            end
+            if lowerName and string.find(lowerName, lowerSearch, 1, true) then
                 isMatch = true
             end
         end
         if Omni.ItemButton then
             Omni.ItemButton:SetSearchMatch(btn, isMatch)
         end
+        if isMatch then
+            matchedButtons = matchedButtons + 1
+        end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("bank.ApplySearch", perfToken, {
+            queryLen = string.len(searchText or ""),
+            visibleButtons = #itemButtons,
+            matchedButtons = matchedButtons,
+        })
     end
 end
 

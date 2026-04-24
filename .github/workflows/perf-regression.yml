@@ -1,0 +1,29 @@
+name: Perf Regression Check
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  perf-regression:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify candidate perf snapshot exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "perf/candidate.quick.json")) {
+            Write-Error "Missing perf/candidate.quick.json in PR branch."
+          }
+
+      - name: Compare baseline and candidate
+        shell: pwsh
+        run: |
+          ./scripts/perf/compare-baseline.ps1 `
+            -BaselinePath "perf/baseline.quick.json" `
+            -CandidatePath "perf/candidate.quick.json" `
+            -AvgRegressionPct 8 `
+            -P95RegressionPct 12 `
+            -MaxRegressionPct 15

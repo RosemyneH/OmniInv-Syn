@@ -241,6 +241,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "ADDON_LOADED" and arg1 == addonName then
         OmniInventoryDB = OmniInventoryDB or {}
+        if Omni.Perf and Omni.Perf.SyncEnabledFromSettings then
+            Omni.Perf:SyncEnabledFromSettings()
+        end
 
         if Omni.Data then
             Omni.Data:Init()
@@ -351,6 +354,36 @@ local function HandleSlashCommand(msg)
         end
         if Omni.Pool then Omni.Pool:Debug() end
 
+    elseif msg == "perf on" then
+        if Omni.Perf then
+            Omni.Perf:SetEnabled(true)
+            print("|cFF00FF00OmniInventory|r: perf profiling enabled.")
+        end
+
+    elseif msg == "perf off" then
+        if Omni.Perf then
+            Omni.Perf:SetEnabled(false)
+            print("|cFF00FF00OmniInventory|r: perf profiling disabled.")
+        end
+
+    elseif msg == "perf reset" then
+        if Omni.Perf then
+            Omni.Perf:Reset()
+            print("|cFF00FF00OmniInventory|r: perf samples cleared.")
+        end
+
+    elseif msg == "perf report" then
+        if Omni.Perf then
+            Omni.Perf:PrintReport()
+        end
+
+    elseif msg == "perf dump" then
+        if Omni.Perf then
+            print("OMNI_PERF_JSON_BEGIN")
+            print(Omni.Perf:ExportJson())
+            print("OMNI_PERF_JSON_END")
+        end
+
     elseif msg == "forceshow" then
         -- ʕ •ᴥ•ʔ✿ Bypass every Omni layer and call the bare frame method
         -- directly. If THIS triggers the popup the issue is not in our
@@ -393,6 +426,11 @@ local function HandleSlashCommand(msg)
         print("  |cFFFFFF00/oi forceshow|r - Bypass and try raw mainFrame:Show")
         print("  |cFFFFFF00/oi forcehide|r - Bypass and try raw mainFrame:Hide")
         print("  |cFFFFFF00/oi pool|r - Pool stats")
+        print("  |cFFFFFF00/oi perf on|r - Enable perf profiling")
+        print("  |cFFFFFF00/oi perf off|r - Disable perf profiling")
+        print("  |cFFFFFF00/oi perf reset|r - Clear perf samples")
+        print("  |cFFFFFF00/oi perf report|r - Print timing summary")
+        print("  |cFFFFFF00/oi perf dump|r - Print JSON snapshot markers")
         print("  |cFFFFFF00/oi reapply|r - Re-apply bag function overrides")
 
     else
