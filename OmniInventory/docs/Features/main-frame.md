@@ -162,6 +162,17 @@ Switch view mode: "grid", "flow", "list"
 
 **Expected:** Internal drag targets stay stable during the drag, then the category layout reconciles immediately after drop
 
+### Positive Flow: Drop Into Empty Slot In Grid/Bag View
+
+**Precondition:** Main frame is in `grid` or `bag` view and at least one visible slot is empty
+
+1. Pick up any inventory item from a populated slot
+2. Drag it onto a visible empty slot cell in OmniInventory
+3. Drop the item
+4. Verify the item lands in that exact target slot
+
+**Expected:** Empty cells in `grid` and `bag` views are real `(bagID, slotID)` slots and accept drag/drop directly
+
 ---
 
 ## Definition of Done

@@ -3483,8 +3483,13 @@ function Frame:RefreshCombatContent(changedBags)
                         and DoesFlowSlotChangeRequireRelayout(previousInfo, nil) then
                     meta.requiresFlowRelayout = true
                 end
-                SetButtonItem(btn, nil)
-                pcall(btn.SetAlpha, btn, 0)
+                if currentView == "grid" or currentView == "bag" then
+                    SetButtonItem(btn, { bagID = bagID, slotID = slotID, __empty = true })
+                    pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
+                else
+                    SetButtonItem(btn, nil)
+                    pcall(btn.SetAlpha, btn, 0)
+                end
             end
         else
             if btn.itemInfo then
@@ -4268,9 +4273,6 @@ function Frame:RenderFlowView(items)
                     end)
 
                     local slotItem = itemInfo
-                    if itemInfo and itemInfo.__empty then
-                        slotItem = nil
-                    end
 
                     local nextRenderKey = ItemRenderKey(slotItem)
                     local success = true
