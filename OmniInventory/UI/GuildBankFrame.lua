@@ -2099,15 +2099,15 @@ local function ParseGuildBankMoneyInputToCopper(raw)
         return ClampGuildBankMoneyCopper(math.floor(total))
     end
 
-    local c = tonumber(s)
-    if c and c > 0 then
-        return ClampGuildBankMoneyCopper(math.floor(c + 0.5))
+    local g = tonumber(s)
+    if g and g > 0 then
+        return ClampGuildBankMoneyCopper(math.floor(g * 10000 + 0.5))
     end
     return nil
 end
 
 StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
-    text = "Deposit amount (copper, or e.g. 50g, 5k, 12g34s):",
+    text = "Deposit amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
@@ -2132,7 +2132,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
 }
 
 StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
-    text = "Withdraw amount (copper, or e.g. 50g, 5k, 12g34s):",
+    text = "Withdraw amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
