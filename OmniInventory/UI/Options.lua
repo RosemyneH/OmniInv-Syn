@@ -13,6 +13,9 @@ local optionsFrame = nil
 
 local function RefreshAllInventory()
     if Omni.Frame then
+        if Omni.Frame.InvalidateRenderCaches then
+            Omni.Frame:InvalidateRenderCaches()
+        end
         Omni.Frame:UpdateLayout()
     end
     if Omni.BankFrame and Omni.BankFrame.UpdateLayout then

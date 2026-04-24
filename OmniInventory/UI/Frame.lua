@@ -145,6 +145,77 @@ local function StopBurstFullRefresh()
     end
 end
 
+Frame._renderCacheEpoch = 0
+Frame._layoutFlushState = Frame._layoutFlushState or {
+    frame = nil,
+    pending = false,
+    changedBags = nil,
+    opts = nil,
+}
+
+function Frame:_QueueLayoutUpdate(changedBags, opts)
+    local layoutFlushState = self._layoutFlushState
+    local incomingOpts = {}
+    if type(opts) == "table" then
+        for k, v in pairs(opts) do
+            incomingOpts[k] = v
+        end
+    end
+    layoutFlushState.opts = layoutFlushState.opts or {}
+
+    if incomingOpts.forceFull then
+        layoutFlushState.opts.forceFull = true
+    end
+    if incomingOpts.reason then
+        layoutFlushState.opts.reason = incomingOpts.reason
+    end
+
+    if layoutFlushState.changedBags == nil then
+        if type(changedBags) == "table" then
+            layoutFlushState.changedBags = {}
+            for bagID, changed in pairs(changedBags) do
+                if type(bagID) == "number" and changed then
+                    layoutFlushState.changedBags[bagID] = true
+                elseif bagID == "_trigger" and changed then
+                    layoutFlushState.changedBags._trigger = changed
+                end
+            end
+        else
+            layoutFlushState.changedBags = nil
+        end
+    elseif type(changedBags) == "table" then
+        for bagID, changed in pairs(changedBags) do
+            if type(bagID) == "number" and changed then
+                layoutFlushState.changedBags[bagID] = true
+            elseif bagID == "_trigger" and changed then
+                layoutFlushState.changedBags._trigger = changed
+            end
+        end
+    end
+
+    if layoutFlushState.pending then
+        return
+    end
+
+    layoutFlushState.pending = true
+    if not layoutFlushState.frame then
+        layoutFlushState.frame = CreateFrame("Frame")
+    end
+
+    layoutFlushState.frame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        layoutFlushState.pending = false
+        local flushChangedBags = layoutFlushState.changedBags
+        local flushOpts = layoutFlushState.opts or {}
+        layoutFlushState.changedBags = nil
+        layoutFlushState.opts = nil
+        flushOpts.__coalesced = true
+        if Frame and Frame.UpdateLayout then
+            Frame:UpdateLayout(flushChangedBags, flushOpts)
+        end
+    end)
+end
+
 local function TryForceFullRefresh(reason)
     local now = (GetTime and GetTime()) or 0
     if now > 0 and lastForcedFullRefreshAt > 0 and (now - lastForcedFullRefreshAt) < FORCED_FULL_REFRESH_COOLDOWN then
@@ -152,7 +223,7 @@ local function TryForceFullRefresh(reason)
     end
     lastForcedFullRefreshAt = now
     if Omni.Frame and Omni.Frame.UpdateLayout then
-        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "forced_full" })
+        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "forced_full", immediate = true })
         return true
     end
     return false
@@ -194,9 +265,10 @@ end
 
 local function ItemRenderKey(itemInfo)
     if not itemInfo or itemInfo.__empty then
-        return "empty"
+        return "empty:" .. tostring(Frame._renderCacheEpoch or 0)
     end
     return table.concat({
+        tostring(Frame._renderCacheEpoch or 0),
         tostring(itemInfo.itemID or 0),
         tostring(itemInfo.bagID or -1),
         tostring(itemInfo.slotID or -1),
@@ -382,6 +454,31 @@ local function SetButtonItem(btn, itemInfo)
 
     if Omni.ItemButton and Omni.ItemButton.SetItem then
         Omni.ItemButton:SetItem(btn, itemInfo)
+    end
+end
+
+function Frame:InvalidateRenderCaches(opts)
+    opts = opts or {}
+    self._renderCacheEpoch = (self._renderCacheEpoch or 0) + 1
+
+    if not opts.clearLayout and not opts.clearSearchCache then
+        return
+    end
+
+    for _, byBag in pairs(slotButtons) do
+        for _, btn in pairs(byBag) do
+            if btn then
+                if opts.clearLayout then
+                    btn._oiLayoutX = nil
+                    btn._oiLayoutY = nil
+                    btn._oiLayoutScale = nil
+                end
+                if opts.clearSearchCache then
+                    btn._cachedSearchName = nil
+                    btn._cachedSearchNameLower = nil
+                end
+            end
+        end
     end
 end
 
@@ -1915,6 +2012,7 @@ function Frame:SetQuickFilter(filterName)
         filterName = nil
     end
     activeFilter = filterName
+    self:InvalidateRenderCaches()
 
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
@@ -3183,9 +3281,7 @@ function Frame:SetItemScale(scale)
     OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
     OmniInventoryDB.char.settings.itemScale = scale
 
-    IterateSlotButtons(function(_, _, btn)
-        ApplyItemButtonMetrics(btn, scale)
-    end)
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     self:UpdateLayout()
     return true
@@ -3203,6 +3299,8 @@ function Frame:SetItemGap(gap)
     OmniInventoryDB.char = OmniInventoryDB.char or {}
     OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
     OmniInventoryDB.char.settings.itemGap = gap
+
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     self:UpdateLayout()
     return true
@@ -3222,6 +3320,7 @@ end
 
 function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
     -- remembered pre-bag view -- otherwise a later bag toggle could
@@ -3438,6 +3537,11 @@ end
 
 function Frame:UpdateLayout(changedBags, opts)
     if not mainFrame then return end
+    if not (opts and opts.__coalesced) and not (opts and opts.immediate) then
+        self:_QueueLayoutUpdate(changedBags, opts)
+        return
+    end
+
     local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.total")
     local forceFull = opts and opts.forceFull == true
     local updateReason = (opts and opts.reason) or "layout"
@@ -4838,10 +4942,6 @@ function Frame:Hide()
     for _, byBag in pairs(slotButtons) do
         for _, btn in pairs(byBag) do
             if btn then
-                btn._oiLayoutX = nil
-                btn._oiLayoutY = nil
-                btn._oiLayoutScale = nil
-                btn._oiRenderKey = nil
                 btn._cachedSearchName = nil
                 btn._cachedSearchNameLower = nil
             end
