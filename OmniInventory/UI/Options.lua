@@ -127,6 +127,33 @@ local function IsAttuneHelperMiniNoBorderEnabled()
     return OmniInventoryDB.global.attuneHelperMiniNoBorder == true
 end
 
+local function IsAttuneHelperSortBagViewEnabled()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if OmniInventoryDB.global.attuneHelperSortBagView == nil then
+        OmniInventoryDB.global.attuneHelperSortBagView = true
+    end
+    return OmniInventoryDB.global.attuneHelperSortBagView == true
+end
+
+local function GetAttuneHelperSortBagID()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    local bagID = OmniInventoryDB.global.attuneHelperSortBagID
+    if bagID ~= 0 and bagID ~= 1 then
+        bagID = 1
+        OmniInventoryDB.global.attuneHelperSortBagID = bagID
+    end
+    return bagID
+end
+
+local function FormatAttuneHelperSortBagID(bagID)
+    if bagID == 0 then
+        return "Backpack"
+    end
+    return "Bag 1"
+end
+
 local FOOTER_BUTTON_OPTIONS = {
     { key = "resetInstances", label = "Reset Instances" },
     { key = "transmog",     label = "Transmog"       },
@@ -561,6 +588,34 @@ function Settings:CreateControls(parent)
     end)
     self.attuneHelperMiniNoBorderCb = attuneHelperMiniNoBorderCb
 
+    yOffset = yOffset - 22
+
+    local attuneHelperSortBagViewCb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    attuneHelperSortBagViewCb:SetSize(24, 24)
+    attuneHelperSortBagViewCb:SetPoint("TOPLEFT", 14, yOffset)
+    local attuneHelperSortBagViewLabel = attuneHelperSortBagViewCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    attuneHelperSortBagViewLabel:SetPoint("LEFT", attuneHelperSortBagViewCb, "RIGHT", 2, 1)
+    attuneHelperSortBagViewLabel:SetText("AH Sort View")
+    attuneHelperSortBagViewCb:SetChecked(IsAttuneHelperSortBagViewEnabled())
+    attuneHelperSortBagViewCb:SetScript("OnClick", function(self)
+        OmniInventoryDB = OmniInventoryDB or {}
+        OmniInventoryDB.global = OmniInventoryDB.global or {}
+        OmniInventoryDB.global.attuneHelperSortBagView = self:GetChecked() and true or false
+    end)
+    self.attuneHelperSortBagViewCb = attuneHelperSortBagViewCb
+
+    local attuneHelperSortBagBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    attuneHelperSortBagBtn:SetSize(116, 22)
+    attuneHelperSortBagBtn:SetPoint("TOPLEFT", 154, yOffset - 1)
+    attuneHelperSortBagBtn:SetScript("OnClick", function(self)
+        OmniInventoryDB = OmniInventoryDB or {}
+        OmniInventoryDB.global = OmniInventoryDB.global or {}
+        local nextBagID = GetAttuneHelperSortBagID() == 1 and 0 or 1
+        OmniInventoryDB.global.attuneHelperSortBagID = nextBagID
+        self:SetText("AH Sort: " .. FormatAttuneHelperSortBagID(nextBagID))
+    end)
+    self.attuneHelperSortBagBtn = attuneHelperSortBagBtn
+
     yOffset = yOffset - 22 - SECTION_GAP
 
     CreateSectionHeader(parent, "Footer Buttons", yOffset, SECTION_COLORS.footer)
@@ -780,6 +835,10 @@ function Settings:UpdateValues()
     if self.attuneForgeOutline then self.attuneForgeOutline:SetChecked(attune.forgeOutline ~= false) end
     if self.attuneHelperEmbedCb then self.attuneHelperEmbedCb:SetChecked(IsAttuneHelperEmbedEnabled()) end
     if self.attuneHelperMiniNoBorderCb then self.attuneHelperMiniNoBorderCb:SetChecked(IsAttuneHelperMiniNoBorderEnabled()) end
+    if self.attuneHelperSortBagViewCb then self.attuneHelperSortBagViewCb:SetChecked(IsAttuneHelperSortBagViewEnabled()) end
+    if self.attuneHelperSortBagBtn then
+        self.attuneHelperSortBagBtn:SetText("AH Sort: " .. FormatAttuneHelperSortBagID(GetAttuneHelperSortBagID()))
+    end
     if self.footerButtonCbs then
         for _, def in ipairs(FOOTER_BUTTON_OPTIONS) do
             local cb = self.footerButtonCbs[def.key]
