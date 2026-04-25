@@ -283,3 +283,4 @@ If no new rule is detected → do not update the file.
 - User prefers comprehensive documentation before coding
 - User wants forward-compatible architecture (3.3.5a → Retail)
 - Prefer `GetItemLinkAttuneProgress(itemlink)` over item ID-based attune APIs so affix variants resolve correctly
+- AttuneHelper mini-frame embedding must leave child button visibility/layout under AttuneHelper control; OmniInventory should only parent, show, and hide the mini frame so AH's dynamic button modes do not malform
