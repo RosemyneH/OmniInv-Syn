@@ -544,10 +544,11 @@ function ItemButton:Create(parent)
     fade:SetSmoothing("IN_OUT")
     button.glow.anim = ag
 
-    -- Register with Masque if available
+    --[[
     if Omni.MasqueGroup then
         Omni.MasqueGroup:AddButton(button)
     end
+    --]]
 
     -- Pawn Upgrade Arrow
     button.upgradeArrow = button:CreateTexture(nil, "OVERLAY")

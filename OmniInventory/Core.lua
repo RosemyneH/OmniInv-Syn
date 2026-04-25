@@ -57,12 +57,19 @@ blockedSink:SetScript("OnEvent", function(_, ev, addon, func)
     end
 end)
 
--- Masque Support
-local libStub = _G.LibStub
-local Masque = libStub and libStub("Masque", true)
+--[[
+-- Masque Support (disabled — integration not functional)
+local Masque
+if type(_G.LibStub) == "function" then
+    local ok, masqueLib = pcall(_G.LibStub, "Masque", true)
+    if ok then
+        Masque = masqueLib
+    end
+end
 if Masque then
     Omni.MasqueGroup = Masque:Group("OmniInventory")
 end
+--]]
 
 -- ʕ •ᴥ•ʔ✿ Bag-function overrides hoisted to module scope so we can re-apply
 -- on PLAYER_ENTERING_WORLD / after combat. Some addons (and the default UI
