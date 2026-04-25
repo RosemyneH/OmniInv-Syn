@@ -518,6 +518,26 @@ local function IsAttuneHelperMiniNoBorderEnabled()
     return global and global.attuneHelperMiniNoBorder == true
 end
 
+function Frame:IsAttuneHelperSortBagViewEnabled()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if global and global.attuneHelperSortBagView == nil then
+        global.attuneHelperSortBagView = true
+    end
+    return not global or global.attuneHelperSortBagView ~= false
+end
+
+function Frame:GetAttuneHelperSortBagID()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    local bagID = global and global.attuneHelperSortBagID
+    if bagID ~= 0 and bagID ~= 1 then
+        bagID = 1
+        if global then
+            global.attuneHelperSortBagID = bagID
+        end
+    end
+    return bagID
+end
+
 local function ApplyEmbeddedMiniBorderStyle(miniFrame)
     if not miniFrame then return end
     if not miniFrame.SetBackdropBorderColor then return end
@@ -527,6 +547,34 @@ local function ApplyEmbeddedMiniBorderStyle(miniFrame)
     else
         miniFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
     end
+end
+
+function Frame:HookAttuneHelperMiniSortButton()
+    local sortBtn = _G.AttuneHelperMiniSortButton
+    if not sortBtn or sortBtn.__OmniSortBagViewHooked then
+        return false
+    end
+
+    sortBtn.__OmniSortBagViewHooked = true
+    sortBtn:HookScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" and Frame.SetAttuneHelperSortBagView then
+            sortBtn.__OmniSortBagViewMouseDown = true
+            Frame:SetAttuneHelperSortBagView()
+        end
+    end)
+    sortBtn:HookScript("OnClick", function(_, button)
+        if sortBtn.__OmniSortBagViewMouseDown then
+            sortBtn.__OmniSortBagViewMouseDown = nil
+            return
+        end
+        if button and button ~= "LeftButton" then
+            return
+        end
+        if Frame.SetAttuneHelperSortBagView then
+            Frame:SetAttuneHelperSortBagView()
+        end
+    end)
+    return true
 end
 
 -- ʕ •ᴥ•ʔ✿ Rebind drag-drop on embedded mini buttons so cursor items feed
@@ -642,6 +690,8 @@ local function InstallAttuneHelperEarlyHooks()
             mini:Hide()
         end
     end
+
+    Frame:HookAttuneHelperMiniSortButton()
 
     return true
 end
@@ -3135,8 +3185,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
             ApplyEmbeddedMiniBorderStyle(frame)
             embedHost:SetSize(frame:GetWidth(), frame:GetHeight())
             embedHost:Show()
-            Frame:RefreshEmbeddedAttuneHelperButtons(frame)
-            RebindEmbeddedDragHandlers()
+            Frame:HookAttuneHelperMiniSortButton()
             if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
         end)
     end
@@ -3153,9 +3202,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
 
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
-    self:RefreshEmbeddedAttuneHelperButtons(miniFrame)
-
-    RebindEmbeddedDragHandlers()
+    self:HookAttuneHelperMiniSortButton()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
@@ -4992,6 +5039,24 @@ function Frame:SetBagFilter(bagID)
 
     self:UpdateBagIconVisuals()
     self:UpdateLayout()
+end
+
+function Frame:SetAttuneHelperSortBagView()
+    if not self:IsAttuneHelperSortBagViewEnabled() then
+        return false
+    end
+
+    local bagID = self:GetAttuneHelperSortBagID()
+    if not IsValidBagID(bagID) then
+        return false
+    end
+
+    if currentView ~= "bag" then
+        preBagViewMode = currentView
+        self:SetView("bag")
+    end
+    self:SetBagFilter(bagID)
+    return true
 end
 
 function Frame:ToggleBagPreview(bagID)
