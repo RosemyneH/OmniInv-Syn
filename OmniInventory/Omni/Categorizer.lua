@@ -853,7 +853,11 @@ end
 -- =============================================================================
 
 function Categorizer:GetCategory(itemInfo)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("categorizer.GetCategory")
     if not itemInfo then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Miscellaneous"
     end
 
@@ -861,6 +865,9 @@ function Categorizer:GetCategory(itemInfo)
     if itemInfo.itemID and OmniInventoryDB and OmniInventoryDB.categoryOverrides then
         local override = OmniInventoryDB.categoryOverrides[itemInfo.itemID]
         if override then
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("categorizer.GetCategory", perfToken)
+            end
             return override
         end
     end
@@ -869,6 +876,9 @@ function Categorizer:GetCategory(itemInfo)
 
     -- Priority 1.75: Perishable / time-limited turn-in items
     if self:IsPerishableItem(GetItemID(itemInfo)) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Perishable"
     end
 
@@ -876,48 +886,76 @@ function Categorizer:GetCategory(itemInfo)
 
     -- Priority 2: Quest Items
     if IsQuestItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Quest Items"
     end
 
     -- Priority 3: Attunable
     if IsAttunableItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Attunable"
     end
 
     -- Priority 4: Equipment Sets
     if IsEquipmentSetItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Equipment Sets"
     end
 
     -- Priority 4.5: Account Attunable (BoE that an alt can attune)
     if IsAccountAttunableItem(itemInfo) then
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("categorizer.GetCategory", perfToken)
+            end
             return "Account Attunable"
         end
 
     -- Prio 5 : Tools
     if IsToolsItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Tools"
     end
 
     -- Priority 6: BoE equipment
     if IsBoEItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "BoE"
     end
 
     -- Priority 7: Explicit upgradable-item allowlist  6 7 6 7 6 7 6  7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7
     if IsUpgradableItem(itemInfo) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Upgradable Items"
     end
 
     -- Priority 88: Check quality for junk
     if itemInfo.quality == 0 then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
         return "Junk"
     end
 
     
 
     -- Priority 10+: Heuristic classification
-    return ClassifyByItemType(itemInfo)
+    local out = ClassifyByItemType(itemInfo)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("categorizer.GetCategory", perfToken, { result = out })
+    end
+    return out
 end
 
 -- =============================================================================
@@ -984,6 +1022,7 @@ end
 -- =============================================================================
 
 function Categorizer:CategorizeItems(items)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("categorizer.CategorizeItems")
     local categorized = {}  -- { categoryName = { items } }
 
     for _, itemInfo in ipairs(items) do
@@ -997,6 +1036,9 @@ function Categorizer:CategorizeItems(items)
         table.insert(categorized[category], itemInfo)
     end
 
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("categorizer.CategorizeItems", perfToken, { itemCount = items and #items or 0 })
+    end
     return categorized
 end
 

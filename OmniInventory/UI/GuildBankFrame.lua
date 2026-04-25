@@ -85,6 +85,7 @@ local flowItemButtons = {}
 local categoryHeadersFlow = {}
 local currentTab = 1
 local searchText = ""
+local searchTextLower = ""
 local VIEW_FLOW = "flow"
 local VIEW_GRID = "grid"
 
@@ -891,9 +892,18 @@ local function UpdateGuildBankSlotVisual(btn, tab, slot)
         btn.icon:SetDesaturated(false)
     end
 
-    if searchText ~= "" and link then
-        local name = GetItemInfo(link)
-        if name and string.find(string.lower(name), string.lower(searchText), 1, true) then
+    if searchTextLower ~= "" and link then
+        local name = btn._cachedSearchName
+        local lowerName = btn._cachedSearchNameLower
+        if not name then
+            name = GetItemInfo(link)
+            btn._cachedSearchName = name
+        end
+        if name and not lowerName then
+            lowerName = string.lower(name)
+            btn._cachedSearchNameLower = lowerName
+        end
+        if lowerName and string.find(lowerName, searchTextLower, 1, true) then
             btn.dimOverlay:Hide()
             btn.icon:SetAlpha(1)
         else
@@ -1058,6 +1068,7 @@ local function CreateSearchBar(parent)
 
     bar.editBox:SetScript("OnTextChanged", function(self)
         searchText = self:GetText() or ""
+        searchTextLower = string.lower(searchText)
         GuildBankFrame:RefreshItemArea()
     end)
     bar.editBox:SetScript("OnEscapePressed", function(self)
@@ -1202,6 +1213,7 @@ end
 -- =============================================================================
 
 local function CollectGuildBankTabItems(tab)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.CollectTabItems.total")
     local items = {}
     for slot = 1, SLOTS_PER_TAB do
         local tex, count, locked = GetGuildBankItemInfo(tab, slot)
@@ -1247,7 +1259,14 @@ local function CollectGuildBankTabItems(tab)
         end
     end
     if Omni.Sorter then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.CollectTabItems.sort")
         items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("guildbank.CollectTabItems.sort", perfSort, { itemCount = #items })
+        end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("guildbank.CollectTabItems.total", perfToken, { itemCount = #items, tab = tab })
     end
     return items
 end
@@ -1408,16 +1427,32 @@ function GuildBankFrame:RenderFlowView(items)
 end
 
 function GuildBankFrame:RefreshItemArea()
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.RefreshItemArea")
     if not frame then return end
     if GetViewMode() == VIEW_GRID then
         if frame.gridContainer then frame.gridContainer:Show() end
         if frame.flowScroll then frame.flowScroll:Hide() end
+        local perfGrid = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.RefreshItemArea.grid")
         self:UpdateSlots()
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("guildbank.RefreshItemArea.grid", perfGrid)
+        end
     else
         if frame.gridContainer then frame.gridContainer:Hide() end
         if frame.flowScroll then frame.flowScroll:Show() end
+        local perfFlowCollect = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.RefreshItemArea.flowCollect")
         local items = CollectGuildBankTabItems(currentTab)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("guildbank.RefreshItemArea.flowCollect", perfFlowCollect, { itemCount = #items })
+        end
+        local perfFlowRender = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.RefreshItemArea.flowRender")
         self:RenderFlowView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("guildbank.RefreshItemArea.flowRender", perfFlowRender)
+        end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("guildbank.RefreshItemArea", perfToken, { view = GetViewMode() })
     end
 end
 
@@ -1639,6 +1674,7 @@ function GuildBankFrame:UpdateGuildName()
 end
 
 function GuildBankFrame:UpdateLayout()
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("guildbank.UpdateLayout.total")
     if not frame or not frame:IsShown() then return end
     self:SyncViewModeLabel()
     self:UpdateGuildName()
@@ -1648,6 +1684,9 @@ function GuildBankFrame:UpdateLayout()
     self:UpdateInfoText()
     self:UpdateBuyButton()
     self:RefreshItemArea()
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("guildbank.UpdateLayout.total", perfToken, { tab = currentTab })
+    end
 end
 
 function GuildBankFrame:UpdateCurrentTabSlotSummary()
@@ -2060,15 +2099,15 @@ local function ParseGuildBankMoneyInputToCopper(raw)
         return ClampGuildBankMoneyCopper(math.floor(total))
     end
 
-    local c = tonumber(s)
-    if c and c > 0 then
-        return ClampGuildBankMoneyCopper(math.floor(c + 0.5))
+    local g = tonumber(s)
+    if g and g > 0 then
+        return ClampGuildBankMoneyCopper(math.floor(g * 10000 + 0.5))
     end
     return nil
 end
 
 StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
-    text = "Deposit amount (copper, or e.g. 50g, 5k, 12g34s):",
+    text = "Deposit amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
@@ -2093,7 +2132,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
 }
 
 StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
-    text = "Withdraw amount (copper, or e.g. 50g, 5k, 12g34s):",
+    text = "Withdraw amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,

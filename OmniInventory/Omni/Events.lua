@@ -15,6 +15,8 @@ local Events = Omni.Events
 -- =============================================================================
 
 local BUCKET_DELAY = 0.05  -- 50ms window for coalescing events
+local BAG_UPDATE_CHUNK_SIZE = 2
+local BAG_UPDATE_CHUNK_TICK = 0.02
 
 -- =============================================================================
 -- State
@@ -22,10 +24,62 @@ local BUCKET_DELAY = 0.05  -- 50ms window for coalescing events
 
 local buckets = {}  -- { eventName = { timer, callback, payload } }
 local eventFrame = CreateFrame("Frame")
-local inventorySessionBaselineDone = false
-local inventoryNewTrackingReady = false
-local inventoryBaselineScheduled = false
-local inventoryBaselineDeferFrame = nil
+local bagUpdateChunkFrame = nil
+local bagUpdateChunkQueue = nil
+
+local function StopBagUpdateChunking()
+    if bagUpdateChunkFrame then
+        bagUpdateChunkFrame:SetScript("OnUpdate", nil)
+    end
+    bagUpdateChunkQueue = nil
+end
+
+local function StartBagUpdateChunking(modifiedBags)
+    local bagIDs = {}
+    for bagID in pairs(modifiedBags or {}) do
+        if type(bagID) == "number" and bagID >= 0 and bagID <= 4 then
+            bagIDs[#bagIDs + 1] = bagID
+        end
+    end
+    if #bagIDs == 0 then
+        return false
+    end
+    table.sort(bagIDs)
+    bagUpdateChunkQueue = {
+        bagIDs = bagIDs,
+        idx = 1,
+        elapsed = 0,
+    }
+    bagUpdateChunkFrame = bagUpdateChunkFrame or CreateFrame("Frame")
+    bagUpdateChunkFrame:SetScript("OnUpdate", function(self, elapsed)
+        if not bagUpdateChunkQueue then
+            self:SetScript("OnUpdate", nil)
+            return
+        end
+        bagUpdateChunkQueue.elapsed = (bagUpdateChunkQueue.elapsed or 0) + (elapsed or 0)
+        if bagUpdateChunkQueue.elapsed < BAG_UPDATE_CHUNK_TICK then
+            return
+        end
+        bagUpdateChunkQueue.elapsed = 0
+        local chunk = {}
+        local endIdx = math.min(
+            bagUpdateChunkQueue.idx + BAG_UPDATE_CHUNK_SIZE - 1,
+            #bagUpdateChunkQueue.bagIDs
+        )
+        for i = bagUpdateChunkQueue.idx, endIdx do
+            chunk[bagUpdateChunkQueue.bagIDs[i]] = true
+        end
+        bagUpdateChunkQueue.idx = endIdx + 1
+        if Omni.Frame and Omni.Frame.IsShown and Omni.Frame:IsShown() and Omni.Frame.UpdateLayout then
+            Omni.Frame:UpdateLayout(chunk, { reason = "bag_update_chunk" })
+        end
+        if bagUpdateChunkQueue.idx > #bagUpdateChunkQueue.bagIDs then
+            self:SetScript("OnUpdate", nil)
+            bagUpdateChunkQueue = nil
+        end
+    end)
+    return true
+end
 
 -- =============================================================================
 -- Bucket Manager
@@ -57,6 +111,9 @@ function Events:RegisterBucketEvent(eventName, callback)
             -- Fire the callback with accumulated payload
             local payload = bucket.payload
             bucket.payload = {}  -- Reset for next batch
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:CountBucket(eventName, true)
+            end
             bucket.callback(payload)
         end
     end)
@@ -94,6 +151,9 @@ end
 -- =============================================================================
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:CountBucket(event, false)
+    end
     -- Check for bucketed events
     local bucket = buckets[event]
     if bucket then
@@ -123,45 +183,56 @@ end)
 
 --- Initialize with common bag events
 function Events:Init()
-    inventorySessionBaselineDone = false
-    inventoryNewTrackingReady = false
-    inventoryBaselineScheduled = false
-    if inventoryBaselineDeferFrame then
-        inventoryBaselineDeferFrame:SetScript("OnUpdate", nil)
-        inventoryBaselineDeferFrame:Hide()
-        inventoryBaselineDeferFrame = nil
-    end
-
     -- These are the primary events that can cause rapid updates
     -- The callback receives a table of modified bagIDs
 
     self:RegisterBucketEvent("BAG_UPDATE", function(modifiedBags)
-        if Omni.Categorizer and inventoryNewTrackingReady then
-            local API = Omni.API
-            for bagID in pairs(modifiedBags) do
-                if type(bagID) == "number" and bagID >= 0 and bagID <= 4 then
-                    local numSlots = GetContainerNumSlots(bagID) or 0
-                    for slot = 1, numSlots do
-                        local link = API and API:GetItemLinkBySlot(bagID, slot)
-                            or GetContainerItemLink(bagID, slot)
-                        if link then
-                            local itemID = API and API:GetIdFromLink(link)
-                                or tonumber(string.match(link, "item:(%d+)"))
-                            if itemID then
-                                Omni.Categorizer:MarkAsNew(itemID)
-                            end
-                        end
-                    end
+        local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("events.BAG_UPDATE.flush")
+        local hasPlayerBagChange = false
+        local hasBankBagChange = false
+        local hasTrigger = modifiedBags and modifiedBags._trigger == true
+
+        for bagID in pairs(modifiedBags or {}) do
+            if type(bagID) == "number" then
+                if bagID >= 0 and bagID <= 4 then
+                    hasPlayerBagChange = true
+                elseif bagID == -1 or (bagID >= 5 and bagID <= 11) then
+                    hasBankBagChange = true
                 end
             end
         end
 
-        -- Update the frame
-        if Omni.Frame then
-            Omni.Frame:UpdateLayout(modifiedBags)
+        if hasTrigger then
+            hasPlayerBagChange = true
+            hasBankBagChange = true
         end
-        if Omni.BankFrame and Omni.BankFrame:IsShown() then
+
+        -- Update the frame
+        if Omni.Frame and Omni.Frame.IsShown and Omni.Frame:IsShown() and hasPlayerBagChange then
+            local bagCount = 0
+            for bagID in pairs(modifiedBags or {}) do
+                if type(bagID) == "number" and bagID >= 0 and bagID <= 4 then
+                    bagCount = bagCount + 1
+                end
+            end
+            if bagCount > BAG_UPDATE_CHUNK_SIZE and not hasTrigger then
+                StartBagUpdateChunking(modifiedBags)
+            else
+                StopBagUpdateChunking()
+                Omni.Frame:UpdateLayout(modifiedBags, { reason = "bag_update" })
+            end
+        else
+            StopBagUpdateChunking()
+        end
+        if Omni.BankFrame and Omni.BankFrame:IsShown() and hasBankBagChange then
             Omni.BankFrame:UpdateLayout()
+        end
+        if Omni._perfEnabled and Omni.Perf then
+            local bagCount = 0
+            for _ in pairs(modifiedBags or {}) do
+                bagCount = bagCount + 1
+            end
+            Omni.Perf:End("events.BAG_UPDATE.flush", perfToken, { changedBags = bagCount })
         end
     end)
 
@@ -252,12 +323,30 @@ function Events:Init()
         end
     end)
 
+    self:RegisterEvent("MERCHANT_SHOW", function()
+        if Omni.Frame and Omni.Frame.SetMerchantOpen then
+            Omni.Frame:SetMerchantOpen(true)
+            if Omni.Frame.IsShown and Omni.Frame:IsShown() then
+                Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = "vendor_transition" })
+            end
+        end
+    end)
+
+    self:RegisterEvent("MERCHANT_CLOSED", function()
+        if Omni.Frame and Omni.Frame.SetMerchantOpen then
+            Omni.Frame:SetMerchantOpen(false)
+            if Omni.Frame.IsShown and Omni.Frame:IsShown() then
+                Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = "vendor_transition" })
+            end
+        end
+    end)
+
     self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
         -- ʕ •ᴥ•ʔ✿ Always re-render so secure attributes / positions / new
         -- items missed during combat are restored. UpdateLayout no longer
         -- requires IsShown(), so this is safe even when bags are hidden. ✿ ʕ •ᴥ•ʔ
         if Omni.Frame and Omni.Frame.UpdateLayout then
-            pcall(Omni.Frame.UpdateLayout, Omni.Frame)
+            pcall(Omni.Frame.UpdateLayout, Omni.Frame, nil, { reason = "player_regen" })
         end
         if Omni.BankFrame and Omni.BankFrame.UpdateLayout
                 and Omni.BankFrame:IsShown() then
@@ -271,9 +360,10 @@ function Events:Init()
 
     -- Item info received (async data load)
     self:RegisterBucketEvent("GET_ITEM_INFO_RECEIVED", function()
+        local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("events.GET_ITEM_INFO_RECEIVED.flush")
         if Omni.Frame and Omni.Frame:IsShown() then
             -- Refresh layout to fix "Miscellaneous" items that now have data
-            Omni.Frame:UpdateLayout()
+            Omni.Frame:UpdateLayout(nil, { reason = "item_info_received" })
         end
         if Omni.BankFrame and Omni.BankFrame:IsShown() then
             Omni.BankFrame:UpdateLayout()
@@ -281,42 +371,11 @@ function Events:Init()
         if Omni.GuildBankFrame and Omni.GuildBankFrame:IsShown() then
             Omni.GuildBankFrame:UpdateLayout()
         end
-    end)
-
-    self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
-        if inventorySessionBaselineDone or inventoryBaselineScheduled then
-            return
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("events.GET_ITEM_INFO_RECEIVED.flush", perfToken)
         end
-        inventoryBaselineScheduled = true
-
-        local acc = 0
-        inventoryBaselineDeferFrame = CreateFrame("Frame")
-        local defer = inventoryBaselineDeferFrame
-        defer:SetScript("OnUpdate", function(self, elapsed)
-            acc = acc + (elapsed or 0)
-            if acc < 0.4 then
-                return
-            end
-            self:SetScript("OnUpdate", nil)
-            self:Hide()
-            inventoryBaselineDeferFrame = nil
-            inventorySessionBaselineDone = true
-            inventoryNewTrackingReady = true
-            if Omni.Categorizer then
-                Omni.Categorizer:ClearAllNewItems()
-                if Omni.Categorizer.SnapshotInventory then
-                    Omni.Categorizer:SnapshotInventory()
-                end
-            end
-            if Omni.Frame and Omni.Frame.UpdateLayout then
-                Omni.Frame:UpdateLayout()
-            end
-            if Omni.BankFrame and Omni.BankFrame.UpdateLayout and Omni.BankFrame:IsShown() then
-                Omni.BankFrame:UpdateLayout()
-            end
-        end)
-        defer:Show()
     end)
+
 end
 
 print("|cFF00FF00OmniInventory|r: Event Bucketing system loaded")

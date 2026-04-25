@@ -20,6 +20,8 @@ The main frame is the primary window for OmniInventory, providing the container 
 5. B key toggles visibility
 6. Flow mode should re-pack categories as soon as the client reflects an item entering or leaving a bag slot, even if the bucketed `BAG_UPDATE` refresh has not fired yet
 7. The header includes a left-of-bag helper button that opens the `.finddungeon` popup wrapper
+8. When enabled, pressing AttuneHelper's mini sort button switches OmniInventory into bag preview for the configured target bag (`0` backpack or `1` first bag) before AttuneHelper moves items
+9. AttuneHelper mini-frame embedding is frame-level only: OmniInventory may parent, show, hide, and style the mini frame, but AttuneHelper owns child button visibility and layout
 
 ---
 
@@ -73,6 +75,10 @@ Watch a source bag slot after a user action and trigger an early full flow-mode 
 ### Frame:SetView(mode)
 
 Switch view mode: "grid", "flow", "list"
+
+### Frame:SetAttuneHelperSortBagView()
+
+Switch to bag view and select the configured AttuneHelper mini-sort target bag when the integration setting is enabled.
 
 ---
 
@@ -152,6 +158,30 @@ Switch view mode: "grid", "flow", "list"
 
 **Expected:** Selling items rapidly does not leave stale gaps at the front of flow-mode categories
 
+### Positive Flow: AttuneHelper Mini Sort Bag Preview
+
+**Precondition:** AttuneHelper is loaded, its mini buttons are embedded, and `AH Sort View` is enabled in OmniInventory settings
+
+1. Open OmniInventory
+2. Set `AH Sort Bag` to `Bag 1`
+3. Press `AttuneHelperMiniSortButton` or run AttuneHelper's prepare-disenchant mini sort action
+4. Verify OmniInventory switches to `Bag` view and highlights bag 1
+5. Change `AH Sort Bag` to `Backpack`
+6. Press the mini sort button again
+7. Verify OmniInventory switches to `Bag` view and highlights bag 0
+
+**Expected:** Bag events from AttuneHelper's item moves refresh the selected destination bag instead of leaving the layout scoped to the wrong bag.
+
+### Edge Case: AttuneHelper Dynamic Mini Buttons
+
+**Precondition:** AttuneHelper is loaded, mini mode is embedded, and OmniInventory is open
+
+1. Press AttuneHelper mini buttons that toggle between sort/vendor-style states
+2. Verify OmniInventory does not force hidden AttuneHelper child buttons visible
+3. Verify AttuneHelper's own mini button layout remains intact across repeated presses
+
+**Expected:** OmniInventory embeds the mini frame without overriding AttuneHelper's child button layout decisions.
+
 ### Edge Case: Drag Within Bags
 
 **Precondition:** Main frame is in `flow` view with at least one draggable item
@@ -161,6 +191,17 @@ Switch view mode: "grid", "flow", "list"
 3. Drop the item and verify flow mode refreshes once the move completes
 
 **Expected:** Internal drag targets stay stable during the drag, then the category layout reconciles immediately after drop
+
+### Positive Flow: Drop Into Empty Slot In Grid/Bag View
+
+**Precondition:** Main frame is in `grid` or `bag` view and at least one visible slot is empty
+
+1. Pick up any inventory item from a populated slot
+2. Drag it onto a visible empty slot cell in OmniInventory
+3. Drop the item
+4. Verify the item lands in that exact target slot
+
+**Expected:** Empty cells in `grid` and `bag` views are real `(bagID, slotID)` slots and accept drag/drop directly
 
 ---
 
@@ -172,3 +213,4 @@ Switch view mode: "grid", "flow", "list"
 - Position saves between sessions
 - B key toggles
 - ESC closes
+

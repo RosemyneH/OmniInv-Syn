@@ -407,6 +407,25 @@ local function HideItemCooldown(button)
     end
 end
 
+local function ShouldShowEmptyDropHighlight(button)
+    if not button or not button.itemInfo or not button.itemInfo.__empty then
+        return false
+    end
+    return CursorHasItem and CursorHasItem() and true or false
+end
+
+local function UpdateEmptyDropHighlight(button)
+    if not button or not button.emptyDropHighlight then
+        return
+    end
+
+    if ShouldShowEmptyDropHighlight(button) then
+        button.emptyDropHighlight:Show()
+    else
+        button.emptyDropHighlight:Hide()
+    end
+end
+
 -- =============================================================================
 -- Button Creation
 -- =============================================================================
@@ -544,6 +563,12 @@ function ItemButton:Create(parent)
     button.dimOverlay:SetVertexColor(0, 0, 0, 0.7)
     button.dimOverlay:Hide()
 
+    button.emptyDropHighlight = button:CreateTexture(nil, "OVERLAY", nil, 8)
+    button.emptyDropHighlight:SetAllPoints(button.icon)
+    button.emptyDropHighlight:SetTexture("Interface\\Buttons\\WHITE8X8")
+    button.emptyDropHighlight:SetVertexColor(0.25, 0.85, 1, 0.35)
+    button.emptyDropHighlight:Hide()
+
     -- Pin/Favorite icon (star in top-right corner)
     button.pinIcon = button:CreateTexture(nil, "OVERLAY")
     button.pinIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1") -- Star icon
@@ -628,6 +653,12 @@ function ItemButton:Create(parent)
 
     button:HookScript("OnLeave", function(self)
         ItemButton:OnLeave(self)
+    end)
+
+    button:HookScript("OnUpdate", function(self)
+        if self.__emptyDropHighlightHovering then
+            UpdateEmptyDropHighlight(self)
+        end
     end)
 
     button:HookScript("OnDragStart", function(self)
@@ -806,10 +837,18 @@ function ItemButton:SetItem(button, itemInfo)
 
     button.itemInfo = itemInfo
 
-    if not itemInfo then
+    if itemInfo and itemInfo.__empty then
+        local prevSlotID = button.slotID
+        button.bagID = itemInfo.bagID
+        button.slotID = itemInfo.slotID
+        if itemInfo.slotID and button.SetID and prevSlotID ~= itemInfo.slotID then
+            pcall(button.SetID, button, itemInfo.slotID)
+        end
+
         button.icon:SetTexture(nil)
         button.count:SetText("")
         button.count:Hide()
+        pcall(button.EnableMouse, button, true)
         local grey = 0.3
         if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
@@ -817,12 +856,35 @@ function ItemButton:SetItem(button, itemInfo)
         if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
         button.glow:Hide()
         button.dimOverlay:Hide()
+        UpdateEmptyDropHighlight(button)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
         button.__lastRenderKey = nil
         return
     end
+
+    if not itemInfo then
+        button.icon:SetTexture(nil)
+        button.count:SetText("")
+        button.count:Hide()
+        pcall(button.EnableMouse, button, false)
+        local grey = 0.3
+        if button.borderTop then button.borderTop:SetVertexColor(grey, grey, grey, 1) end
+        if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
+        if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
+        if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
+        button.glow:Hide()
+        button.dimOverlay:Hide()
+        UpdateEmptyDropHighlight(button)
+        HideAttuneDisplay(button)
+        if button.forgeText then button.forgeText:Hide() end
+        HideItemCooldown(button)
+        button.__lastRenderKey = nil
+        return
+    end
+
+    pcall(button.EnableMouse, button, true)
 
     local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
     local attuneSettings = GetAttuneSettings()
@@ -922,6 +984,7 @@ function ItemButton:SetItem(button, itemInfo)
         button.icon:SetDesaturated(false)
         button.icon:SetAlpha(1)
     end
+    UpdateEmptyDropHighlight(button)
 
     -- Show pin icon if item is pinned
     if isPinned then
@@ -1066,6 +1129,7 @@ function ItemButton:OnClick(button, mouseButton)
     end
 
     QueueOptimisticFlowRefresh(button, CursorHasItem and CursorHasItem())
+    UpdateEmptyDropHighlight(button)
 end
 
 function ItemButton:OnEnter(button)
@@ -1107,9 +1171,16 @@ function ItemButton:OnEnter(button)
     if Omni.Frame and Omni.Frame.HighlightItem then
         Omni.Frame:HighlightItem(button.itemInfo)
     end
+
+    button.__emptyDropHighlightHovering = true
+    UpdateEmptyDropHighlight(button)
 end
 
 function ItemButton:OnLeave(button)
+    button.__emptyDropHighlightHovering = false
+    if button.emptyDropHighlight then
+        button.emptyDropHighlight:Hide()
+    end
     GameTooltip:Hide()
     if ResetCursor then
         ResetCursor()
@@ -1135,6 +1206,7 @@ function ItemButton:Reset(button)
     button.itemInfo = nil
     button.__lastRenderKey = nil
     button.__omniActionStateKey = nil
+    button.__emptyDropHighlightHovering = false
     button.bagID = nil
     button.slotID = nil
     if button.icon then button.icon:SetTexture(nil) end
@@ -1153,6 +1225,7 @@ function ItemButton:Reset(button)
     if button.glow then button.glow:Hide() end
     if button.dimOverlay then button.dimOverlay:Hide() end
     if button.pinIcon then button.pinIcon:Hide() end
+    if button.emptyDropHighlight then button.emptyDropHighlight:Hide() end
     HideAttuneDisplay(button)
     if button.forgeText then button.forgeText:Hide() end
     HideItemCooldown(button)

@@ -52,6 +52,7 @@ local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
+local IsValidBagID
 -- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
 -- bag icon forced bag view. ToggleBagPreview uses it to restore the
 -- prior view (flow/grid/list) when the bag is unselected. ✿ ʕ •ᴥ•ʔ
@@ -84,18 +85,44 @@ local burstRefreshFrame = nil
 local burstRefreshElapsed = 0
 local burstRefreshPending = false
 local BURST_FULL_REFRESH_DELAY = 0.20
+local FORCED_FULL_REFRESH_COOLDOWN = 0.20
+local lastForcedFullRefreshAt = 0
 local optimisticFlowRefreshFrame = nil
 local optimisticFlowRefreshWatches = {}
 local lastOptimisticFlowRefreshAt = 0
 local OPTIMISTIC_FLOW_REFRESH_TIMEOUT = 0.75
 local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
+local flowLayoutCache = nil
+local vendorFlowLayoutFreeze = nil
+local wasMerchantOpen = false
+local lastRenderedShowSignature = nil
+local renderScratch = {
+    categories = {},
+    categoryOrder = {},
+    touched = {},
+    usedCategoryKeys = {},
+    usedTouchedBags = {},
+    headerByCategory = {},
+}
+
+local function ClearArray(t)
+    for i = #t, 1, -1 do
+        t[i] = nil
+    end
+end
+
+local function ClearMap(t)
+    for k in pairs(t) do
+        t[k] = nil
+    end
+end
 
 local function InCombat()
     return InCombatLockdown and InCombatLockdown()
 end
 
 local function IsMerchantOpen()
-    return MerchantFrame and MerchantFrame:IsShown()
+    return Omni and Omni._merchantOpen == true
 end
 
 local function HasBagChangeEntries(changedBags)
@@ -118,6 +145,90 @@ local function StopBurstFullRefresh()
     end
 end
 
+Frame._renderCacheEpoch = 0
+Frame._layoutFlushState = Frame._layoutFlushState or {
+    frame = nil,
+    pending = false,
+    changedBags = nil,
+    opts = nil,
+}
+
+function Frame:_QueueLayoutUpdate(changedBags, opts)
+    local layoutFlushState = self._layoutFlushState
+    local incomingOpts = {}
+    if type(opts) == "table" then
+        for k, v in pairs(opts) do
+            incomingOpts[k] = v
+        end
+    end
+    layoutFlushState.opts = layoutFlushState.opts or {}
+
+    if incomingOpts.forceFull then
+        layoutFlushState.opts.forceFull = true
+    end
+    if incomingOpts.reason then
+        layoutFlushState.opts.reason = incomingOpts.reason
+    end
+
+    if layoutFlushState.changedBags == nil then
+        if type(changedBags) == "table" then
+            layoutFlushState.changedBags = {}
+            for bagID, changed in pairs(changedBags) do
+                if type(bagID) == "number" and changed then
+                    layoutFlushState.changedBags[bagID] = true
+                elseif bagID == "_trigger" and changed then
+                    layoutFlushState.changedBags._trigger = changed
+                end
+            end
+        else
+            layoutFlushState.changedBags = nil
+        end
+    elseif type(changedBags) == "table" then
+        for bagID, changed in pairs(changedBags) do
+            if type(bagID) == "number" and changed then
+                layoutFlushState.changedBags[bagID] = true
+            elseif bagID == "_trigger" and changed then
+                layoutFlushState.changedBags._trigger = changed
+            end
+        end
+    end
+
+    if layoutFlushState.pending then
+        return
+    end
+
+    layoutFlushState.pending = true
+    if not layoutFlushState.frame then
+        layoutFlushState.frame = CreateFrame("Frame")
+    end
+
+    layoutFlushState.frame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        layoutFlushState.pending = false
+        local flushChangedBags = layoutFlushState.changedBags
+        local flushOpts = layoutFlushState.opts or {}
+        layoutFlushState.changedBags = nil
+        layoutFlushState.opts = nil
+        flushOpts.__coalesced = true
+        if Frame and Frame.UpdateLayout then
+            Frame:UpdateLayout(flushChangedBags, flushOpts)
+        end
+    end)
+end
+
+local function TryForceFullRefresh(reason)
+    local now = (GetTime and GetTime()) or 0
+    if now > 0 and lastForcedFullRefreshAt > 0 and (now - lastForcedFullRefreshAt) < FORCED_FULL_REFRESH_COOLDOWN then
+        return false
+    end
+    lastForcedFullRefreshAt = now
+    if Omni.Frame and Omni.Frame.UpdateLayout then
+        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "forced_full", immediate = true })
+        return true
+    end
+    return false
+end
+
 local function RequestBurstFullRefresh()
     burstRefreshPending = true
     burstRefreshElapsed = 0
@@ -135,10 +246,39 @@ local function RequestBurstFullRefresh()
         self:SetScript("OnUpdate", nil)
         burstRefreshPending = false
         burstRefreshElapsed = 0
-        if Omni.Frame and Omni.Frame.UpdateLayout then
-            Omni.Frame:UpdateLayout(nil, { forceFull = true })
-        end
+        TryForceFullRefresh("burst_full")
     end)
+end
+
+local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep, filterName)
+    local parts = {
+        tostring(math.floor((usableWidth or 0) + 0.5)),
+        tostring(math.floor(((itemStep or 0) * 100) + 0.5)),
+        tostring(filterName or "none"),
+    }
+    for _, catName in ipairs(categoryOrder or {}) do
+        local count = categories and categories[catName] and #categories[catName] or 0
+        parts[#parts + 1] = tostring(catName) .. ":" .. tostring(count)
+    end
+    return table.concat(parts, "|")
+end
+
+local function ItemRenderKey(itemInfo)
+    if not itemInfo or itemInfo.__empty then
+        return "empty:" .. tostring(Frame._renderCacheEpoch or 0)
+    end
+    return table.concat({
+        tostring(Frame._renderCacheEpoch or 0),
+        tostring(itemInfo.itemID or 0),
+        tostring(itemInfo.bagID or -1),
+        tostring(itemInfo.slotID or -1),
+        tostring(itemInfo.hyperlink or ""),
+        tostring(itemInfo.iconFileID or ""),
+        tostring(itemInfo.stackCount or 1),
+        tostring(itemInfo.quality or 0),
+        tostring(itemInfo.category or "Miscellaneous"),
+        tostring(itemInfo.isQuickFiltered == true),
+    }, ":")
 end
 
 local function BuildBagSlotStateKey(info)
@@ -160,6 +300,45 @@ local function GetBagSlotStateKey(bagID, slotID)
     end
 
     return BuildBagSlotStateKey(OmniC_Container.GetContainerItemInfo(bagID, slotID))
+end
+
+local function ComputeBagContentSignature()
+    local parts = {}
+    for _, bagID in ipairs(BAG_IDS) do
+        local numSlots = GetContainerNumSlots(bagID) or 0
+        parts[#parts + 1] = "b" .. tostring(bagID) .. ":" .. tostring(numSlots)
+        for slotID = 1, numSlots do
+            local texture, count = GetContainerItemInfo(bagID, slotID)
+            if texture then
+                parts[#parts + 1] = tostring(texture) .. ":" .. tostring(count or 1)
+            end
+        end
+    end
+    return table.concat(parts, "|")
+end
+
+local function ComputeShowSignature()
+    local parts = {
+        tostring(currentView or "flow"),
+        tostring(activeFilter or "none"),
+        tostring(selectedBagID or "all"),
+    }
+    if mainFrame then
+        local w, h = mainFrame:GetSize()
+        local s = mainFrame:GetScale() or 1
+        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
+    end
+    parts[#parts + 1] = ComputeBagContentSignature()
+    return table.concat(parts, "|")
+end
+
+local function RebuildPopulatedItemButtonList()
+    ClearArray(itemButtons)
+    IterateSlotButtons(function(_, _, btn)
+        if btn and btn.itemInfo and not (btn.itemInfo and btn.itemInfo.__empty) then
+            itemButtons[#itemButtons + 1] = btn
+        end
+    end)
 end
 
 local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
@@ -188,6 +367,25 @@ local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
     end
 
     return false
+end
+
+local function NarrowChangedBagsToSelectedScope(changedBags)
+    if type(changedBags) ~= "table" then
+        return changedBags
+    end
+    if currentView ~= "bag" then
+        return changedBags
+    end
+    if not IsValidBagID(selectedBagID) then
+        return changedBags
+    end
+    if changedBags._trigger then
+        return changedBags
+    end
+    if changedBags[selectedBagID] then
+        return { [selectedBagID] = true }
+    end
+    return {}
 end
 
 local function HasOptimisticFlowRefreshWatches()
@@ -236,9 +434,7 @@ local function StartOptimisticFlowRefreshWatcher()
             lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
             StopBurstFullRefresh()
             StopOptimisticFlowRefreshWatcher()
-            if Omni.Frame and Omni.Frame.UpdateLayout then
-                Omni.Frame:UpdateLayout(nil, { forceFull = true })
-            end
+            TryForceFullRefresh("optimistic_flow")
             return
         end
 
@@ -258,6 +454,31 @@ local function SetButtonItem(btn, itemInfo)
 
     if Omni.ItemButton and Omni.ItemButton.SetItem then
         Omni.ItemButton:SetItem(btn, itemInfo)
+    end
+end
+
+function Frame:InvalidateRenderCaches(opts)
+    opts = opts or {}
+    self._renderCacheEpoch = (self._renderCacheEpoch or 0) + 1
+
+    if not opts.clearLayout and not opts.clearSearchCache then
+        return
+    end
+
+    for _, byBag in pairs(slotButtons) do
+        for _, btn in pairs(byBag) do
+            if btn then
+                if opts.clearLayout then
+                    btn._oiLayoutX = nil
+                    btn._oiLayoutY = nil
+                    btn._oiLayoutScale = nil
+                end
+                if opts.clearSearchCache then
+                    btn._cachedSearchName = nil
+                    btn._cachedSearchNameLower = nil
+                end
+            end
+        end
     end
 end
 
@@ -297,6 +518,26 @@ local function IsAttuneHelperMiniNoBorderEnabled()
     return global and global.attuneHelperMiniNoBorder == true
 end
 
+function Frame:IsAttuneHelperSortBagViewEnabled()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    if global and global.attuneHelperSortBagView == nil then
+        global.attuneHelperSortBagView = true
+    end
+    return not global or global.attuneHelperSortBagView ~= false
+end
+
+function Frame:GetAttuneHelperSortBagID()
+    local global = OmniInventoryDB and OmniInventoryDB.global
+    local bagID = global and global.attuneHelperSortBagID
+    if bagID ~= 0 and bagID ~= 1 then
+        bagID = 1
+        if global then
+            global.attuneHelperSortBagID = bagID
+        end
+    end
+    return bagID
+end
+
 local function ApplyEmbeddedMiniBorderStyle(miniFrame)
     if not miniFrame then return end
     if not miniFrame.SetBackdropBorderColor then return end
@@ -306,6 +547,34 @@ local function ApplyEmbeddedMiniBorderStyle(miniFrame)
     else
         miniFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
     end
+end
+
+function Frame:HookAttuneHelperMiniSortButton()
+    local sortBtn = _G.AttuneHelperMiniSortButton
+    if not sortBtn or sortBtn.__OmniSortBagViewHooked then
+        return false
+    end
+
+    sortBtn.__OmniSortBagViewHooked = true
+    sortBtn:HookScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" and Frame.SetAttuneHelperSortBagView then
+            sortBtn.__OmniSortBagViewMouseDown = true
+            Frame:SetAttuneHelperSortBagView()
+        end
+    end)
+    sortBtn:HookScript("OnClick", function(_, button)
+        if sortBtn.__OmniSortBagViewMouseDown then
+            sortBtn.__OmniSortBagViewMouseDown = nil
+            return
+        end
+        if button and button ~= "LeftButton" then
+            return
+        end
+        if Frame.SetAttuneHelperSortBagView then
+            Frame:SetAttuneHelperSortBagView()
+        end
+    end)
+    return true
 end
 
 -- ʕ •ᴥ•ʔ✿ Rebind drag-drop on embedded mini buttons so cursor items feed
@@ -324,34 +593,10 @@ local function GetAttuneHelperAddon()
     return nil
 end
 
-local function RebindEmbeddedDragHandlers()
-    local AH = GetAttuneHelperAddon()
-
-    local equipBtn = _G.AttuneHelperMiniEquipButton
-    if equipBtn and not equipBtn.__OmniEmbedDragFixed then
-        equipBtn.__OmniEmbedDragFixed = true
-        equipBtn:SetScript("OnReceiveDrag", function()
-            local addon = GetAttuneHelperAddon()
-            if addon and addon.AddCursorItemToAHSet then
-                addon.AddCursorItemToAHSet()
-            elseif _G.EquipAllButton and _G.EquipAllButton:GetScript("OnReceiveDrag") then
-                _G.EquipAllButton:GetScript("OnReceiveDrag")()
-            end
-        end)
-    end
-
-    local vendorBtn = _G.AttuneHelperMiniVendorButton
-    if vendorBtn and not vendorBtn.__OmniEmbedDragFixed then
-        vendorBtn.__OmniEmbedDragFixed = true
-        vendorBtn:SetScript("OnReceiveDrag", function(self)
-            local addon = GetAttuneHelperAddon()
-            if addon and addon.AddCursorItemToIgnore then
-                addon.AddCursorItemToIgnore()
-            elseif _G.VendorAttunedButton and _G.VendorAttunedButton:GetScript("OnReceiveDrag") then
-                _G.VendorAttunedButton:GetScript("OnReceiveDrag")(self)
-            end
-        end)
-    end
+local function IsAttuneHelperAvailable()
+    return _G.AttuneHelperMiniFrame ~= nil
+        or _G.AttuneHelperFrame ~= nil
+        or GetAttuneHelperAddon() ~= nil
 end
 
 local function RestoreEmbeddedAttuneHelper()
@@ -416,6 +661,8 @@ local function InstallAttuneHelperEarlyHooks()
         end
     end
 
+    Frame:HookAttuneHelperMiniSortButton()
+
     return true
 end
 
@@ -451,6 +698,55 @@ function Frame:HideAttuneHelperUntilOpened()
     end)
 end
 
+function Frame:StopEmbeddedAttuneHelperRetry()
+    local watcher = self._embedRetryWatcher
+    if watcher then
+        watcher:SetScript("OnUpdate", nil)
+        watcher.__elapsed = 0
+        watcher.__totalElapsed = 0
+    end
+end
+
+function Frame:EnsureEmbeddedAttuneHelperRetry()
+    if not self._embedRetryWatcher then
+        self._embedRetryWatcher = CreateFrame("Frame")
+        self._embedRetryWatcher.__elapsed = 0
+        self._embedRetryWatcher.__totalElapsed = 0
+    end
+    local watcher = self._embedRetryWatcher
+    if watcher:GetScript("OnUpdate") then
+        return
+    end
+
+    watcher:SetScript("OnUpdate", function(frameWatcher, elapsed)
+        frameWatcher.__elapsed = (frameWatcher.__elapsed or 0) + elapsed
+        frameWatcher.__totalElapsed = (frameWatcher.__totalElapsed or 0) + elapsed
+        if frameWatcher.__elapsed < 0.2 then return end
+        frameWatcher.__elapsed = 0
+
+        if not mainFrame or not mainFrame.footer or not mainFrame:IsShown() or not IsAttuneHelperEmbedEnabled() then
+            Frame:StopEmbeddedAttuneHelperRetry()
+            return
+        end
+
+        Frame:UpdateEmbeddedAttuneHelper()
+
+        local host = mainFrame.footer.attuneHelperHost
+        local miniFrame = _G.AttuneHelperMiniFrame
+        local embedded = host and host:IsShown()
+            and miniFrame and miniFrame:IsShown()
+            and miniFrame:GetParent() == host
+        if embedded and frameWatcher.__totalElapsed > 1.0 then
+            Frame:StopEmbeddedAttuneHelperRetry()
+            return
+        end
+
+        if frameWatcher.__totalElapsed > 4 then
+            Frame:StopEmbeddedAttuneHelperRetry()
+        end
+    end)
+end
+
 local function GetSavedViewMode()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     return NormalizeViewMode(settings and settings.viewMode)
@@ -474,7 +770,7 @@ local function GetSavedItemGap()
     return math.max(ITEM_GAP_MIN, math.min(gap, ITEM_GAP_MAX))
 end
 
-local function IsValidBagID(bagID)
+IsValidBagID = function(bagID)
     return type(bagID) == "number" and bagID >= 0 and bagID <= 4
 end
 
@@ -1478,7 +1774,6 @@ local activeFilter = nil  -- Current active filter
 -- present in the inventory (see RebuildFilterTabs). ✿ ʕ ◕ᴥ◕ ʔ
 local SPECIAL_FILTERS = {
     { name = "All", filter = nil, color = FILTER_NEUTRAL_COLOR },
-    { name = "New", filter = "NEW_ITEMS", isSpecial = true, categoryColorFor = "New Items" },
 }
 
 local function ApplyFilterButtonVisual(btn, hovered)
@@ -1692,7 +1987,7 @@ function Frame:RebuildFilterTabs(presentCategories)
     -- (e.g. vendored every Junk item), fall back to "All" so the user
     -- isn't stuck looking at an empty filtered view. Re-apply visuals
     -- afterward so the previously-active tab no longer reads active. ✿ ʕ •ᴥ•ʔ
-    if activeFilter and activeFilter ~= "NEW_ITEMS" then
+    if activeFilter then
         local stillPresent = false
         for _, def in ipairs(defs) do
             if def.filter == activeFilter then
@@ -1717,6 +2012,7 @@ function Frame:SetQuickFilter(filterName)
         filterName = nil
     end
     activeFilter = filterName
+    self:InvalidateRenderCaches()
 
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
@@ -1726,7 +2022,7 @@ function Frame:SetQuickFilter(filterName)
         end
     end
 
-    self:UpdateLayout()
+    self:UpdateLayout(nil, { reason = "filter_change" })
 end
 
 function Frame:GetActiveFilter()
@@ -2224,6 +2520,220 @@ local function CreateFooterMiniButton(parent, def)
     return btn
 end
 
+local HONOR_PER_ARENA_POINT = 62
+local STONE_KEEPER_SHARDS_PER_100K_HONOR = 300
+local STONE_KEEPER_SHARD_ITEM_ID = 43228
+local WINTERGRASP_MARK_OF_HONOR_ITEM_ID = 43589
+
+local TRACKED_TOOLTIP_CURRENCIES = {
+    { key = "frost",      label = "Emblem of Frost",            itemID = 49426, color = { 0.70, 0.95, 1.00 } },
+    { key = "triumph",    label = "Emblem of Triumph",          itemID = 47241, color = { 1.00, 0.90, 0.45 } },
+    { key = "conquest",   label = "Emblem of Conquest",         itemID = 45624, color = { 1.00, 0.78, 0.42 } },
+    { key = "valor",      label = "Emblem of Valor",            itemID = 40753, color = { 1.00, 0.70, 0.30 } },
+    { key = "heroism",    label = "Emblem of Heroism",          itemID = 40752, color = { 0.90, 0.85, 0.80 } },
+    { key = "justice",    label = "Badge of Justice",           itemID = 29434, color = { 0.95, 0.95, 0.95 } },
+    { key = "seal",       label = "Champion's Seal",            itemID = 24131, color = { 0.95, 0.82, 0.35 } },
+    { key = "venture",    label = "Venture Coin",               itemID = 37836, color = { 0.40, 1.00, 0.70 } },
+    { key = "wgMark",     label = "Wintergrasp Mark of Honor",  itemID = WINTERGRASP_MARK_OF_HONOR_ITEM_ID, color = { 0.65, 0.90, 1.00 } },
+}
+
+local function AddThousandsSeparators(value)
+    local str = tostring(math.floor(tonumber(value) or 0))
+    local sign = ""
+    if string.sub(str, 1, 1) == "-" then
+        sign = "-"
+        str = string.sub(str, 2)
+    end
+    local left, count = str, 0
+    repeat
+        left, count = string.gsub(left, "^(-?%d+)(%d%d%d)", "%1,%2")
+    until count == 0
+    return sign .. left
+end
+
+local function FormatTooltipNumber(value)
+    value = tonumber(value) or 0
+    local absValue = math.abs(value)
+    if absValue >= 1000000 then
+        return string.format("%.1fM", value / 1000000)
+    end
+    if absValue >= 1000 then
+        return AddThousandsSeparators(value)
+    end
+    return tostring(math.floor(value))
+end
+
+local function FormatTooltipLabelIcon(itemID, fallbackIcon, label)
+    local icon = fallbackIcon
+    if itemID and GetItemIcon then
+        icon = GetItemIcon(itemID) or icon
+    end
+    if icon then
+        return string.format("|T%s:13:13:0:0|t %s", icon, label)
+    end
+    return label
+end
+
+local function FormatTooltipIconLabel(iconPath, label)
+    if iconPath and iconPath ~= "" then
+        return string.format("|T%s:13:13:0:0|t %s", iconPath, label)
+    end
+    return label
+end
+
+local function GetCurrentHonorPoints()
+    if GetHonorCurrency then
+        local honor = select(1, GetHonorCurrency())
+        if type(honor) == "number" then
+            return honor
+        end
+    end
+    return 0
+end
+
+local function GetCurrentArenaPoints()
+    if GetArenaCurrency then
+        local a, b, c = GetArenaCurrency()
+        if type(a) == "number" and a >= 0 then
+            return a
+        end
+        if type(b) == "number" and b >= 0 then
+            return b
+        end
+        if type(c) == "number" and c >= 0 then
+            return c
+        end
+    end
+    if GetArenaPoints then
+        local arena = GetArenaPoints()
+        if type(arena) == "number" and arena >= 0 then
+            return arena
+        end
+    end
+    return 0
+end
+
+local function GetStoneKeeperShardCount()
+    if GetCurrencyInfo then
+        local _, amount = GetCurrencyInfo(161)
+        if type(amount) == "number" and amount > 0 then
+            return amount
+        end
+    end
+    if GetItemCount then
+        return GetItemCount(STONE_KEEPER_SHARD_ITEM_ID, true) or 0
+    end
+    return 0
+end
+
+local function GetTrackedItemCurrencyCount(itemID)
+    if not itemID or not GetItemCount then
+        return 0
+    end
+    return GetItemCount(itemID, true) or 0
+end
+
+local function CollectTooltipCurrencies()
+    local rows = {
+        {
+            key = "honor",
+            label = "Honor Points",
+            value = GetCurrentHonorPoints(),
+            color = { 0.95, 0.35, 0.35 },
+            icon = "Interface\\Icons\\inv_bannerpvp_01",
+        },
+        {
+            key = "arena",
+            label = "Arena Points",
+            value = GetCurrentArenaPoints(),
+            color = { 0.45, 0.85, 1.00 },
+            icon = "Interface\\Icons\\achievement_pvp_h_14",
+        },
+    }
+
+    for i = 1, #TRACKED_TOOLTIP_CURRENCIES do
+        local entry = TRACKED_TOOLTIP_CURRENCIES[i]
+        rows[#rows + 1] = {
+            key = entry.key,
+            label = entry.label,
+            value = GetTrackedItemCurrencyCount(entry.itemID),
+            itemID = entry.itemID,
+            color = entry.color,
+        }
+    end
+
+    rows[#rows + 1] = {
+        key = "stoneKeeperShard",
+        label = "Stone Keeper's Shard",
+        value = GetStoneKeeperShardCount(),
+        itemID = STONE_KEEPER_SHARD_ITEM_ID,
+        color = { 0.80, 0.80, 1.00 },
+    }
+
+    return rows
+end
+
+local function ShowFooterMoneyTooltip(owner)
+    if not owner then
+        return
+    end
+
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:SetText("Money", 1, 0.85, 0.25)
+    GameTooltip:AddLine(
+        FormatTooltipIconLabel("Interface\\MoneyFrame\\UI-GoldIcon", (owner._moneyText and owner._moneyText ~= "") and owner._moneyText or "0"),
+        1, 1, 1
+    )
+
+    local currencies = CollectTooltipCurrencies()
+    if #currencies > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Currencies", 0.6, 0.85, 1)
+        for i = 1, #currencies do
+            local row = currencies[i]
+            local value = tonumber(row.value) or 0
+            if value > 0 then
+                local color = row.color or { 0.9, 0.9, 0.9 }
+                local leftLabel = FormatTooltipLabelIcon(row.itemID, row.icon, row.label)
+                local rightValue = FormatTooltipNumber(value)
+                GameTooltip:AddDoubleLine(leftLabel, rightValue, color[1], color[2], color[3], 1, 1, 1)
+            end
+        end
+
+        local honor = GetCurrentHonorPoints()
+        local stoneKeeperShards = GetStoneKeeperShardCount()
+        local honorFromShards = math.floor(stoneKeeperShards * (100000 / STONE_KEEPER_SHARDS_PER_100K_HONOR))
+        local totalHonor = honor + honorFromShards
+        local arenaFromTotalHonor = math.floor(totalHonor / HONOR_PER_ARENA_POINT)
+
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Conversions", 0.8, 0.7, 1)
+        if arenaFromTotalHonor > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\achievement_pvp_h_14", "Arena from Total Honor (62:1)"),
+                FormatTooltipNumber(arenaFromTotalHonor),
+                0.45, 0.85, 1.00, 1, 1, 1
+            )
+        end
+        if honorFromShards > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\inv_bannerpvp_01", "Honor from Shards"),
+                FormatTooltipNumber(honorFromShards),
+                0.95, 0.35, 0.35, 1, 1, 1
+            )
+        end
+        if honorFromShards > 0 then
+            GameTooltip:AddDoubleLine(
+                FormatTooltipIconLabel("Interface\\Icons\\inv_bannerpvp_01", "Total Honor (current+shards)"),
+                FormatTooltipNumber(totalHonor),
+                0.95, 0.55, 0.55, 1, 1, 1
+            )
+        end
+    end
+
+    GameTooltip:Show()
+end
+
 function Frame:CreateFooter()
     local footer = CreateFrame("Frame", nil, mainFrame)
     footer:SetHeight(FOOTER_HEIGHT)
@@ -2311,6 +2821,19 @@ function Frame:CreateFooter()
     footer.money:SetPoint("RIGHT", -6, 0)
     footer.money:SetText("0g 0s 0c")
 
+    footer.moneyHitBox = CreateFrame("Button", nil, footer)
+    footer.moneyHitBox:SetPoint("RIGHT", footer.money, "RIGHT", 2, 0)
+    footer.moneyHitBox:SetHeight(FOOTER_HEIGHT)
+    footer.moneyHitBox:SetWidth(90)
+    footer.moneyHitBox:EnableMouse(true)
+    footer.moneyHitBox:SetScript("OnEnter", function(self)
+        ShowFooterMoneyTooltip(self)
+    end)
+    footer.moneyHitBox:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    footer.moneyHitBox._moneyText = footer.money:GetText() or "0"
+
     -- ʕ •ᴥ•ʔ✿ Overflow flyout: when ribbon + money can't fit, extra buttons
     -- are re-parented here and revealed above the footer on demand ✿ ʕ •ᴥ•ʔ
     footer.overflowPopup = CreateFrame("Frame", nil, footer)
@@ -2364,6 +2887,18 @@ local function SyncBagFullAlertHitBox(footer)
     if not b or not b.label then return end
     local lw = b.label:GetStringWidth() or 8
     b:SetWidth(math.max(14, lw + 6))
+end
+
+local function SyncFooterMoneyHitBox(footer)
+    local hitBox = footer and footer.moneyHitBox
+    local money = footer and footer.money
+    if not hitBox or not money then
+        return
+    end
+    local width = (money:GetStringWidth() or 0) + 10
+    hitBox:SetWidth(math.max(45, width))
+    hitBox:ClearAllPoints()
+    hitBox:SetPoint("RIGHT", money, "RIGHT", 2, 0)
 end
 
 local function GetFooterSlotsBlockWidth(footer)
@@ -2555,22 +3090,31 @@ function Frame:UpdateEmbeddedAttuneHelper()
         return
     end
 
+    _G.AttuneHelperDB = _G.AttuneHelperDB or {}
+    local miniModeWasEnabled = (_G.AttuneHelperDB["Mini Mode"] == 1)
+    if not miniModeWasEnabled then
+        _G.AttuneHelperDB["Mini Mode"] = 1
+    end
+
+    if _G.AttuneHelper_UpdateDisplayMode and not miniModeWasEnabled then
+        _G.AttuneHelper_UpdateDisplayMode()
+    elseif _G.AttuneHelperFrame then
+        _G.AttuneHelperFrame:Hide()
+    end
+
     local miniFrame = _G.AttuneHelperMiniFrame
+    if not miniFrame then
+        -- ʕ •ᴥ•ʔ✿ Some AttuneHelper builds instantiate MiniFrame lazily.
+        -- Force one more display-mode sync after setting Mini Mode. ✿ ʕ •ᴥ•ʔ
+        if _G.AttuneHelper_UpdateDisplayMode then
+            pcall(_G.AttuneHelper_UpdateDisplayMode)
+            miniFrame = _G.AttuneHelperMiniFrame
+        end
+    end
     if not miniFrame then
         host:Hide()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
         return
-    end
-
-    _G.AttuneHelperDB = _G.AttuneHelperDB or {}
-    if _G.AttuneHelperDB["Mini Mode"] ~= 1 then
-        _G.AttuneHelperDB["Mini Mode"] = 1
-    end
-
-    if _G.AttuneHelper_UpdateDisplayMode then
-        _G.AttuneHelper_UpdateDisplayMode()
-    elseif _G.AttuneHelperFrame then
-        _G.AttuneHelperFrame:Hide()
     end
 
     if not miniFrame.__OmniEmbedHooked then
@@ -2591,7 +3135,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
             ApplyEmbeddedMiniBorderStyle(frame)
             embedHost:SetSize(frame:GetWidth(), frame:GetHeight())
             embedHost:Show()
-            RebindEmbeddedDragHandlers()
+            Frame:HookAttuneHelperMiniSortButton()
             if Frame.UpdateFooterCustomButtons then Frame:UpdateFooterCustomButtons() end
         end)
     end
@@ -2608,8 +3152,7 @@ function Frame:UpdateEmbeddedAttuneHelper()
 
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
-
-    RebindEmbeddedDragHandlers()
+    self:HookAttuneHelperMiniSortButton()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
@@ -2735,9 +3278,7 @@ function Frame:SetItemScale(scale)
     OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
     OmniInventoryDB.char.settings.itemScale = scale
 
-    IterateSlotButtons(function(_, _, btn)
-        ApplyItemButtonMetrics(btn, scale)
-    end)
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     self:UpdateLayout()
     return true
@@ -2755,6 +3296,8 @@ function Frame:SetItemGap(gap)
     OmniInventoryDB.char = OmniInventoryDB.char or {}
     OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
     OmniInventoryDB.char.settings.itemGap = gap
+
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     self:UpdateLayout()
     return true
@@ -2774,6 +3317,7 @@ end
 
 function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
+    self:InvalidateRenderCaches({ clearLayout = true })
 
     -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
     -- remembered pre-bag view -- otherwise a later bag toggle could
@@ -2869,6 +3413,7 @@ function Frame:UpdateBankTabState() end
 -- those are protected on ContainerFrameItemButtonTemplate children.
 function Frame:RefreshCombatContent(changedBags)
     if not mainFrame or not OmniC_Container then return end
+    changedBags = NarrowChangedBagsToSelectedScope(changedBags)
 
     -- ʕ •ᴥ•ʔ✿ List view parks all slot buttons at alpha 0 and drives its
     -- own insecure row widgets -- which are OOC-only anyway (list row
@@ -2886,6 +3431,11 @@ function Frame:RefreshCombatContent(changedBags)
     if type(changedBags) == "table" then
         local hasEntries = false
         for _ in pairs(changedBags) do hasEntries = true break end
+        if not hasEntries then
+            self:UpdateSlotCount()
+            self:UpdateMoney()
+            return { requiresFlowRelayout = false }
+        end
         if hasEntries and not changedBags._trigger then
             affected = changedBags
         end
@@ -2899,7 +3449,14 @@ function Frame:RefreshCombatContent(changedBags)
         requiresFlowRelayout = false,
     }
 
+    local selectedScopeBagID = IsValidBagID(selectedBagID) and selectedBagID or nil
+
     IterateSlotButtons(function(bagID, slotID, btn)
+        if selectedScopeBagID and bagID ~= selectedScopeBagID then
+            SetButtonItem(btn, nil)
+            pcall(btn.SetAlpha, btn, 0)
+            return
+        end
         local info
         if affected == nil or affected[bagID] then
             local previousInfo = btn.itemInfo
@@ -2907,9 +3464,6 @@ function Frame:RefreshCombatContent(changedBags)
             if info then
                 if Omni.Categorizer then
                     info.category = info.category or Omni.Categorizer:GetCategory(info)
-                    if info.itemID and Omni.Categorizer.IsNewItem then
-                        info.isNew = Omni.Categorizer:IsNewItem(info.itemID)
-                    end
                 end
                 info.isQuickFiltered = btn.itemInfo and btn.itemInfo.isQuickFiltered or false
                 if currentView == "flow"
@@ -2926,8 +3480,13 @@ function Frame:RefreshCombatContent(changedBags)
                         and DoesFlowSlotChangeRequireRelayout(previousInfo, nil) then
                     meta.requiresFlowRelayout = true
                 end
-                SetButtonItem(btn, nil)
-                pcall(btn.SetAlpha, btn, 0)
+                if currentView == "grid" or currentView == "bag" then
+                    SetButtonItem(btn, { bagID = bagID, slotID = slotID, __empty = true })
+                    pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
+                else
+                    SetButtonItem(btn, nil)
+                    pcall(btn.SetAlpha, btn, 0)
+                end
             end
         else
             if btn.itemInfo then
@@ -2980,7 +3539,38 @@ end
 
 function Frame:UpdateLayout(changedBags, opts)
     if not mainFrame then return end
+    if not (opts and opts.__coalesced) and not (opts and opts.immediate) then
+        self:_QueueLayoutUpdate(changedBags, opts)
+        return
+    end
+
+    local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.total")
     local forceFull = opts and opts.forceFull == true
+    local updateReason = (opts and opts.reason) or "layout"
+    changedBags = NarrowChangedBagsToSelectedScope(changedBags)
+    if not forceFull and type(changedBags) == "table" then
+        local hasEntries = false
+        for _ in pairs(changedBags) do
+            hasEntries = true
+            break
+        end
+        if not hasEntries then
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                    skipped = "irrelevant_bag",
+                    reason = updateReason,
+                    view = currentView or "unknown",
+                })
+            end
+            return
+        end
+    end
+    if not forceFull and mainFrame.IsShown and not mainFrame:IsShown() then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.total", perfTotal, { skipped = "hidden", reason = updateReason })
+        end
+        return
+    end
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
     -- Structural ops on ContainerFrameItemButton children (SetParent,
@@ -3023,12 +3613,18 @@ function Frame:UpdateLayout(changedBags, opts)
         end
 
         if not forceFull then
+            -- ʕ •ᴥ•ʔ✿ Burst full relayouts are expensive and mainly needed
+            -- for flow-lane/category reconstruction. In bag/grid modes the
+            -- incremental slot refresh is already sufficient, especially
+            -- during mass operations like disenchant/vendor spam. ✿ ʕ •ᴥ•ʔ
+            local allowBurstFull = (currentView == "flow")
+                and (updateReason ~= "bag_update_chunk")
             local now = (GetTime and GetTime()) or 0
-            local suppressBurst = currentView == "flow"
+            local suppressBurst = allowBurstFull
                 and lastOptimisticFlowRefreshAt > 0
                 and now > 0
                 and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
-            if not suppressBurst then
+            if allowBurstFull and not suppressBurst then
                 RequestBurstFullRefresh()
             end
             return
@@ -3040,18 +3636,22 @@ function Frame:UpdateLayout(changedBags, opts)
     end
 
     local items = {}
+    local perfCollect = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.collect")
     if OmniC_Container then
         items = OmniC_Container.GetAllBagItems()
     end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.UpdateLayout.collect", perfCollect, { itemCount = #items, reason = updateReason })
+    end
 
-    -- Categorize items and check for new items
+    -- Categorize items
     if Omni.Categorizer then
+        local perfCategorize = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.categorize")
         for _, item in ipairs(items) do
             item.category = item.category or Omni.Categorizer:GetCategory(item)
-            -- Check if this is a new item (acquired this session)
-            if item.itemID then
-                item.isNew = Omni.Categorizer:IsNewItem(item.itemID)
-            end
+        end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.categorize", perfCategorize, { reason = updateReason })
         end
     end
 
@@ -3086,9 +3686,6 @@ function Frame:UpdateLayout(changedBags, opts)
     -- again toggles the filter off and the bag sorts back to normal.
     --
     -- In combat we can't restructure the layout safely, so we fall
-    -- back to the dim-only behavior. The NEW_ITEMS special filter
-    -- spans multiple categories, so it always uses dimming.
-    --
     -- Exact equality matches stop "Attunable" from catching
     -- "Account Attunable" via substring. ✿ ʕ •ᴥ•ʔ
     -- ʕ •ᴥ•ʔ✿ When a filter tab is active, always dim the non-matching
@@ -3100,12 +3697,7 @@ function Frame:UpdateLayout(changedBags, opts)
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
         for _, item in ipairs(items) do
-            local matches = false
-            if quickFilter == "NEW_ITEMS" then
-                matches = item.isNew == true
-            elseif item.category == quickFilter then
-                matches = true
-            end
+            local matches = item.category == quickFilter
             item.isQuickFiltered = not matches
         end
     else
@@ -3116,15 +3708,27 @@ function Frame:UpdateLayout(changedBags, opts)
 
     -- Sort items
     if Omni.Sorter then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
         items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
+        end
     end
 
     -- Render based on view mode
     if currentView == "list" then
+        local perfRenderList = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderList")
         self:RenderListView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.renderList", perfRenderList, { reason = updateReason })
+        end
     else
         -- Combined Grid/Flow rendering
+        local perfRenderFlow = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderFlow")
         self:RenderFlowView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, { reason = updateReason })
+        end
     end
 
     -- Update footer
@@ -3135,11 +3739,24 @@ function Frame:UpdateLayout(changedBags, opts)
 
     -- Apply search if active
     if searchText and searchText ~= "" then
+        local perfSearch = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.search")
         self:ApplySearch(searchText)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.search", perfSearch, { reason = updateReason })
+        end
     end
 
     hasRenderedOnce = true
     pendingCombatRender = false
+    lastRenderedShowSignature = ComputeShowSignature()
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+            itemCount = #items,
+            view = currentView or "unknown",
+            quickFilter = self:GetActiveFilter() or "none",
+            reason = updateReason,
+        })
+    end
 end
 
 -- =============================================================================
@@ -3158,9 +3775,37 @@ function Frame:RenderFlowView(items)
     -- needing a protected structural call. ✿ ʕ •ᴥ•ʔ
     EnsureSlotButtons()
 
-    itemButtons = {}
-    local touched = {}  -- [bagID][slotID] = true for slots rendered with an item
+    ClearArray(itemButtons)
 
+    local categories = renderScratch.categories
+    local categoryOrder = renderScratch.categoryOrder
+    local touched = renderScratch.touched
+    local usedCategoryKeys = renderScratch.usedCategoryKeys
+    local usedTouchedBags = renderScratch.usedTouchedBags
+    local headerByCategory = renderScratch.headerByCategory
+    local seenCategoryThisPass = {}
+    local seenTouchedBagsThisPass = {}
+
+    for i = 1, #usedCategoryKeys do
+        local key = usedCategoryKeys[i]
+        local bucket = categories[key]
+        if bucket then
+            ClearArray(bucket)
+        end
+    end
+    ClearArray(usedCategoryKeys)
+    for i = 1, #usedTouchedBags do
+        local bagID = usedTouchedBags[i]
+        local bagTouched = touched[bagID]
+        if bagTouched then
+            ClearMap(bagTouched)
+        end
+    end
+    ClearArray(usedTouchedBags)
+    ClearArray(categoryOrder)
+    ClearMap(headerByCategory)
+
+    local freezeHeadersForVendor = false
     -- Hide existing headers and list rows
     for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
@@ -3187,20 +3832,19 @@ function Frame:RenderFlowView(items)
     local yRight = -itemGap
     local yOffset = -itemGap
 
-    -- Group items
-    local categories = {}
-    local categoryOrder = {}
-
     local itemBySlot = nil
     local bagSlotCounts = nil
     local bagItemCounts = nil
+    local bagPreviewScopeSet = nil
 
     if currentView == "grid" then
         -- ʕ •ᴥ•ʔ✿ Bagnon-like grid: keep physical slot order and render empty
         -- slots inline so players always see full bag capacity. ✿ ʕ •ᴥ•ʔ
         itemBySlot = {}
-        categories["All"] = {}
-        categoryOrder = { "All" }
+        categories["All"] = categories["All"] or {}
+        seenCategoryThisPass["All"] = true
+        usedCategoryKeys[#usedCategoryKeys + 1] = "All"
+        categoryOrder[1] = "All"
 
         for _, itemInfo in ipairs(items) do
             if IsValidBagID(itemInfo.bagID) and itemInfo.slotID and itemInfo.slotID > 0 then
@@ -3221,17 +3865,22 @@ function Frame:RenderFlowView(items)
         bagSlotCounts = {}
         bagItemCounts = {}
         local bagScope = {}
+        bagPreviewScopeSet = {}
 
         if IsValidBagID(selectedBagID) then
             table.insert(bagScope, selectedBagID)
+            bagPreviewScopeSet[selectedBagID] = true
         else
             for _, bagID in ipairs(BAG_IDS) do
                 table.insert(bagScope, bagID)
+                bagPreviewScopeSet[bagID] = true
             end
         end
 
         for _, bagID in ipairs(bagScope) do
-            categories[bagID] = {}
+            categories[bagID] = categories[bagID] or {}
+            seenCategoryThisPass[bagID] = true
+            usedCategoryKeys[#usedCategoryKeys + 1] = bagID
             table.insert(categoryOrder, bagID)
             bagSlotCounts[bagID] = GetContainerNumSlots(bagID) or 0
             bagItemCounts[bagID] = 0
@@ -3256,8 +3905,10 @@ function Frame:RenderFlowView(items)
         -- FLOW MODE: Group by assigned category
         for _, item in ipairs(items) do
             local cat = item.category or "Miscellaneous"
-            if not categories[cat] then
-                categories[cat] = {}
+            if not seenCategoryThisPass[cat] then
+                categories[cat] = categories[cat] or {}
+                seenCategoryThisPass[cat] = true
+                usedCategoryKeys[#usedCategoryKeys + 1] = cat
                 table.insert(categoryOrder, cat)
             end
             table.insert(categories[cat], item)
@@ -3288,6 +3939,38 @@ function Frame:RenderFlowView(items)
         categories["BoE"] = categories["BoE"] or {}
         table.insert(reordered, "BoE")
         categoryOrder = reordered
+
+        if IsMerchantOpen() then
+            if not vendorFlowLayoutFreeze then
+                local frozenOrder = {}
+                local seedOrder = (flowLayoutCache and flowLayoutCache.order) or categoryOrder
+                for _, catName in ipairs(seedOrder) do
+                    frozenOrder[#frozenOrder + 1] = catName
+                end
+                vendorFlowLayoutFreeze = {
+                    order = frozenOrder,
+                    laneAssignment = flowLayoutCache and flowLayoutCache.laneAssignment or nil,
+                }
+            else
+                local frozenSeen = {}
+                local finalOrder = {}
+                for _, catName in ipairs(vendorFlowLayoutFreeze.order or {}) do
+                    finalOrder[#finalOrder + 1] = catName
+                    frozenSeen[catName] = true
+                    categories[catName] = categories[catName] or {}
+                end
+                for _, catName in ipairs(categoryOrder) do
+                    if not frozenSeen[catName] then
+                        finalOrder[#finalOrder + 1] = catName
+                        frozenSeen[catName] = true
+                    end
+                end
+                vendorFlowLayoutFreeze.order = finalOrder
+                categoryOrder = finalOrder
+            end
+        else
+            vendorFlowLayoutFreeze = nil
+        end
     end
 
     local headerIndex = 0
@@ -3296,6 +3979,39 @@ function Frame:RenderFlowView(items)
     -- BoE's own half-width. ✿ ʕ •ᴥ•ʔ
     local boeAnchor = nil
     local flowMode = (currentView ~= "grid" and currentView ~= "bag")
+    local merchantOpen = IsMerchantOpen()
+    if not flowMode then
+        vendorFlowLayoutFreeze = nil
+    end
+    if flowMode and merchantOpen and not wasMerchantOpen and flowLayoutCache then
+        local seededOrder = {}
+        local cachedOrder = flowLayoutCache.order or categoryOrder
+        for _, catName in ipairs(cachedOrder or {}) do
+            seededOrder[#seededOrder + 1] = catName
+        end
+        vendorFlowLayoutFreeze = {
+            order = seededOrder,
+            laneAssignment = flowLayoutCache.laneAssignment or nil,
+        }
+    end
+    local compositionSignature = nil
+    local canReuseLaneAssignment = false
+
+    if flowMode then
+        compositionSignature = BuildFlowCompositionSignature(
+            categories,
+            categoryOrder,
+            usableWidth,
+            itemStep,
+            activeFilter
+        )
+        freezeHeadersForVendor = merchantOpen
+            and flowLayoutCache ~= nil
+            and flowLayoutCache.signature == compositionSignature
+        canReuseLaneAssignment = flowLayoutCache
+            and flowLayoutCache.signature == compositionSignature
+            and flowLayoutCache.laneAssignment ~= nil
+    end
 
     -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
     -- flow mode. We predict each section's height, sort categories by
@@ -3311,7 +4027,17 @@ function Frame:RenderFlowView(items)
     -- on so the overflow strip still anchors at the bottom of BoE's
     -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
     local laneAssignment = nil
+    local forceVendorFrozenLanes = flowMode
+        and merchantOpen
+        and vendorFlowLayoutFreeze ~= nil
+        and vendorFlowLayoutFreeze.laneAssignment ~= nil
     if flowMode and dualCategoryLanes and #categoryOrder > 1 then
+        if forceVendorFrozenLanes then
+            laneAssignment = vendorFlowLayoutFreeze.laneAssignment
+            canReuseLaneAssignment = true
+        elseif canReuseLaneAssignment then
+            laneAssignment = flowLayoutCache.laneAssignment
+        end
         local laneColumns = columnsForLaneWidth((usableWidth - laneGap) * 0.5)
         local function sectionHeight(catName)
             local n = categories[catName] and #categories[catName] or 0
@@ -3336,15 +4062,17 @@ function Frame:RenderFlowView(items)
         -- caller already suppresses item dimming OOC, so this re-order
         -- is the entire "push the filter to top-left" behavior. ✿ ʕ ◕ᴥ◕ ʔ
         local pinnedCategory = nil
-        if activeFilter and activeFilter ~= "NEW_ITEMS" and categories[activeFilter] then
+        if activeFilter and categories[activeFilter] then
             pinnedCategory = activeFilter
         end
 
         local leftLane, rightLane = {}, {}
         local leftH, rightH = 0, 0
-        laneAssignment = {}
+        if not laneAssignment then
+            laneAssignment = {}
+        end
 
-        if pinnedCategory then
+        if not canReuseLaneAssignment and pinnedCategory then
             table.insert(leftLane, pinnedCategory)
             laneAssignment[pinnedCategory] = "left"
             leftH = sectionHeight(pinnedCategory)
@@ -3367,7 +4095,7 @@ function Frame:RenderFlowView(items)
                     laneAssignment[name] = "left"
                 end
             end
-        else
+        elseif not canReuseLaneAssignment then
             -- ʕ •ᴥ•ʔ✿ LPT: sort by predicted height descending, greedy
             -- into shorter lane for balance. Tallest sections land at
             -- the top of each lane. ✿ ʕ •ᴥ•ʔ
@@ -3394,11 +4122,28 @@ function Frame:RenderFlowView(items)
         -- ʕ •ᴥ•ʔ✿ Render order: left lane top-to-bottom, then right lane
         -- top-to-bottom. Each section's lane is fixed by laneAssignment
         -- below so the render loop ignores live y-based greedy. ✿ ʕ •ᴥ•ʔ
-        local final = {}
-        for _, n in ipairs(leftLane) do table.insert(final, n) end
-        for _, n in ipairs(rightLane) do table.insert(final, n) end
-        categoryOrder = final
+        if canReuseLaneAssignment then
+            local leftOrdered = {}
+            local rightOrdered = {}
+            for _, name in ipairs(categoryOrder) do
+                if laneAssignment[name] == "right" then
+                    table.insert(rightOrdered, name)
+                else
+                    table.insert(leftOrdered, name)
+                end
+            end
+            local final = {}
+            for _, n in ipairs(leftOrdered) do table.insert(final, n) end
+            for _, n in ipairs(rightOrdered) do table.insert(final, n) end
+            categoryOrder = final
+        else
+            local final = {}
+            for _, n in ipairs(leftLane) do table.insert(final, n) end
+            for _, n in ipairs(rightLane) do table.insert(final, n) end
+            categoryOrder = final
+        end
     end
+
 
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
@@ -3432,29 +4177,49 @@ function Frame:RenderFlowView(items)
             end
 
             if currentView ~= "grid" then
-                headerIndex = headerIndex + 1
-                local header = categoryHeaders[headerIndex]
+                local header
+                local reusedHeader = false
+                local headerSlotIndex = nil
+                if freezeHeadersForVendor and flowLayoutCache and flowLayoutCache.headerByCategory then
+                    local cachedIdx = flowLayoutCache.headerByCategory[catName]
+                    if cachedIdx then
+                        header = categoryHeaders[cachedIdx]
+                        if header then
+                            reusedHeader = true
+                            headerSlotIndex = cachedIdx
+                            headerIndex = math.max(headerIndex, cachedIdx)
+                        end
+                    end
+                end
                 if not header then
-                    header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    categoryHeaders[headerIndex] = header
+                    headerIndex = headerIndex + 1
+                    header = categoryHeaders[headerIndex]
+                    if not header then
+                        header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        categoryHeaders[headerIndex] = header
+                    end
+                    headerSlotIndex = headerIndex
                 end
 
-                header:ClearAllPoints()
-                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
+                headerByCategory[catName] = headerSlotIndex
+                if not reusedHeader then
+                    header:ClearAllPoints()
+                    header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
 
-                local r, g, b = 1, 1, 1
-                if currentView == "bag" then
-                    r, g, b = 0.9, 0.8, 0.4
-                elseif Omni.Categorizer then
-                    r, g, b = Omni.Categorizer:GetCategoryColor(catName)
-                end
-                header:SetTextColor(r, g, b)
-                if currentView == "bag" then
-                    local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
-                    local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                    header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
-                else
-                    header:SetText(catName .. " (" .. #catItems .. ")")
+                    local r, g, b = 1, 1, 1
+                    if currentView == "bag" then
+                        r, g, b = 0.9, 0.8, 0.4
+                    elseif Omni.Categorizer then
+                        r, g, b = Omni.Categorizer:GetCategoryColor(catName)
+                    end
+                    header:SetTextColor(r, g, b)
+                    if currentView == "bag" then
+                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                    else
+                        header:SetText(catName .. " (" .. #catItems .. ")")
+                    end
                 end
                 header:Show()
 
@@ -3488,29 +4253,47 @@ function Frame:RenderFlowView(items)
                     local x = laneX + col * itemStep
                     local y = laneY - row * itemStep
 
+                    local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+                    local needsMetrics = (btn._oiLayoutScale ~= itemScale)
                     pcall(function()
-                        btn:ClearAllPoints()
-                        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                        ApplyItemButtonMetrics(btn, itemScale)
+                        if needsReposition then
+                            btn:ClearAllPoints()
+                            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                            btn._oiLayoutX = x
+                            btn._oiLayoutY = y
+                        end
+                        if needsMetrics then
+                            ApplyItemButtonMetrics(btn, itemScale)
+                            btn._oiLayoutScale = itemScale
+                        end
                         btn:SetAlpha(1)
                     end)
 
                     local slotItem = itemInfo
-                    if itemInfo and itemInfo.__empty then
-                        slotItem = nil
-                    end
 
-                    local success = pcall(function()
-                        SetButtonItem(btn, slotItem)
-                        btn:Show()
-                    end)
+                    local nextRenderKey = ItemRenderKey(slotItem)
+                    local success = true
+                    if btn._oiRenderKey ~= nextRenderKey then
+                        success = pcall(function()
+                            SetButtonItem(btn, slotItem)
+                            btn._oiRenderKey = nextRenderKey
+                            btn:Show()
+                        end)
+                    else
+                        pcall(btn.Show, btn)
+                    end
                     if not success then
                         pcall(SetButtonItem, btn, nil)
                         if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
                         pcall(btn.Show, btn)
+                        btn._oiRenderKey = "error"
                     end
 
                     touched[bagID] = touched[bagID] or {}
+                    if not seenTouchedBagsThisPass[bagID] then
+                        seenTouchedBagsThisPass[bagID] = true
+                        usedTouchedBags[#usedTouchedBags + 1] = bagID
+                    end
                     touched[bagID][slotID] = true
                     if not slotItem then
                         pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
@@ -3594,6 +4377,14 @@ function Frame:RenderFlowView(items)
 
     local overflowIndex = 0
     IterateSlotButtons(function(bagID, slotID, btn)
+        if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
+            pcall(btn.SetAlpha, btn, 0)
+            if btn._oiRenderKey ~= "empty" then
+                pcall(SetButtonItem, btn, nil)
+                btn._oiRenderKey = "empty"
+            end
+            return
+        end
         local isTouched = touched[bagID] and touched[bagID][slotID]
         if isTouched then return end
 
@@ -3602,13 +4393,25 @@ function Frame:RenderFlowView(items)
         local x = overflowX + col * itemStep
         local y = overflowTop - row * itemStep
 
+        local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+        local needsMetrics = (btn._oiLayoutScale ~= itemScale)
         pcall(function()
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-            ApplyItemButtonMetrics(btn, itemScale)
+            if needsReposition then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                btn._oiLayoutX = x
+                btn._oiLayoutY = y
+            end
+            if needsMetrics then
+                ApplyItemButtonMetrics(btn, itemScale)
+                btn._oiLayoutScale = itemScale
+            end
             btn:SetAlpha(0)
         end)
-        pcall(SetButtonItem, btn, nil)
+        if btn._oiRenderKey ~= "empty" then
+            pcall(SetButtonItem, btn, nil)
+            btn._oiRenderKey = "empty"
+        end
         pcall(btn.Show, btn)
 
         overflowIndex = overflowIndex + 1
@@ -3631,6 +4434,21 @@ function Frame:RenderFlowView(items)
     local overflowBottom = overflowAnchorY - overflowExtent
     local deepestY = math.min(mainBottomY, overflowBottom)
     scrollChild:SetHeight(math.abs(deepestY) + itemGap)
+
+    if flowMode then
+        flowLayoutCache = {
+            signature = compositionSignature,
+            laneAssignment = laneAssignment,
+            headerByCategory = headerByCategory,
+            order = categoryOrder,
+        }
+        if merchantOpen and vendorFlowLayoutFreeze and laneAssignment then
+            vendorFlowLayoutFreeze.laneAssignment = laneAssignment
+        end
+    else
+        flowLayoutCache = nil
+    end
+    wasMerchantOpen = merchantOpen
 end
 
 -- =============================================================================
@@ -3724,7 +4542,7 @@ function Frame:RenderListView(items)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     GameTooltip:SetBagItem(self.itemInfo.bagID, self.itemInfo.slotID)
                     GameTooltip:Show()
-                    if MerchantFrame and MerchantFrame:IsShown() and (not CursorHasItem or not CursorHasItem()) and ShowContainerSellCursor then
+                    if IsMerchantOpen() and (not CursorHasItem or not CursorHasItem()) and ShowContainerSellCursor then
                         ShowContainerSellCursor(self.itemInfo.bagID, self.itemInfo.slotID)
                     elseif CursorUpdate then
                         CursorUpdate(self)
@@ -3848,6 +4666,7 @@ end
 -- =============================================================================
 
 function Frame:ApplySearch(text)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.ApplySearch")
     searchText = text or ""
     isSearchActive = (searchText ~= "")
 
@@ -3869,6 +4688,7 @@ function Frame:ApplySearch(text)
     end
 
     local lowerSearch = string.lower(searchText)
+    local matchedButtons = 0
 
     -- Filter Grid/Flow view buttons
     for _, btn in ipairs(itemButtons) do
@@ -3876,8 +4696,17 @@ function Frame:ApplySearch(text)
         local isMatch = false
 
         if itemInfo and itemInfo.hyperlink then
-            local name = GetItemInfo(itemInfo.hyperlink)
-            if name and string.find(string.lower(name), lowerSearch, 1, true) then
+            local name = itemInfo.__cachedName
+            local lowerName = itemInfo.__cachedLowerName
+            if not name then
+                name = GetItemInfo(itemInfo.hyperlink)
+                itemInfo.__cachedName = name
+            end
+            if name and not lowerName then
+                lowerName = string.lower(name)
+                itemInfo.__cachedLowerName = lowerName
+            end
+            if lowerName and string.find(lowerName, lowerSearch, 1, true) then
                 isMatch = true
             end
         end
@@ -3885,17 +4714,30 @@ function Frame:ApplySearch(text)
         if Omni.ItemButton then
             Omni.ItemButton:SetSearchMatch(btn, isMatch)
         end
+        if isMatch then
+            matchedButtons = matchedButtons + 1
+        end
     end
 
     -- Filter List view rows
+    local matchedRows = 0
     for _, row in ipairs(listRows) do
         if row:IsShown() and row.itemInfo then
             local itemInfo = row.itemInfo
             local isMatch = false
 
             if itemInfo.hyperlink then
-                local name = GetItemInfo(itemInfo.hyperlink)
-                if name and string.find(string.lower(name), lowerSearch, 1, true) then
+                local name = itemInfo.__cachedName
+                local lowerName = itemInfo.__cachedLowerName
+                if not name then
+                    name = GetItemInfo(itemInfo.hyperlink)
+                    itemInfo.__cachedName = name
+                end
+                if name and not lowerName then
+                    lowerName = string.lower(name)
+                    itemInfo.__cachedLowerName = lowerName
+                end
+                if lowerName and string.find(lowerName, lowerSearch, 1, true) then
                     isMatch = true
                 end
             end
@@ -3903,11 +4745,20 @@ function Frame:ApplySearch(text)
             if isMatch then
                 row:SetAlpha(1)
                 if row.icon then row.icon:SetDesaturated(false) end
+                matchedRows = matchedRows + 1
             else
                 row:SetAlpha(0.3)
                 if row.icon then row.icon:SetDesaturated(true) end
             end
         end
+    end
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("frame.ApplySearch", perfToken, {
+            queryLen = string.len(searchText or ""),
+            visibleButtons = #itemButtons,
+            matchedButtons = matchedButtons,
+            matchedRows = matchedRows,
+        })
     end
 end
 
@@ -4002,14 +4853,24 @@ function Frame:UpdateMoney()
 
     local money = GetMoney() or 0
     if Omni.Utils and Omni.Utils.FormatMoney then
-        mainFrame.footer.money:SetText(Omni.Utils:FormatMoney(money))
+        local text = Omni.Utils:FormatMoney(money)
+        mainFrame.footer.money:SetText(text)
+        if mainFrame.footer.moneyHitBox then
+            mainFrame.footer.moneyHitBox._moneyText = text
+            SyncFooterMoneyHitBox(mainFrame.footer)
+        end
         return
     end
 
     local gold = math.floor(money / 10000)
     local silver = math.floor((money % 10000) / 100)
     local copper = money % 100
-    mainFrame.footer.money:SetText(string.format("%dg %ds %dc", gold, silver, copper))
+    local text = string.format("%dg %ds %dc", gold, silver, copper)
+    mainFrame.footer.money:SetText(text)
+    if mainFrame.footer.moneyHitBox then
+        mainFrame.footer.moneyHitBox._moneyText = text
+        SyncFooterMoneyHitBox(mainFrame.footer)
+    end
 end
 
 -- =============================================================================
@@ -4031,7 +4892,26 @@ function Frame:Show()
     -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
     pcall(mainFrame.Show, mainFrame)
 
-    self:UpdateLayout()
+    local sig = ComputeShowSignature()
+    local forceFullShowForAttune = IsAttuneHelperEmbedEnabled() and IsAttuneHelperAvailable()
+    local canFastShow = hasRenderedOnce
+        and not pendingCombatRender
+        and lastRenderedShowSignature ~= nil
+        and sig == lastRenderedShowSignature
+        and not forceFullShowForAttune
+
+    if canFastShow then
+        RebuildPopulatedItemButtonList()
+        self:UpdateBagIconTextures()
+        self:UpdateBagIconVisuals()
+        self:UpdateSlotCount()
+        self:UpdateMoney()
+        if searchText and searchText ~= "" then
+            self:ApplySearch(searchText)
+        end
+    else
+        self:UpdateLayout(nil, { reason = "show_open" })
+    end
     self:UpdateEmbeddedAttuneHelper()
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
@@ -4040,7 +4920,32 @@ function Frame:Hide()
     if not mainFrame then return end
 
     pcall(mainFrame.Hide, mainFrame)
-    RestoreEmbeddedAttuneHelper()
+    if not IsAttuneHelperEmbedEnabled() then
+        RestoreEmbeddedAttuneHelper()
+    elseif mainFrame.footer and mainFrame.footer.attuneHelperHost then
+        -- ʕ •ᴥ•ʔ✿ Keep mini frame parented to the embed host across hide/show
+        -- cycles so repeated bag toggles do not lose embedded AH controls. ✿ ʕ •ᴥ•ʔ
+        local host = mainFrame.footer.attuneHelperHost
+        local miniFrame = _G.AttuneHelperMiniFrame
+        if miniFrame and miniFrame:GetParent() == host then
+            miniFrame:Hide()
+        end
+        host:Hide()
+    end
+    flowLayoutCache = nil
+    vendorFlowLayoutFreeze = nil
+    wasMerchantOpen = false
+    ClearMap(optimisticFlowRefreshWatches)
+    ClearArray(itemButtons)
+
+    for _, byBag in pairs(slotButtons) do
+        for _, btn in pairs(byBag) do
+            if btn then
+                btn._cachedSearchName = nil
+                btn._cachedSearchNameLower = nil
+            end
+        end
+    end
 
     if not InCombat()
             and OmniInventoryDB and OmniInventoryDB.global
@@ -4084,6 +4989,24 @@ function Frame:SetBagFilter(bagID)
 
     self:UpdateBagIconVisuals()
     self:UpdateLayout()
+end
+
+function Frame:SetAttuneHelperSortBagView()
+    if not self:IsAttuneHelperSortBagViewEnabled() then
+        return false
+    end
+
+    local bagID = self:GetAttuneHelperSortBagID()
+    if not IsValidBagID(bagID) then
+        return false
+    end
+
+    if currentView ~= "bag" then
+        preBagViewMode = currentView
+        self:SetView("bag")
+    end
+    self:SetBagFilter(bagID)
+    return true
 end
 
 function Frame:ToggleBagPreview(bagID)
@@ -4301,7 +5224,12 @@ end
 -- Initialization
 -- =============================================================================
 
+function Frame:SetMerchantOpen(isOpen)
+    Omni._merchantOpen = (isOpen == true)
+end
+
 function Frame:Init()
+    Omni._merchantOpen = false
     currentView = GetSavedViewMode()
     selectedBagID = GetSavedBagFilter()
 

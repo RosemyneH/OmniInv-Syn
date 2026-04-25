@@ -78,6 +78,9 @@ end
 
 -- Get category priority for sorting
 local function GetCategoryPriority(item)
+    if item and item._oiSortCache and item._oiSortCache.catPriority then
+        return item._oiSortCache.catPriority
+    end
     if not item or not item.category then
         return 99
     end
@@ -92,6 +95,9 @@ end
 
 -- Get item name (cached from GetItemInfo)
 local function GetItemName(item)
+    if item and item._oiSortCache and item._oiSortCache.name then
+        return item._oiSortCache.name
+    end
     if not item or not item.hyperlink then
         return "zzz"  -- Sort unknown items last
     end
@@ -102,6 +108,9 @@ end
 
 -- Get item level
 local function GetItemLevel(item)
+    if item and item._oiSortCache and item._oiSortCache.ilvl then
+        return item._oiSortCache.ilvl
+    end
     if not item or not item.hyperlink then
         return 0
     end
@@ -121,8 +130,10 @@ local function DefaultComparator(a, b)
     if not b then return true end
 
     -- 0. Pinned/Favorite items first
-    local pinnedA = a.itemID and Omni.Data and Omni.Data:IsPinned(a.itemID)
-    local pinnedB = b.itemID and Omni.Data and Omni.Data:IsPinned(b.itemID)
+    local pinnedA = (a._oiSortCache and a._oiSortCache.pinned)
+        or (a.itemID and Omni.Data and Omni.Data:IsPinned(a.itemID))
+    local pinnedB = (b._oiSortCache and b._oiSortCache.pinned)
+        or (b.itemID and Omni.Data and Omni.Data:IsPinned(b.itemID))
     if pinnedA and not pinnedB then return true end
     if pinnedB and not pinnedA then return false end
 
@@ -165,6 +176,33 @@ local function DefaultComparator(a, b)
     local posA = ((a.bagID or 0) * 100) + (a.slotID or 0)
     local posB = ((b.bagID or 0) * 100) + (b.slotID or 0)
     return posA < posB
+end
+
+local function BuildSortCaches(items)
+    if not items then
+        return
+    end
+    for _, item in ipairs(items) do
+        if item then
+            local cache = {}
+            cache.catPriority = GetCategoryPriority(item)
+            cache.name = GetItemName(item)
+            cache.ilvl = GetItemLevel(item)
+            cache.pinned = item.itemID and Omni.Data and Omni.Data:IsPinned(item.itemID) or false
+            item._oiSortCache = cache
+        end
+    end
+end
+
+local function ClearSortCaches(items)
+    if not items then
+        return
+    end
+    for _, item in ipairs(items) do
+        if item then
+            item._oiSortCache = nil
+        end
+    end
 end
 
 -- Quality-only comparator
@@ -228,7 +266,11 @@ local COMPARATORS = {
 ---@param mode string Optional sort mode: "category", "quality", "name", "ilvl"
 ---@return table Sorted array (new table)
 function Sorter:Sort(items, mode)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("sorter.Sort.total")
     if not items or #items == 0 then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("sorter.Sort.total", perfToken)
+        end
         return {}
     end
 
@@ -241,9 +283,23 @@ function Sorter:Sort(items, mode)
     -- Get comparator
     local comparator = COMPARATORS[mode] or DefaultComparator
 
-    -- Apply stable merge sort
-    MergeSort(sorted, 1, #sorted, comparator)
+    local perfCache = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("sorter.Sort.cache")
+    BuildSortCaches(sorted)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("sorter.Sort.cache", perfCache, { itemCount = #sorted })
+    end
 
+    -- Apply stable merge sort
+    local perfMerge = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("sorter.Sort.merge")
+    MergeSort(sorted, 1, #sorted, comparator)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("sorter.Sort.merge", perfMerge, { itemCount = #sorted })
+    end
+    ClearSortCaches(sorted)
+
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("sorter.Sort.total", perfToken, { itemCount = #sorted, mode = mode or "category" })
+    end
     return sorted
 end
 
