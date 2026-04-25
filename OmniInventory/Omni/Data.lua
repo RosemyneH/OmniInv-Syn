@@ -47,6 +47,8 @@ local defaults = {
         },
         attuneHelperEmbed = true,
         attuneHelperMiniNoBorder = false,
+        attuneHelperSortBagView = true,
+        attuneHelperSortBagID = 1,
         -- ʕ •ᴥ•ʔ✿ Custom footer launcher buttons (mini-mode themed) ✿ ʕ •ᴥ•ʔ
         footerButtons = {
             resetInstances = false,
