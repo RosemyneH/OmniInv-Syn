@@ -599,36 +599,6 @@ local function IsAttuneHelperAvailable()
         or GetAttuneHelperAddon() ~= nil
 end
 
-local function RebindEmbeddedDragHandlers()
-    local AH = GetAttuneHelperAddon()
-
-    local equipBtn = _G.AttuneHelperMiniEquipButton
-    if equipBtn and not equipBtn.__OmniEmbedDragFixed then
-        equipBtn.__OmniEmbedDragFixed = true
-        equipBtn:SetScript("OnReceiveDrag", function()
-            local addon = GetAttuneHelperAddon()
-            if addon and addon.AddCursorItemToAHSet then
-                addon.AddCursorItemToAHSet()
-            elseif _G.EquipAllButton and _G.EquipAllButton:GetScript("OnReceiveDrag") then
-                _G.EquipAllButton:GetScript("OnReceiveDrag")()
-            end
-        end)
-    end
-
-    local vendorBtn = _G.AttuneHelperMiniVendorButton
-    if vendorBtn and not vendorBtn.__OmniEmbedDragFixed then
-        vendorBtn.__OmniEmbedDragFixed = true
-        vendorBtn:SetScript("OnReceiveDrag", function(self)
-            local addon = GetAttuneHelperAddon()
-            if addon and addon.AddCursorItemToIgnore then
-                addon.AddCursorItemToIgnore()
-            elseif _G.VendorAttunedButton and _G.VendorAttunedButton:GetScript("OnReceiveDrag") then
-                _G.VendorAttunedButton:GetScript("OnReceiveDrag")(self)
-            end
-        end)
-    end
-end
-
 local function RestoreEmbeddedAttuneHelper()
     if not mainFrame or not mainFrame.footer then return end
 
@@ -775,26 +745,6 @@ function Frame:EnsureEmbeddedAttuneHelperRetry()
             Frame:StopEmbeddedAttuneHelperRetry()
         end
     end)
-end
-
-function Frame:RefreshEmbeddedAttuneHelperButtons(miniFrame)
-    if not miniFrame then return end
-
-    local function EnsureButton(button, fallbackAnchor)
-        if not button then return end
-        if button:GetParent() ~= miniFrame then
-            button:SetParent(miniFrame)
-        end
-        if button.GetNumPoints and button:GetNumPoints() == 0 and fallbackAnchor then
-            button:SetPoint(unpack(fallbackAnchor))
-        end
-        button:SetFrameStrata(miniFrame:GetFrameStrata())
-        button:SetFrameLevel((miniFrame:GetFrameLevel() or 1) + 2)
-        button:Show()
-    end
-
-    EnsureButton(_G.AttuneHelperMiniEquipButton, { "LEFT", miniFrame, "LEFT", 4, 0 })
-    EnsureButton(_G.AttuneHelperMiniVendorButton, { "LEFT", miniFrame, "LEFT", 36, 0 })
 end
 
 local function GetSavedViewMode()
