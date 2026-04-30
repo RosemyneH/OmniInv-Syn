@@ -42,6 +42,7 @@ local categoryHeaders = {}
 local searchText = ""
 local isSearchActive = false
 local selectedBankBagID = nil
+local currentBankView = "flow"
 local bankForceEmptyFrame = nil
 local bankForceEmptyJob = nil
 local BANK_FORCE_EMPTY_EVENT_TIMEOUT = 0.35
@@ -51,6 +52,10 @@ local BANK_FORCE_EMPTY_MAX_MOVE = 6
 -- =============================================================================
 -- Helpers
 -- =============================================================================
+
+local function InCombat()
+    return InCombatLockdown and InCombatLockdown()
+end
 
 local function SetButtonItem(btn, itemInfo)
     if not btn then return end
@@ -84,6 +89,20 @@ local function ApplyBankItemMetrics(btn, itemSize)
     end)
 end
 
+local function GetBankContentWidth()
+    if not bankFrame or not bankFrame.content then
+        return FRAME_DEFAULT_WIDTH
+    end
+
+    local width = bankFrame.content:GetWidth() or 0
+    local left = bankFrame.content.GetLeft and bankFrame.content:GetLeft() or nil
+    local right = bankFrame.content.GetRight and bankFrame.content:GetRight() or nil
+    if right and left and right > left then
+        width = right - left
+    end
+    return math.max(width, 1)
+end
+
 local function IsValidBankBagID(bagID)
     if bagID == nil then return false end
     if bagID == -1 then return true end
@@ -103,6 +122,24 @@ local function GetSavedBankBagFilter()
         return id
     end
     return nil
+end
+
+local function NormalizeBankView(mode)
+    if mode == "grid" or mode == "flow" then
+        return mode
+    end
+    return "flow"
+end
+
+local function GetSavedBankView()
+    local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
+    return NormalizeBankView(settings and settings.bankViewMode)
+end
+
+function BankFrame:UpdateViewButton()
+    if bankFrame and bankFrame.header and bankFrame.header.viewBtn then
+        bankFrame.header.viewBtn.text:SetText(currentBankView == "grid" and "Grid" or "Flow")
+    end
 end
 
 local function GetBankBagIconTexture(bagID)
@@ -149,6 +186,21 @@ local function CreateRibbonIconButton(parent, iconTexture, tooltipTitle, tooltip
     btn.icon:SetPoint("BOTTOMRIGHT", -2, 2)
     btn.icon:SetTexture(iconTexture)
     btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    btn._tooltipTitle = tooltipTitle
+    btn._tooltipSub = tooltipSub
+    btn:SetScript("OnClick", onClick)
+    return btn
+end
+
+local function CreateRibbonTextButton(parent, text, tooltipTitle, tooltipSub, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(46, RIBBON_ICON_BTN_SIZE)
+    StyleRibbonButton(btn)
+
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.text:SetPoint("CENTER")
+    btn.text:SetText(text)
 
     btn._tooltipTitle = tooltipTitle
     btn._tooltipSub = tooltipSub
@@ -280,11 +332,16 @@ local function CreateHeader(parent)
         end)
     header.optBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -RIBBON_GAP, 0)
 
+    header.viewBtn = CreateRibbonTextButton(header, "Flow",
+        "View Mode", "Click to switch bank Flow / Grid",
+        function() BankFrame:CycleView() end)
+    header.viewBtn:SetPoint("RIGHT", header.optBtn, "LEFT", -RIBBON_GAP, 0)
+
     header.ribbonSep = header:CreateTexture(nil, "OVERLAY")
     header.ribbonSep:SetTexture("Interface\\Buttons\\WHITE8X8")
     header.ribbonSep:SetVertexColor(0.35, 0.35, 0.35, 1)
     header.ribbonSep:SetSize(1, 14)
-    header.ribbonSep:SetPoint("RIGHT", header.optBtn, "LEFT", -RIBBON_SEP_GAP, 0)
+    header.ribbonSep:SetPoint("RIGHT", header.viewBtn, "LEFT", -RIBBON_SEP_GAP, 0)
 
     header.bagBar = CreateFrame("Frame", nil, header)
     header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BANK_BAG_IDS, BAG_ICON_SIZE)
@@ -566,6 +623,8 @@ function BankFrame:CreateMainFrame()
     CreateResizeHandle(bankFrame)
 
     selectedBankBagID = GetSavedBankBagFilter()
+    currentBankView = GetSavedBankView()
+    BankFrame:UpdateViewButton()
     BankFrame:UpdateBankBagButtonVisuals()
     BankFrame:UpdateBankBagButtonIcons()
 
@@ -584,7 +643,7 @@ function BankFrame:CreateMainFrame()
 end
 
 -- =============================================================================
--- Rendering (flow view only)
+-- Rendering
 -- =============================================================================
 
 local function CollectBankItems()
@@ -648,6 +707,22 @@ function BankFrame:ToggleBankBagPreview(bagID)
     else
         self:SetBankBagFilter(bagID)
     end
+end
+
+function BankFrame:SetView(mode)
+    currentBankView = NormalizeBankView(mode)
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.char = OmniInventoryDB.char or {}
+    OmniInventoryDB.char.settings = OmniInventoryDB.char.settings or {}
+    OmniInventoryDB.char.settings.bankViewMode = currentBankView
+
+    self:UpdateViewButton()
+    self:UpdateLayout()
+end
+
+function BankFrame:CycleView()
+    self:SetView(currentBankView == "grid" and "flow" or "grid")
 end
 
 function BankFrame:UpdateBankBagButtonIcons()
@@ -922,6 +997,7 @@ function BankFrame:RenderFlowView(items)
     if Omni.Pool then
         for _, btn in ipairs(itemButtons) do
             Omni.Pool:Release("ItemButton", btn)
+            pcall(btn.Hide, btn)
         end
     end
     itemButtons = {}
@@ -931,7 +1007,8 @@ function BankFrame:RenderFlowView(items)
     end
 
     local hInset = 8
-    local usableWidth = bankFrame.content:GetWidth() - 20
+    local usableWidth = GetBankContentWidth() - hInset
+    scrollChild:SetWidth(math.max(usableWidth, 1))
     local itemScale = GetSharedItemScale()
     local itemGap = GetSharedItemGap()
     local itemSize = ITEM_SIZE * itemScale
@@ -1070,17 +1147,147 @@ function BankFrame:RenderFlowView(items)
     scrollChild:SetHeight(math.abs(bottomY) + itemGap)
 end
 
+function BankFrame:RenderGridView(items)
+    if not bankFrame or not bankFrame.scrollChild then return false end
+
+    local scrollChild = bankFrame.scrollChild
+    local previousButtons = itemButtons
+    itemButtons = {}
+
+    if InCombat() then
+        for _, btn in ipairs(previousButtons) do
+            pcall(btn.SetAlpha, btn, 0)
+        end
+    elseif Omni.Pool then
+        for _, btn in ipairs(previousButtons) do
+            Omni.Pool:Release("ItemButton", btn)
+        end
+    end
+
+    for _, header in ipairs(categoryHeaders) do
+        header:Hide()
+    end
+
+    local itemBySlot = {}
+    for _, item in ipairs(items or {}) do
+        if item.bagID and item.slotID then
+            itemBySlot[item.bagID] = itemBySlot[item.bagID] or {}
+            itemBySlot[item.bagID][item.slotID] = item
+        end
+    end
+
+    local itemScale = GetSharedItemScale()
+    local itemGap = GetSharedItemGap()
+    local itemSize = ITEM_SIZE * itemScale
+    local itemStep = itemSize + itemGap
+    local usableWidth = math.max(1, GetBankContentWidth() - itemGap)
+    scrollChild:SetWidth(usableWidth)
+    local columns = math.max(math.floor((usableWidth + itemGap) / itemStep), 1)
+    local index = 0
+    local rendered = false
+
+    local function renderSlot(bagID, slotID)
+        index = index + 1
+        local container = GetBankItemContainer(bagID) or scrollChild
+        local btn = previousButtons[index]
+        if not btn then
+            if InCombat() and Omni.ItemButton then
+                local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
+                if createdOK then
+                    btn = created
+                end
+            end
+            if not btn and Omni.Pool then
+                local acquiredOK, acquired = pcall(Omni.Pool.Acquire, Omni.Pool, "ItemButton")
+                if acquiredOK then
+                    btn = acquired
+                end
+            end
+            if not btn and Omni.ItemButton then
+                local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
+                if createdOK then
+                    btn = created
+                end
+            end
+        end
+        if not btn then return end
+
+        local col = (index - 1) % columns
+        local row = math.floor((index - 1) / columns)
+        local x = itemGap + col * itemStep
+        local y = -itemGap - row * itemStep
+
+        pcall(function()
+            if btn:GetParent() ~= container then
+                btn:SetParent(container)
+            end
+            ApplyBankItemMetrics(btn, itemSize)
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+            btn:SetAlpha(1)
+        end)
+
+        local itemInfo = itemBySlot[bagID] and itemBySlot[bagID][slotID]
+        pcall(SetButtonItem, btn, itemInfo or { bagID = bagID, slotID = slotID, __empty = true })
+        pcall(btn.Show, btn)
+        table.insert(itemButtons, btn)
+        rendered = true
+    end
+
+    if IsValidBankBagID(selectedBankBagID) then
+        local slots = GetContainerNumSlots(selectedBankBagID) or 0
+        for slotID = 1, slots do
+            renderSlot(selectedBankBagID, slotID)
+        end
+    else
+        local mainSlots = GetContainerNumSlots(-1) or 0
+        for slotID = 1, mainSlots do
+            renderSlot(-1, slotID)
+        end
+
+        for _, bagID in ipairs(BANK_BAG_IDS) do
+            local slots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, slots do
+                renderSlot(bagID, slotID)
+            end
+        end
+    end
+
+    for i = index + 1, #previousButtons do
+        local btn = previousButtons[i]
+        pcall(SetButtonItem, btn, nil)
+        pcall(btn.SetAlpha, btn, 0)
+        table.insert(itemButtons, btn)
+    end
+
+    local rows = math.ceil(index / columns)
+    scrollChild:SetHeight(math.max(rows * itemStep + itemGap, 1))
+    return rendered
+end
+
 function BankFrame:UpdateLayout()
     local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.total")
     if not bankFrame or not bankFrame:IsShown() then return end
 
-    -- ʕ •ᴥ•ʔ✿ Defer secure-button churn to PLAYER_REGEN_ENABLED ✿ ʕ •ᴥ•ʔ
-    if InCombatLockdown and InCombatLockdown() then
-        return
-    end
-
     self:UpdateBankBagButtonIcons()
     self:UpdateBankBagButtonVisuals()
+
+    if currentBankView == "grid" or InCombat() then
+        local items = CollectBankItems()
+        local perfRender = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.renderGrid")
+        self:RenderGridView(items)
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("bank.UpdateLayout.renderGrid", perfRender, { itemCount = #items })
+        end
+        self:UpdateSlotCount()
+        if searchText and searchText ~= "" then
+            self:ApplySearch(searchText)
+        end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("bank.UpdateLayout.total", perfTotal, { itemCount = #items, view = "grid" })
+        end
+        return
+    end
 
     local items = CollectBankItems()
     local perfRender = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.UpdateLayout.renderFlow")
@@ -1098,7 +1305,7 @@ function BankFrame:UpdateLayout()
         end
     end
     if Omni._perfEnabled and Omni.Perf then
-        Omni.Perf:End("bank.UpdateLayout.total", perfTotal, { itemCount = #items })
+        Omni.Perf:End("bank.UpdateLayout.total", perfTotal, { itemCount = #items, view = "flow" })
     end
 end
 
