@@ -520,11 +520,6 @@ function ItemButton:Create(parent)
     -- Hide the backdrop border texture we created earlier
     button.border:Hide()
 
-    -- Register with Masque if available
-    if Omni.MasqueGroup then
-        Omni.MasqueGroup:AddButton(button)
-    end
-
     -- Search dim overlay
     button.dimOverlay = button:CreateTexture(nil, "OVERLAY", nil, 7)
     button.dimOverlay:SetAllPoints(button.icon)
