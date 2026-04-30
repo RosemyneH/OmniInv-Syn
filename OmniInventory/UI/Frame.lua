@@ -52,6 +52,7 @@ local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
+local bagViewNeedsFreshSort = true
 local IsValidBagID
 -- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
 -- bag icon forced bag view. ToggleBagPreview uses it to restore the
@@ -259,6 +260,18 @@ local function BuildFlowCompositionSignature(categories, categoryOrder, usableWi
     for _, catName in ipairs(categoryOrder or {}) do
         local count = categories and categories[catName] and #categories[catName] or 0
         parts[#parts + 1] = tostring(catName) .. ":" .. tostring(count)
+    end
+    return table.concat(parts, "|")
+end
+
+function Frame:BuildFlowLaneSignature(categoryOrder, usableWidth, itemStep, filterName)
+    local parts = {
+        tostring(math.floor((usableWidth or 0) + 0.5)),
+        tostring(math.floor(((itemStep or 0) * 100) + 0.5)),
+        tostring(filterName or "none"),
+    }
+    for _, catName in ipairs(categoryOrder or {}) do
+        parts[#parts + 1] = tostring(catName)
     end
     return table.concat(parts, "|")
 end
@@ -500,6 +513,40 @@ local function NormalizeViewMode(mode)
         return mode
     end
     return DEFAULT_VIEW_MODE
+end
+
+function Frame:_RefreshViewButtonLabel()
+    if mainFrame and mainFrame.header and mainFrame.header.viewBtn then
+        local labels = { grid = "Grid", flow = "Flow", list = "List", bag = "Bag" }
+        mainFrame.header.viewBtn.text:SetText(labels[currentView] or "Grid")
+    end
+end
+
+function Frame:_ActivateCombatGridFallback()
+    if not self._combatGridFallbackActive then
+        self._combatGridFallbackOriginalView = currentView
+        self._combatGridFallbackActive = true
+    end
+    currentView = "grid"
+    self:_RefreshViewButtonLabel()
+end
+
+function Frame:_RestoreCombatGridFallback()
+    if not self._combatGridFallbackActive then
+        return false
+    end
+
+    currentView = NormalizeViewMode(self._combatGridFallbackOriginalView)
+    self._combatGridFallbackOriginalView = nil
+    self._combatGridFallbackActive = false
+    self:_RefreshViewButtonLabel()
+    if currentView == "bag" then
+        bagViewNeedsFreshSort = true
+    end
+    if Frame and Frame.InvalidateRenderCaches then
+        Frame:InvalidateRenderCaches({ clearLayout = true })
+    end
+    return true
 end
 
 local function IsAttuneHelperEmbedEnabled()
@@ -1767,6 +1814,12 @@ local FILTER_ROW_TOP_PAD = 2
 local FILTER_ROW_BOTTOM_PAD = 2
 local FILTER_NEUTRAL_COLOR = { 0.75, 0.75, 0.75 }
 local activeFilter = nil  -- Current active filter
+local activeFilterMissingState = {
+    since = nil,
+    count = 0,
+    clearDelay = 0.75,
+    clearEvents = 4,
+}
 
 -- ʕ ◕ᴥ◕ ʔ✿ Static specials always rendered first. "All" clears the
 -- filter, "New" matches the session-acquired flag, and everything
@@ -1995,12 +2048,30 @@ function Frame:RebuildFilterTabs(presentCategories)
                 break
             end
         end
-        if not stillPresent then
-            activeFilter = nil
-            for i = 1, #defs do
-                ApplyFilterButtonVisual(filterBar.buttons[i], false)
+        if stillPresent then
+            activeFilterMissingState.since = nil
+            activeFilterMissingState.count = 0
+        else
+            activeFilterMissingState.count = (activeFilterMissingState.count or 0) + 1
+            if not activeFilterMissingState.since then
+                activeFilterMissingState.since = (GetTime and GetTime()) or 0
+            end
+            local now = (GetTime and GetTime()) or 0
+            local elapsed = now - (activeFilterMissingState.since or now)
+            local shouldClear = activeFilterMissingState.count >= activeFilterMissingState.clearEvents
+                and elapsed >= activeFilterMissingState.clearDelay
+            if shouldClear then
+                activeFilter = nil
+                activeFilterMissingState.since = nil
+                activeFilterMissingState.count = 0
+                for i = 1, #defs do
+                    ApplyFilterButtonVisual(filterBar.buttons[i], false)
+                end
             end
         end
+    else
+        activeFilterMissingState.since = nil
+        activeFilterMissingState.count = 0
     end
 end
 
@@ -2012,7 +2083,10 @@ function Frame:SetQuickFilter(filterName)
         filterName = nil
     end
     activeFilter = filterName
+    activeFilterMissingState.since = nil
+    activeFilterMissingState.count = 0
     self:InvalidateRenderCaches()
+    bagViewNeedsFreshSort = true
 
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
@@ -2182,7 +2256,7 @@ local function GetItemContainer(bagID)
     if not mainFrame or not mainFrame.itemContainers then return nil end
     local container = mainFrame.itemContainers[bagID]
     if container then return container end
-    if InCombat() then return nil end
+    if InCombat() and not Frame._combatGridBootstrap then return nil end
     if mainFrame._makeItemContainer then
         return mainFrame._makeItemContainer(bagID)
     end
@@ -2214,21 +2288,35 @@ end
 Frame._GetSlotButton = GetSlotButton
 
 local function CreateSlotButton(bagID, slotID)
-    if InCombat() then return nil end
+    if InCombat() and not Frame._combatGridBootstrap then return nil end
 
     local container = GetItemContainer(bagID)
     if not container then return nil end
 
     local btn
-    if Omni.Pool then
-        btn = Omni.Pool:Acquire("ItemButton")
+    local fromPool = false
+    if Frame._combatGridBootstrap and Omni.ItemButton then
+        local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
+        if createdOK then
+            btn = created
+        end
+    end
+    if not btn and Omni.Pool then
+        local acquiredOK, acquired = pcall(Omni.Pool.Acquire, Omni.Pool, "ItemButton")
+        if acquiredOK then
+            btn = acquired
+            fromPool = btn ~= nil
+        end
     end
     if not btn and Omni.ItemButton then
-        btn = Omni.ItemButton:Create(container)
+        local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
+        if createdOK then
+            btn = created
+        end
     end
     if not btn then return nil end
 
-    pcall(function()
+    local ok = pcall(function()
         if btn:GetParent() ~= container then
             btn:SetParent(container)
         end
@@ -2238,6 +2326,17 @@ local function CreateSlotButton(bagID, slotID)
         btn:SetAlpha(0)
         btn:Show()
     end)
+
+    local parentOK = btn.GetParent and btn:GetParent() == container
+    local idOK = (not btn.GetID) or btn:GetID() == slotID
+    if not ok and not (parentOK and idOK) then
+        if fromPool and Omni.Pool then
+            Omni.Pool:Release("ItemButton", btn)
+        else
+            pcall(btn.Hide, btn)
+        end
+        return nil
+    end
 
     btn.bagID = bagID
     btn.slotID = slotID
@@ -2249,7 +2348,7 @@ end
 -- OOC from RenderFlowView. Grows on bag upgrades and releases surplus
 -- buttons back to the pool when a bag is swapped for something smaller.
 local function EnsureSlotButtons()
-    if InCombat() then return end
+    if InCombat() and not Frame._combatGridBootstrap then return end
 
     for _, bagID in ipairs(BAG_IDS) do
         slotButtons[bagID] = slotButtons[bagID] or {}
@@ -2266,9 +2365,8 @@ local function EnsureSlotButtons()
             if slotID > numSlots then
                 if Omni.Pool then
                     Omni.Pool:Release("ItemButton", btn)
-                else
-                    pcall(btn.Hide, btn)
                 end
+                pcall(btn.Hide, btn)
                 byBag[slotID] = nil
             end
         end
@@ -2289,6 +2387,51 @@ local function IterateSlotButtons(callback)
     end
 end
 Frame._IterateSlotButtons = IterateSlotButtons
+
+function Frame:_HasAnySlotButtons()
+    for _, byBag in pairs(slotButtons) do
+        if byBag and next(byBag) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+function Frame:RenderCombatGridFallback()
+    if not mainFrame or not mainFrame.scrollChild then
+        return false
+    end
+
+    self:_ActivateCombatGridFallback()
+    self._combatGridBootstrap = true
+
+    local ok = pcall(function()
+        local items = {}
+        if OmniC_Container then
+            items = OmniC_Container.GetAllBagItems()
+        end
+
+        self:RenderFlowView(items)
+        self:UpdateBagIconTextures()
+        self:UpdateBagIconVisuals()
+        self:UpdateSlotCount()
+        self:UpdateMoney()
+
+        if searchText and searchText ~= "" then
+            self:ApplySearch(searchText)
+        end
+    end)
+
+    self._combatGridBootstrap = false
+
+    if ok and self:_HasAnySlotButtons() then
+        hasRenderedOnce = true
+        lastRenderedShowSignature = ComputeShowSignature()
+        return true
+    end
+
+    return false
+end
 
 -- =============================================================================
 -- Footer
@@ -3317,6 +3460,11 @@ end
 
 function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
+    self._combatGridFallbackActive = false
+    self._combatGridFallbackOriginalView = nil
+    if currentView == "bag" then
+        bagViewNeedsFreshSort = true
+    end
     self:InvalidateRenderCaches({ clearLayout = true })
 
     -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
@@ -3326,10 +3474,7 @@ function Frame:SetView(mode)
         preBagViewMode = nil
     end
 
-    if mainFrame and mainFrame.header and mainFrame.header.viewBtn then
-        local labels = { grid = "Grid", flow = "Flow", list = "List", bag = "Bag" }
-        mainFrame.header.viewBtn.text:SetText(labels[currentView] or "Grid")
-    end
+    self:_RefreshViewButtonLabel()
 
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.char = OmniInventoryDB.char or {}
@@ -3378,6 +3523,7 @@ function Frame:CycleSort()
         mainFrame.header.sortBtn.text:SetText(displayMode)
     end
 
+    bagViewNeedsFreshSort = true
     -- Refresh layout with new sort
     Frame:UpdateLayout()
 end
@@ -3547,6 +3693,10 @@ function Frame:UpdateLayout(changedBags, opts)
     local perfTotal = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.total")
     local forceFull = opts and opts.forceFull == true
     local updateReason = (opts and opts.reason) or "layout"
+    if not InCombat() and self:_RestoreCombatGridFallback() then
+        forceFull = true
+        updateReason = "restore_" .. updateReason
+    end
     changedBags = NarrowChangedBagsToSelectedScope(changedBags)
     if not forceFull and type(changedBags) == "table" then
         local hasEntries = false
@@ -3573,23 +3723,27 @@ function Frame:UpdateLayout(changedBags, opts)
     end
 
     -- ʕ •ᴥ•ʔ✿ Combat policy ✿ ʕ •ᴥ•ʔ
-    -- Structural ops on ContainerFrameItemButton children (SetParent,
-    -- SetID, SetPoint, ClearAllPoints) are protected during combat, so
-    -- we cannot re-run the flow/grid layout. Content updates (icon,
-    -- count, border color, tooltip-resolving bagID/slotID pair) ARE
-    -- insecure, so we mirror AdiBags: refresh contents of existing
-    -- slot buttons in place. Items sold during combat clear visually
-    -- and items that change in a known slot update their tooltip
-    -- instantly. Any fresh slots that had no button at the last OOC
-    -- render are still deferred to PLAYER_REGEN_ENABLED.
+    -- ʕ •ᴥ•ʔ✿ Structural ops on ContainerFrameItemButton children are risky in
+    -- combat, so normal updates only refresh existing slot-button content.
+    -- First-open lockdown is the exception: we try a physical grid
+    -- bootstrap, then restore the user's saved view after combat. ✿ ʕ •ᴥ•ʔ
     if InCombat() then
         pendingCombatRender = true
         if hasRenderedOnce then
             if mainFrame.combatHint then mainFrame.combatHint:Hide() end
-            self:RefreshCombatContent(changedBags)
-        elseif mainFrame:IsShown() and mainFrame.combatHint then
-            mainFrame.combatHint:Show()
-            mainFrame.combatHint:SetText("Bag contents will appear after combat.")
+            if self._combatGridFallbackActive then
+                self:RenderCombatGridFallback()
+            else
+                self:RefreshCombatContent(changedBags)
+            end
+        else
+            local renderedGrid = self:RenderCombatGridFallback()
+            if renderedGrid then
+                if mainFrame.combatHint then mainFrame.combatHint:Hide() end
+            elseif mainFrame:IsShown() and mainFrame.combatHint then
+                mainFrame.combatHint:Show()
+                mainFrame.combatHint:SetText("Bag contents will appear after combat.")
+            end
         end
         return
     end
@@ -3603,10 +3757,11 @@ function Frame:UpdateLayout(changedBags, opts)
             and HasBagChangeEntries(changedBags)
             and currentView ~= "list" then
         local refreshMeta = self:RefreshCombatContent(changedBags)
+        local shouldForceFlowConsistency = (currentView == "flow")
         local shouldForceFlowRelayout = currentView == "flow"
             and refreshMeta
             and refreshMeta.requiresFlowRelayout == true
-        if shouldForceFlowRelayout then
+        if shouldForceFlowConsistency or shouldForceFlowRelayout then
             StopBurstFullRefresh()
             lastOptimisticFlowRefreshAt = (GetTime and GetTime()) or 0
             forceFull = true
@@ -3696,8 +3851,15 @@ function Frame:UpdateLayout(changedBags, opts)
     -- RebuildFilterTabs clears activeFilter and the dim goes with it. ✿ ʕ •ᴥ•ʔ
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
+        local hasMatch = false
         for _, item in ipairs(items) do
-            local matches = item.category == quickFilter
+            if item.category == quickFilter then
+                hasMatch = true
+                break
+            end
+        end
+        for _, item in ipairs(items) do
+            local matches = hasMatch and item.category == quickFilter
             item.isQuickFiltered = not matches
         end
     else
@@ -3708,10 +3870,16 @@ function Frame:UpdateLayout(changedBags, opts)
 
     -- Sort items
     if Omni.Sorter then
-        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
-        items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
+        local doBagViewSort = not (currentView == "bag" and not bagViewNeedsFreshSort)
+        if doBagViewSort then
+            local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
+            items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+            if currentView == "bag" then
+                bagViewNeedsFreshSort = false
+            end
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
+            end
         end
     end
 
@@ -3995,6 +4163,7 @@ function Frame:RenderFlowView(items)
         }
     end
     local compositionSignature = nil
+    local laneSignature = nil
     local canReuseLaneAssignment = false
 
     if flowMode then
@@ -4005,11 +4174,17 @@ function Frame:RenderFlowView(items)
             itemStep,
             activeFilter
         )
+        laneSignature = self:BuildFlowLaneSignature(
+            categoryOrder,
+            usableWidth,
+            itemStep,
+            activeFilter
+        )
         freezeHeadersForVendor = merchantOpen
             and flowLayoutCache ~= nil
             and flowLayoutCache.signature == compositionSignature
         canReuseLaneAssignment = flowLayoutCache
-            and flowLayoutCache.signature == compositionSignature
+            and flowLayoutCache.laneSignature == laneSignature
             and flowLayoutCache.laneAssignment ~= nil
     end
 
@@ -4130,6 +4305,19 @@ function Frame:RenderFlowView(items)
                     table.insert(rightOrdered, name)
                 else
                     table.insert(leftOrdered, name)
+                end
+            end
+            -- ʕ •ᴥ•ʔ✿ Cache reuse keeps lane placement stable, but quick-filter
+            -- UX requires the active tab category to stay top-left across
+            -- bag-update redraws. If the pinned category is in the left lane,
+            -- bubble it to the front before we flatten left→right render order. ✿ ʕ •ᴥ•ʔ
+            if activeFilter and laneAssignment[activeFilter] == "left" then
+                for i = 1, #leftOrdered do
+                    if leftOrdered[i] == activeFilter then
+                        table.remove(leftOrdered, i)
+                        table.insert(leftOrdered, 1, activeFilter)
+                        break
+                    end
                 end
             end
             local final = {}
@@ -4438,6 +4626,7 @@ function Frame:RenderFlowView(items)
     if flowMode then
         flowLayoutCache = {
             signature = compositionSignature,
+            laneSignature = laneSignature,
             laneAssignment = laneAssignment,
             headerByCategory = headerByCategory,
             order = categoryOrder,
@@ -4894,11 +5083,14 @@ function Frame:Show()
 
     local sig = ComputeShowSignature()
     local forceFullShowForAttune = IsAttuneHelperEmbedEnabled() and IsAttuneHelperAvailable()
+    local requiresSortedShow = (currentView == "flow")
+        or (currentView == "bag" and bagViewNeedsFreshSort)
     local canFastShow = hasRenderedOnce
         and not pendingCombatRender
         and lastRenderedShowSignature ~= nil
         and sig == lastRenderedShowSignature
         and not forceFullShowForAttune
+        and not requiresSortedShow
 
     if canFastShow then
         RebuildPopulatedItemButtonList()
@@ -4912,8 +5104,10 @@ function Frame:Show()
     else
         self:UpdateLayout(nil, { reason = "show_open" })
     end
-    self:UpdateEmbeddedAttuneHelper()
-    if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+    if not InCombat() then
+        self:UpdateEmbeddedAttuneHelper()
+        if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+    end
 end
 
 function Frame:Hide()
@@ -4935,6 +5129,7 @@ function Frame:Hide()
     flowLayoutCache = nil
     vendorFlowLayoutFreeze = nil
     wasMerchantOpen = false
+    bagViewNeedsFreshSort = true
     ClearMap(optimisticFlowRefreshWatches)
     ClearArray(itemButtons)
 
@@ -4988,6 +5183,7 @@ function Frame:SetBagFilter(bagID)
     OmniInventoryDB.char.settings.selectedBagID = selectedBagID
 
     self:UpdateBagIconVisuals()
+    bagViewNeedsFreshSort = true
     self:UpdateLayout()
 end
 
@@ -5236,7 +5432,7 @@ function Frame:Init()
     self:CreateMainFrame()
     self:LoadPosition()
 
-    if Omni.Pool and Omni.Pool.Prewarm then
+    if not InCombat() and Omni.Pool and Omni.Pool.Prewarm then
         Omni.Pool:Prewarm("ItemButton", 160)
     end
 
@@ -5255,11 +5451,14 @@ function Frame:Init()
         end
     end
 
-    -- ʕ •ᴥ•ʔ✿ Eagerly populate the layout while hidden so a first open
-    -- mid-combat already has every item button parented to its bag's
-    -- ItemContainer, positioned, and click-routable through the
-    -- template's secure OnClick. ✿ ʕ •ᴥ•ʔ
-    pcall(function() Frame:SetView(currentView) end)
+    -- ʕ •ᴥ•ʔ✿ Eagerly populate the hidden layout so a first open
+    -- mid-combat already has bag-slot buttons parked and click-routable.
+    -- If login itself is combat-locked, UpdateLayout will attempt the
+    -- lightweight grid bootstrap instead of the normal sorted flow pass. ✿ ʕ •ᴥ•ʔ
+    self:_RefreshViewButtonLabel()
+    pcall(function()
+        Frame:UpdateLayout(nil, { forceFull = true, reason = "init_prewarm", immediate = true })
+    end)
 end
 
 print("|cFF00FF00OmniInventory|r: Frame loaded")

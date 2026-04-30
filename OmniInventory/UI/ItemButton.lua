@@ -18,8 +18,8 @@ local BUTTON_SIZE = 37
 local ICON_SIZE = 32
 local BORDER_SIZE = 2
 local ATTUNE_BAR_WIDTH = 6
-local ATTUNE_MIN_HEIGHT_PERCENT = 0.2
-local ATTUNE_MAX_HEIGHT_PERCENT = 0.9
+local ATTUNE_MIN_HEIGHT_PERCENT = 0.1
+local ATTUNE_MAX_HEIGHT_PERCENT = 0.92
 -- ʕ •ᴥ•ʔ✿ Per-school resistance icons; fallback covers untyped/unknown schools ✿ ʕ •ᴥ•ʔ
 local RESIST_ICON_TEXTURES = {
     Shadow = "Interface\\Icons\\Spell_Shadow_AntiShadow",
@@ -306,7 +306,6 @@ local function GetItemResistSchool(itemLink, itemID)
 end
 
 local function HideAttuneDisplay(button)
-    if button.attuneBarBG then button.attuneBarBG:Hide() end
     if button.attuneBarFill then button.attuneBarFill:Hide() end
     if button.attuneText then button.attuneText:Hide() end
     if button.bountyIcon then button.bountyIcon:Hide() end
@@ -329,21 +328,16 @@ local function GetButtonRenderSize(button)
 end
 
 local function ApplyAttuneBarMetrics(button)
-    if not button or not button.attuneBarBG or not button.attuneBarFill then
+    if not button or not button.attuneBarFill then
         return
     end
 
     local buttonSize = GetButtonRenderSize(button)
     local inset = math.max(1, math.floor(buttonSize * 0.06 + 0.5))
     local fillWidth = math.max(3, math.floor(buttonSize * 0.16 + 0.5))
-    local border = 1
-
-    button.attuneBarBG:ClearAllPoints()
-    button.attuneBarBG:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", inset, inset)
-    button.attuneBarBG:SetWidth(fillWidth + border * 2)
 
     button.attuneBarFill:ClearAllPoints()
-    button.attuneBarFill:SetPoint("BOTTOMLEFT", button.attuneBarBG, "BOTTOMLEFT", border, border)
+    button.attuneBarFill:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", inset, inset)
     button.attuneBarFill:SetWidth(fillWidth)
 end
 
@@ -526,35 +520,10 @@ function ItemButton:Create(parent)
     -- Hide the backdrop border texture we created earlier
     button.border:Hide()
 
-    -- New item glow using AnimationGroup
-    button.glow = button:CreateTexture(nil, "OVERLAY")
-    button.glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-    button.glow:SetBlendMode("ADD")
-    button.glow:SetPoint("CENTER")
-    button.glow:SetSize(BUTTON_SIZE * 1.5, BUTTON_SIZE * 1.5)
-    button.glow:SetVertexColor(0.0, 1.0, 0.5, 1)
-    button.glow:Hide()
-
-    -- New item glow animation (Classic WoW compatible)
-    local ag = button.glow:CreateAnimationGroup()
-    ag:SetLooping("BOUNCE")
-    local fade = ag:CreateAnimation("Alpha")
-    fade:SetChange(0.5)  -- Pulse alpha by 0.5 (Classic compatible)
-    fade:SetDuration(0.8)
-    fade:SetSmoothing("IN_OUT")
-    button.glow.anim = ag
-
     -- Register with Masque if available
     if Omni.MasqueGroup then
         Omni.MasqueGroup:AddButton(button)
     end
-
-    -- Pawn Upgrade Arrow
-    button.upgradeArrow = button:CreateTexture(nil, "OVERLAY")
-    button.upgradeArrow:SetTexture("Interface\\AddOns\\Pawn\\Textures\\UpgradeArrow")
-    button.upgradeArrow:SetSize(23, 23)
-    button.upgradeArrow:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
-    button.upgradeArrow:Hide()
 
     -- Search dim overlay
     button.dimOverlay = button:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -576,17 +545,9 @@ function ItemButton:Create(parent)
     button.pinIcon:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     button.pinIcon:Hide()
 
-    button.attuneBarBG = button:CreateTexture(nil, "OVERLAY")
-    button.attuneBarBG:SetTexture("Interface\\Buttons\\WHITE8X8")
-    button.attuneBarBG:SetVertexColor(0, 0, 0, 1)
-    button.attuneBarBG:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 2, 2)
-    button.attuneBarBG:SetWidth(ATTUNE_BAR_WIDTH + 2)
-    button.attuneBarBG:SetHeight(0)
-    button.attuneBarBG:Hide()
-
     button.attuneBarFill = button:CreateTexture(nil, "OVERLAY")
     button.attuneBarFill:SetTexture("Interface\\Buttons\\WHITE8X8")
-    button.attuneBarFill:SetPoint("BOTTOMLEFT", button.attuneBarBG, "BOTTOMLEFT", 1, 1)
+    button.attuneBarFill:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 2, 2)
     button.attuneBarFill:SetWidth(ATTUNE_BAR_WIDTH)
     button.attuneBarFill:SetHeight(0)
     button.attuneBarFill:Hide()
@@ -745,7 +706,6 @@ local function UpdateAttuneDisplay(button, itemInfo)
 
     -- ʕ •ᴥ•ʔ✿ Only items attunable by SOMEONE deserve a bar ✿ ʕ •ᴥ•ʔ
     if not accountOK then
-        button.attuneBarBG:Hide()
         button.attuneBarFill:Hide()
         button.attuneText:Hide()
         button:SetScript("OnUpdate", nil)
@@ -771,7 +731,6 @@ local function UpdateAttuneDisplay(button, itemInfo)
     end
 
     if not showBar then
-        button.attuneBarBG:Hide()
         button.attuneBarFill:Hide()
         button:SetScript("OnUpdate", nil)
         if settings.showAccountAttuneText and progress < 100 and (not charOK) and accountOK then
@@ -800,7 +759,6 @@ local function UpdateAttuneDisplay(button, itemInfo)
         button.attuneBarFill:SetVertexColor(0.5, 0.5, 0.5, 1)
     end
 
-    button.attuneBarBG:Show()
     button.attuneBarFill:Show()
 
     if progress >= 100 then
@@ -827,7 +785,6 @@ local function UpdateAttuneDisplay(button, itemInfo)
         button.attuneText:Hide()
     end
 
-    button.attuneBarBG:SetHeight(targetHeight + 2)
     button.attuneBarFill:SetHeight(math.max(targetHeight, 0))
     button:SetScript("OnUpdate", nil)
 end
@@ -854,7 +811,6 @@ function ItemButton:SetItem(button, itemInfo)
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
         if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
         if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
-        button.glow:Hide()
         button.dimOverlay:Hide()
         UpdateEmptyDropHighlight(button)
         HideAttuneDisplay(button)
@@ -874,7 +830,6 @@ function ItemButton:SetItem(button, itemInfo)
         if button.borderBottom then button.borderBottom:SetVertexColor(grey, grey, grey, 1) end
         if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
         if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
-        button.glow:Hide()
         button.dimOverlay:Hide()
         UpdateEmptyDropHighlight(button)
         HideAttuneDisplay(button)
@@ -954,24 +909,6 @@ function ItemButton:SetItem(button, itemInfo)
     -- which are combat-gated). pcall absorbs the error regardless. ✿ ʕ •ᴥ•ʔ
     if itemInfo.slotID and button.SetID and prevSlotID ~= itemInfo.slotID then
         pcall(button.SetID, button, itemInfo.slotID)
-    end
-
-    local highlightNewItems = Omni.Data and Omni.Data:Get("highlightNewItems") == true
-    if itemInfo.isNew and highlightNewItems then
-        button.glow:Show()
-        button.glow.anim:Play()
-    else
-        button.glow.anim:Stop()
-        button.glow:Hide()
-    end
-
-    -- Pawn Upgrade Check (wrapped in pcall for safety)
-    button.upgradeArrow:Hide()
-    if PawnIsContainerItemAnUpgrade and itemInfo.bagID and itemInfo.bagID >= 0 then
-        local ok, isUpgrade = pcall(PawnIsContainerItemAnUpgrade, itemInfo.bagID, itemInfo.slotID)
-        if ok and isUpgrade then
-            button.upgradeArrow:Show()
-        end
     end
 
     -- Apply quick filter dimming or clear search dim
@@ -1121,8 +1058,6 @@ function ItemButton:OnClick(button, mouseButton)
 
     if button.itemInfo and button.itemInfo.isNew then
         button.itemInfo.isNew = false
-        if button.glow then button.glow:Hide() end
-        button.glowAnimating = false
         if Omni.Categorizer and button.itemInfo.itemID then
             Omni.Categorizer:ClearNewItem(button.itemInfo.itemID)
         end
@@ -1221,8 +1156,6 @@ function ItemButton:Reset(button)
     if button.borderLeft then button.borderLeft:SetVertexColor(grey, grey, grey, 1) end
     if button.borderRight then button.borderRight:SetVertexColor(grey, grey, grey, 1) end
 
-    if button.glow and button.glow.anim then button.glow.anim:Stop() end
-    if button.glow then button.glow:Hide() end
     if button.dimOverlay then button.dimOverlay:Hide() end
     if button.pinIcon then button.pinIcon:Hide() end
     if button.emptyDropHighlight then button.emptyDropHighlight:Hide() end
