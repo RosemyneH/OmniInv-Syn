@@ -1153,6 +1153,7 @@ function BankFrame:RenderGridView(items)
     local scrollChild = bankFrame.scrollChild
     local previousButtons = itemButtons
     itemButtons = {}
+    local releasedPreviousToPool = false
 
     if InCombat() then
         for _, btn in ipairs(previousButtons) do
@@ -1162,6 +1163,7 @@ function BankFrame:RenderGridView(items)
         for _, btn in ipairs(previousButtons) do
             Omni.Pool:Release("ItemButton", btn)
         end
+        releasedPreviousToPool = true
     end
 
     for _, header in ipairs(categoryHeaders) do
@@ -1189,7 +1191,7 @@ function BankFrame:RenderGridView(items)
     local function renderSlot(bagID, slotID)
         index = index + 1
         local container = GetBankItemContainer(bagID) or scrollChild
-        local btn = previousButtons[index]
+        local btn = (not releasedPreviousToPool) and previousButtons[index] or nil
         if not btn then
             if InCombat() and Omni.ItemButton then
                 local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
@@ -1253,11 +1255,13 @@ function BankFrame:RenderGridView(items)
         end
     end
 
-    for i = index + 1, #previousButtons do
-        local btn = previousButtons[i]
-        pcall(SetButtonItem, btn, nil)
-        pcall(btn.SetAlpha, btn, 0)
-        table.insert(itemButtons, btn)
+    if not releasedPreviousToPool then
+        for i = index + 1, #previousButtons do
+            local btn = previousButtons[i]
+            pcall(SetButtonItem, btn, nil)
+            pcall(btn.SetAlpha, btn, 0)
+            table.insert(itemButtons, btn)
+        end
     end
 
     local rows = math.ceil(index / columns)
