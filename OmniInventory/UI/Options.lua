@@ -21,6 +21,9 @@ local function RefreshAllInventory()
     if Omni.BankFrame and Omni.BankFrame.UpdateLayout then
         Omni.BankFrame:UpdateLayout()
     end
+    if Omni.GuildBankFrame and Omni.GuildBankFrame.UpdateLayout then
+        Omni.GuildBankFrame:UpdateLayout()
+    end
 end
 
 local function FormatScalePercent(value)
@@ -33,27 +36,6 @@ end
 
 local function IsSettingEditLocked()
     return InCombatLockdown and InCombatLockdown()
-end
-
-local function GetTooltipSide()
-    if Omni and Omni.Data and Omni.Data.Get then
-        local side = Omni.Data:Get("tooltipSide")
-        if side == "left" or side == "right" then
-            return side
-        end
-    end
-    return "right"
-end
-
-local function SetTooltipSide(side)
-    local normalized = (side == "left") and "left" or "right"
-    if Omni and Omni.Data and Omni.Data.Set then
-        Omni.Data:Set("tooltipSide", normalized)
-    else
-        OmniInventoryDB = OmniInventoryDB or {}
-        OmniInventoryDB.global = OmniInventoryDB.global or {}
-        OmniInventoryDB.global.tooltipSide = normalized
-    end
 end
 
 local colorPickerCloseRefreshPending = false
@@ -163,12 +145,14 @@ local FOOTER_BUTTON_OPTIONS = {
     { key = "lootDb",       label = "Loot Database"  },
     { key = "attuneMgr",    label = "Attunable List" },
     { key = "leaderboard",  label = "Leaderboard"    },
+    { key = "bountyHunter", label = "Bounty Board (preview)" },
 }
 
 local ADDON_BUTTON_OPTIONS = {
     { key = "scootsCraft", label = "ScootsCraft" },
     { key = "atlasLoot",   label = "AtlasLoot"   },
     { key = "theJournal",  label = "TheJournal"  },
+    { key = "qtRunner",    label = "QTRunner"    },
 }
 
 local function GetFooterButtonsDB()
@@ -478,30 +462,33 @@ function Settings:CreateControls(parent)
     end)
     self.footerMoneyEmphasisCb = footerMoneyCb
 
-    yOffset = yOffset - 22
+    yOffset = yOffset - SPACING - 4
 
-    local tooltipSideBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    tooltipSideBtn:SetSize(200, 22)
-    tooltipSideBtn:SetPoint("TOP", 0, yOffset)
-    tooltipSideBtn:SetScript("OnClick", function(self)
-        local nextSide = GetTooltipSide() == "right" and "left" or "right"
-        SetTooltipSide(nextSide)
-        self:SetText("Tooltip Side: " .. (nextSide == "right" and "Prefer Right" or "Prefer Left"))
-    end)
-    tooltipSideBtn:SetScript("OnEnter", function(self)
+    local tooltipCompatCb = CreateFrame("CheckButton", "OmniTooltipAddonCompat", parent, "UICheckButtonTemplate")
+    tooltipCompatCb:SetSize(24, 24)
+    tooltipCompatCb:SetPoint("TOPLEFT", 14, yOffset)
+    local tooltipCompatLabel = tooltipCompatCb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    tooltipCompatLabel:SetPoint("LEFT", tooltipCompatCb, "RIGHT", 2, 1)
+    tooltipCompatLabel:SetText("Addon-friendly item tooltips")
+    tooltipCompatCb:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Tooltip Side Preference", 1, 0.82, 0)
-        GameTooltip:AddLine("Choose whether item tooltips prefer opening to the right or left.", 1, 1, 1, true)
+        GameTooltip:SetText("Tooltip compatibility", 1, 0.82, 0)
+        GameTooltip:AddLine("Live bag, bank (including main bank), bank bags, and keyring slots always use the default container button tooltip only — Omni never runs a second SetOwner on them.", 1, 1, 1, true)
+        GameTooltip:AddLine("When enabled: list rows and hyperlink-only tooltips use ANCHOR_NONE so TipTac-style addons can reposition. When disabled: those use ANCHOR_RIGHT.", 0.75, 0.75, 0.75, true)
         GameTooltip:Show()
     end)
-    tooltipSideBtn:SetScript("OnLeave", function()
+    tooltipCompatCb:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-    self.tooltipSideBtn = tooltipSideBtn
+    tooltipCompatCb:SetScript("OnClick", function(self)
+        if Omni.Data then
+            Omni.Data:Set("tooltipAddonCompatibility", self:GetChecked() and true or false)
+            RefreshAllInventory()
+        end
+    end)
+    self.tooltipAddonCompatCb = tooltipCompatCb
 
-    yOffset = yOffset - 24
-
-    yOffset = yOffset - SPACING - 4
+    yOffset = yOffset - 28
 
     -- 6. Reset Button
     local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -789,11 +776,9 @@ function Settings:UpdateValues()
     if self.footerMoneyEmphasisCb and Omni.Data then
         self.footerMoneyEmphasisCb:SetChecked(Omni.Data:Get("footerMoneyEmphasis") == true)
     end
-    if self.tooltipSideBtn then
-        local side = GetTooltipSide()
-        self.tooltipSideBtn:SetText("Tooltip Side: " .. (side == "right" and "Prefer Right" or "Prefer Left"))
+    if self.tooltipAddonCompatCb and Omni.Data then
+        self.tooltipAddonCompatCb:SetChecked(Omni.Data:Get("tooltipAddonCompatibility") ~= false)
     end
-
     if Omni.Frame and self.scaleSlider then
         local scale = Omni.Frame:GetScale()
         self.scaleSlider:SetValue(scale)

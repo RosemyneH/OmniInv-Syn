@@ -22,7 +22,8 @@ local defaults = {
         scale = 1.0,
         opacity = 0.95,
         highlightNewItems = false,
-        tooltipSide = "right",
+        -- ʕ •ᴥ•ʔ✿ Uncheck in settings to restore legacy Omni anchors (double tooltip pass with default UI) ✿ ʕ •ᴥ•ʔ
+        tooltipAddonCompatibility = true,
         -- ʕ •ᴥ•ʔ✿ Footer: larger outlined gold + slot count; slots tint blue→red by fill ✿ ʕ •ᴥ•ʔ
         footerMoneyEmphasis = true,
         attune = {
@@ -59,12 +60,14 @@ local defaults = {
             lootDb        = true,
             attuneMgr     = true,
             leaderboard   = true,
+            bountyHunter  = true,
         },
         -- ʕ •ᴥ•ʔ✿ Third-party addon launchers (auto-hidden when the addon isn't loaded) ✿ ʕ •ᴥ•ʔ
         addonButtons = {
             scootsCraft = true,
             atlasLoot   = true,
             theJournal  = true,
+            qtRunner    = true,
         },
     },
     char = {
