@@ -30,6 +30,10 @@ local RESIST_ICON_TEXTURES = {
 }
 local RESIST_ICON_FALLBACK = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
+local TEXTURE_QUEST_AVAILABLE = "Interface\\GossipFrame\\AvailableQuestIcon"
+local TEXTURE_QUEST_DAILY = "Interface\\GossipFrame\\DailyQuestIcon"
+local QUEST_STARTER_ICON_SIZE = 20
+
 local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
 local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
 local FORGE_LETTERS = { [1] = "T", [2] = "W", [3] = "L" }
@@ -149,6 +153,97 @@ local function IsLiveContainerFrameSlot(bagID, slotID)
     return false
 end
 
+local questScanTooltip
+local function GetQuestScanTooltip()
+    if not questScanTooltip then
+        questScanTooltip = CreateFrame("GameTooltip", "OmniItemQuestScanTooltip", nil, "GameTooltipTemplate")
+        questScanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    end
+    return questScanTooltip
+end
+local function GetItemStartsQuestTooltipMarker()
+    return ITEM_STARTS_QUEST
+end
+
+local function BagSlotTooltipMentionsStartsQuest(bagID, slotID)
+    local marker = GetItemStartsQuestTooltipMarker()
+    if not marker or not bagID or not slotID then
+        return false
+    end
+    if not IsLiveContainerFrameSlot(bagID, slotID) then
+        return false
+    end
+    local tip = GetQuestScanTooltip()
+    tip:ClearLines()
+    tip:SetBagItem(bagID, slotID)
+    local prefix = "OmniItemQuestScanTooltipTextLeft"
+    for i = 1, tip:NumLines() do
+        local left = _G[prefix .. i]
+        if left then
+            local text = left:GetText()
+            if text and string.find(text, marker, 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ʕ •ᴥ•ʔ✿ nil = hide; "available" / "daily" after ITEMS_STARTS_QUEST line + quest id ✿ ʕ •ᴥ•ʔ
+local function GetQuestStarterOverlayKind(bagID, slotID)
+    if not BagSlotTooltipMentionsStartsQuest(bagID, slotID) then
+        return nil
+    end
+    local questId
+    if GetContainerItemQuestInfo then
+        local _, qId = GetContainerItemQuestInfo(bagID, slotID)
+        questId = qId
+    end
+    if questId and questId > 0 and type(IsDailyQuest) == "function" and IsDailyQuest(questId) then
+        return "daily"
+    end
+    return "available"
+end
+
+local function LayoutQuestStarterIcon(button)
+    local icon = button.questStarterIcon
+    if not icon or not icon:IsShown() then
+        return
+    end
+    icon:ClearAllPoints()
+    if button.accountIcon and button.accountIcon:IsShown() then
+        icon:SetPoint("TOPLEFT", button.accountIcon, "TOPRIGHT", 2, 0)
+    else
+        icon:SetPoint("TOPLEFT", button, "TOPLEFT", -3, -2)
+    end
+end
+
+local function UpdateQuestStarterIcon(button, itemInfo)
+    if not button or not button.questStarterIcon then
+        return
+    end
+    local icon = button.questStarterIcon
+    if not itemInfo or itemInfo.__empty or not itemInfo.bagID or not itemInfo.slotID then
+        icon:Hide()
+        return
+    end
+    local kind = GetQuestStarterOverlayKind(itemInfo.bagID, itemInfo.slotID)
+    if not kind then
+        icon:Hide()
+        return
+    end
+    if kind == "daily" then
+        icon:SetTexture(TEXTURE_QUEST_DAILY)
+    else
+        icon:SetTexture(TEXTURE_QUEST_AVAILABLE)
+    end
+    icon:Show()
+    LayoutQuestStarterIcon(button)
+end
+
+local function CustomItemTooltipAnchor()
+    return TooltipAddonCompatibilityEnabled() and "ANCHOR_NONE" or "ANCHOR_RIGHT"
+end
 local function UpdateTooltipCompareState()
     if not GameTooltip or not GameTooltip:IsShown() then
         return
@@ -589,6 +684,10 @@ function ItemButton:Create(parent)
     button.pinIcon:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     button.pinIcon:Hide()
 
+    button.questStarterIcon = button:CreateTexture(nil, "OVERLAY", nil, 3)
+    button.questStarterIcon:SetSize(QUEST_STARTER_ICON_SIZE, QUEST_STARTER_ICON_SIZE)
+    button.questStarterIcon:Hide()
+
     button.attuneBarFill = button:CreateTexture(nil, "OVERLAY")
     button.attuneBarFill:SetTexture("Interface\\Buttons\\WHITE8X8")
     button.attuneBarFill:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 2, 2)
@@ -858,6 +957,7 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        if button.questStarterIcon then button.questStarterIcon:Hide() end
         button.__lastRenderKey = nil
         return
     end
@@ -877,6 +977,7 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        if button.questStarterIcon then button.questStarterIcon:Hide() end
         button.__lastRenderKey = nil
         return
     end
@@ -884,6 +985,7 @@ function ItemButton:SetItem(button, itemInfo)
     pcall(button.EnableMouse, button, true)
 
     local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
+    local questOverlayKind = GetQuestStarterOverlayKind(itemInfo.bagID, itemInfo.slotID)
     local attuneSettings = GetAttuneSettings()
     local attuneEnabled = attuneSettings and attuneSettings.enabled
     local attuneToken = BuildAttuneSettingsToken()
@@ -899,11 +1001,13 @@ function ItemButton:SetItem(button, itemInfo)
             and renderKey.bagID == itemInfo.bagID
             and renderKey.slotID == itemInfo.slotID
             and renderKey.isPinned == isPinned
+            and renderKey.questOverlayKind == questOverlayKind
             and renderKey.attuneToken == attuneToken then
         if attuneEnabled then
             UpdateAttuneDisplay(button, itemInfo)
             UpdateForgeDisplay(button, itemInfo)
         end
+        UpdateQuestStarterIcon(button, itemInfo)
         self:UpdateCooldown(button)
         return
     end
@@ -973,6 +1077,7 @@ function ItemButton:SetItem(button, itemInfo)
     end
 
     UpdateAttuneDisplay(button, itemInfo)
+    UpdateQuestStarterIcon(button, itemInfo)
     UpdateForgeDisplay(button, itemInfo)
     self:UpdateCooldown(button)
 
@@ -987,6 +1092,7 @@ function ItemButton:SetItem(button, itemInfo)
         bagID = itemInfo.bagID,
         slotID = itemInfo.slotID,
         isPinned = isPinned,
+        questOverlayKind = questOverlayKind,
         attuneToken = attuneToken,
     }
 end
