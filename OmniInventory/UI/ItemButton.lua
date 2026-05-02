@@ -113,6 +113,33 @@ local function GetButtonLimbo()
     return buttonLimbo
 end
 
+local function TooltipAddonCompatibilityEnabled()
+    if Omni and Omni.Data and Omni.Data.Get then
+        return Omni.Data:Get("tooltipAddonCompatibility") ~= false
+    end
+    return true
+end
+
+-- ʕ •ᴥ•ʔ✿ Slots backed by ContainerFrameItemButton_OnEnter (bags, bank,
+-- bank bags, keyring): Omni must not SetOwner/SetBagItem after Blizzard or
+-- tooltips anchor twice; main bank is bagID -1 (not >= 0). ✿ ʕ •ᴥ•ʔ
+local function IsLiveContainerFrameSlot(bagID, slotID)
+    if bagID == nil or slotID == nil then
+        return false
+    end
+    if bagID == -2 or bagID == -1 then
+        return true
+    end
+    if bagID >= 0 and bagID <= 11 then
+        return true
+    end
+    return false
+end
+
+local function CustomItemTooltipAnchor()
+    return TooltipAddonCompatibilityEnabled() and "ANCHOR_NONE" or "ANCHOR_RIGHT"
+end
+
 local function UpdateTooltipCompareState()
     if not GameTooltip or not GameTooltip:IsShown() then
         return
@@ -132,44 +159,15 @@ local function UpdateTooltipCompareState()
     end
 end
 
-local function GetTooltipSidePreference()
-    if Omni and Omni.Data and Omni.Data.Get then
-        local side = Omni.Data:Get("tooltipSide")
-        if side == "left" or side == "right" then
-            return side
-        end
-    end
-    return "right"
-end
-
-local function GetPreferredTooltipAnchor(button)
-    local preferred = GetTooltipSidePreference()
-    local anchor = preferred == "left" and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
-    if not button or not UIParent then
-        return anchor
-    end
-
-    local parentWidth = UIParent.GetWidth and UIParent:GetWidth() or 0
-    local buttonLeft = button.GetLeft and button:GetLeft() or nil
-    local buttonRight = button.GetRight and button:GetRight() or nil
-    local REQUIRED_TOOLTIP_GAP = 320
-
-    if preferred == "right" and parentWidth > 0 and buttonRight then
-        if (parentWidth - buttonRight) < REQUIRED_TOOLTIP_GAP then
-            return "ANCHOR_LEFT"
-        end
-    elseif preferred == "left" and buttonLeft then
-        if buttonLeft < REQUIRED_TOOLTIP_GAP then
-            return "ANCHOR_RIGHT"
-        end
-    end
-
-    return anchor
-end
-
 local modifierTooltipFrame = CreateFrame("Frame")
 modifierTooltipFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierTooltipFrame:SetScript("OnEvent", function()
+    if TooltipAddonCompatibilityEnabled() then
+        local owner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
+        if not (owner and owner.__omniUsesCustomTooltip) then
+            return
+        end
+    end
     UpdateTooltipCompareState()
 end)
 
@@ -260,7 +258,7 @@ local function IsAttunableByAccount(itemID)
     return false
 end
 
--- ʕ •ᴥ•ʔ✿ Strictly use hyperlink attune progress API ✿ ʕ •ᴥ•ʔ
+-- ʕ •ᴥ•ʔ✿ Hyperlink progress only — variant-aware ✿ ʕ •ᴥ•ʔ
 local function GetAttuneProgress(itemLink)
     if itemLink and _G.GetItemLinkAttuneProgress then
         local progress = GetItemLinkAttuneProgress(itemLink)
@@ -520,11 +518,6 @@ function ItemButton:Create(parent)
     -- Hide the backdrop border texture we created earlier
     button.border:Hide()
 
-    -- Register with Masque if available
-    if Omni.MasqueGroup then
-        Omni.MasqueGroup:AddButton(button)
-    end
-
     -- Search dim overlay
     button.dimOverlay = button:CreateTexture(nil, "OVERLAY", nil, 7)
     button.dimOverlay:SetAllPoints(button.icon)
@@ -595,11 +588,9 @@ function ItemButton:Create(parent)
 
     button.itemInfo = nil
 
-    -- ʕ •ᴥ•ʔ✿ HookScript on OnClick / OnEnter so the template's built-in
-    -- secure ContainerFrameItemButton_OnClick (use / pickup / equip / swap /
-    -- modified-clicks) and standard tooltip handler still run; ours adds
-    -- the OmniInventory pin-toggle on shift+rclick and our richer tooltip
-    -- compare logic on top. The template owns drag in combat too. ✿ ʕ •ᴥ•ʔ
+    -- ʕ •ᴥ•ʔ✿ HookScript after template: OnClick adds shift+rclick pin; OnEnter
+    -- adds search highlight only — GameTooltip stays on Blizzard’s path for
+    -- live bag/bank slots so tooltip addon hooks are not double-run. ✿ ʕ •ᴥ•ʔ
     button:HookScript("OnMouseDown", function(self)
         ItemButton:OnMouseDown(self)
     end)
@@ -1073,36 +1064,26 @@ function ItemButton:OnEnter(button)
     local bagID = button.bagID
     local slotID = button.slotID
 
-    GameTooltip:SetOwner(button, GetPreferredTooltipAnchor(button))
+    if IsLiveContainerFrameSlot(bagID, slotID) then
+        button.__omniUsesCustomTooltip = false
+        if Omni.Frame and Omni.Frame.HighlightItem then
+            Omni.Frame:HighlightItem(button.itemInfo)
+        end
+        button.__emptyDropHighlightHovering = true
+        UpdateEmptyDropHighlight(button)
+        return
+    end
 
-    if bagID and bagID >= 0 then
-        -- Standard online item
-        GameTooltip:SetBagItem(bagID, slotID)
-    elseif button.itemInfo.hyperlink then
-        -- Offline/Bank item
+    button.__omniUsesCustomTooltip = true
+    GameTooltip:SetOwner(button, CustomItemTooltipAnchor())
+    if button.itemInfo.hyperlink then
         GameTooltip:SetHyperlink(button.itemInfo.hyperlink)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Bank Item (Offline)", 0.5, 0.5, 0.5)
     end
-
-    -- Hook for Auctionator (if it doesn't hook automatically)
-    if Auctionator and Auctionator.ShowTooltip then
-         -- Auctionator usually hooks SetBagItem/SetHyperlink, but we can allow extra logic here if needed
-    end
-
     GameTooltip:Show()
     UpdateTooltipCompareState()
-    if bagID and bagID >= 0 and slotID and MerchantFrame and MerchantFrame:IsShown() and (not CursorHasItem or not CursorHasItem()) then
-        if ShowContainerSellCursor then
-            ShowContainerSellCursor(bagID, slotID)
-        elseif CursorUpdate then
-            CursorUpdate(button)
-        end
-    elseif CursorUpdate then
-        CursorUpdate(button)
-    end
 
-    -- Highlight in search
     if Omni.Frame and Omni.Frame.HighlightItem then
         Omni.Frame:HighlightItem(button.itemInfo)
     end
@@ -1116,10 +1097,20 @@ function ItemButton:OnLeave(button)
     if button.emptyDropHighlight then
         button.emptyDropHighlight:Hide()
     end
+
+    button.__omniUsesCustomTooltip = false
+    if IsLiveContainerFrameSlot(button.bagID, button.slotID) then
+        return
+    end
+
     GameTooltip:Hide()
     if ResetCursor then
         ResetCursor()
     end
+end
+
+function ItemButton:RefreshCompareTooltips()
+    UpdateTooltipCompareState()
 end
 
 -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate already handles OnDragStart and
@@ -1141,6 +1132,7 @@ function ItemButton:Reset(button)
     button.itemInfo = nil
     button.__lastRenderKey = nil
     button.__omniActionStateKey = nil
+    button.__omniUsesCustomTooltip = nil
     button.__emptyDropHighlightHovering = false
     button.bagID = nil
     button.slotID = nil
