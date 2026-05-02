@@ -4805,13 +4805,16 @@ function Frame:RenderListView(items)
                 self.bg:SetVertexColor(0.3, 0.3, 0.3, 1)
                 if self.itemInfo and self.itemInfo.bagID and self.itemInfo.slotID then
                     self.__omniUsesCustomTooltip = true
-                    local tipAnchor = "ANCHOR_RIGHT"
-                    if Omni.Data and Omni.Data.Get and Omni.Data:Get("tooltipAddonCompatibility") ~= false then
-                        tipAnchor = "ANCHOR_NONE"
+                    if Omni.ItemButton and Omni.ItemButton.SetOmniItemTooltipOwner then
+                        Omni.ItemButton.SetOmniItemTooltipOwner(self)
+                    else
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     end
-                    GameTooltip:SetOwner(self, tipAnchor)
                     GameTooltip:SetBagItem(self.itemInfo.bagID, self.itemInfo.slotID)
                     GameTooltip:Show()
+                    if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+                        Omni.ItemButton.FinalizeOmniItemTooltipLayout()
+                    end
                     if Omni.ItemButton and Omni.ItemButton.RefreshCompareTooltips then
                         Omni.ItemButton:RefreshCompareTooltips()
                     end

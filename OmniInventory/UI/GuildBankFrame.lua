@@ -834,11 +834,18 @@ local function CreateSlotButton(parent, slotIndex)
 
     btn:SetScript("OnEnter", function(self)
         self.__omniUsesCustomTooltip = true
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if Omni.ItemButton and Omni.ItemButton.SetOmniItemTooltipOwner then
+            Omni.ItemButton.SetOmniItemTooltipOwner(self)
+        else
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        end
         local t = self.gbTab or currentTab
         local s = self.gbSlot or self.slotIndex
         GameTooltip:SetGuildBankItem(t, s)
         GameTooltip:Show()
+        if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+            Omni.ItemButton.FinalizeOmniItemTooltipLayout()
+        end
         if Omni.ItemButton and Omni.ItemButton.RefreshCompareTooltips then
             Omni.ItemButton:RefreshCompareTooltips()
         end

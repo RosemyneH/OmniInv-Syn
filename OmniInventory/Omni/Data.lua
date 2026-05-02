@@ -22,8 +22,16 @@ local defaults = {
         scale = 1.0,
         opacity = 0.95,
         highlightNewItems = false,
-        -- ʕ •ᴥ•ʔ✿ Uncheck in settings to restore legacy Omni anchors (double tooltip pass with default UI) ✿ ʕ •ᴥ•ʔ
+        -- ʕ •ᴥ•ʔ✿ Legacy: used when itemTooltipPlacement is unset (see ItemButton tooltip resolver) ✿ ʕ •ᴥ•ʔ
         tooltipAddonCompatibility = true,
+        -- ʕ •ᴥ•ʔ✿ nil = derive from tooltipAddonCompatibility; else addon|right|left|fixed ✿ ʕ •ᴥ•ʔ
+        itemTooltipPlacement = nil,
+        itemTooltipFixed = {
+            point = "BOTTOMLEFT",
+            relPoint = "BOTTOMLEFT",
+            x = 24,
+            y = 140,
+        },
         -- ʕ •ᴥ•ʔ✿ Footer: larger outlined gold + slot count; slots tint blue→red by fill ✿ ʕ •ᴥ•ʔ
         footerMoneyEmphasis = true,
         attune = {

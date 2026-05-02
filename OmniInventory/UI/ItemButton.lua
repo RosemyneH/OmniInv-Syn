@@ -113,11 +113,24 @@ local function GetButtonLimbo()
     return buttonLimbo
 end
 
-local function TooltipAddonCompatibilityEnabled()
+local VALID_ITEM_TOOLTIP_PLACEMENT = {
+    addon = true,
+    right = true,
+    left = true,
+    fixed = true,
+}
+
+local function GetResolvedItemTooltipPlacement()
     if Omni and Omni.Data and Omni.Data.Get then
-        return Omni.Data:Get("tooltipAddonCompatibility") ~= false
+        local p = Omni.Data:Get("itemTooltipPlacement")
+        if type(p) == "string" and VALID_ITEM_TOOLTIP_PLACEMENT[p] then
+            return p
+        end
+        if Omni.Data:Get("tooltipAddonCompatibility") == false then
+            return "right"
+        end
     end
-    return true
+    return "addon"
 end
 
 -- ʕ •ᴥ•ʔ✿ Slots backed by ContainerFrameItemButton_OnEnter (bags, bank,
@@ -134,10 +147,6 @@ local function IsLiveContainerFrameSlot(bagID, slotID)
         return true
     end
     return false
-end
-
-local function CustomItemTooltipAnchor()
-    return TooltipAddonCompatibilityEnabled() and "ANCHOR_NONE" or "ANCHOR_RIGHT"
 end
 
 local function UpdateTooltipCompareState()
@@ -162,7 +171,7 @@ end
 local modifierTooltipFrame = CreateFrame("Frame")
 modifierTooltipFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierTooltipFrame:SetScript("OnEvent", function()
-    if TooltipAddonCompatibilityEnabled() then
+    if GetResolvedItemTooltipPlacement() == "addon" then
         local owner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
         if not (owner and owner.__omniUsesCustomTooltip) then
             return
@@ -170,6 +179,48 @@ modifierTooltipFrame:SetScript("OnEvent", function()
     end
     UpdateTooltipCompareState()
 end)
+
+function ItemButton.GetResolvedTooltipPlacement()
+    return GetResolvedItemTooltipPlacement()
+end
+
+function ItemButton.SetOmniItemTooltipOwner(owner)
+    if not owner or not GameTooltip then
+        return
+    end
+    local placement = GetResolvedItemTooltipPlacement()
+    if placement == "addon" or placement == "fixed" then
+        GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+    elseif placement == "left" then
+        GameTooltip:SetOwner(owner, "ANCHOR_LEFT")
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    end
+end
+
+function ItemButton.FinalizeOmniItemTooltipLayout()
+    if GetResolvedItemTooltipPlacement() ~= "fixed" then
+        return
+    end
+    if not GameTooltip or not GameTooltip:IsShown() then
+        return
+    end
+    local fix = Omni.Data and Omni.Data.Get and Omni.Data:Get("itemTooltipFixed")
+    local point, relPoint = "BOTTOMLEFT", "BOTTOMLEFT"
+    local x, y = 24, 140
+    if type(fix) == "table" then
+        if type(fix.point) == "string" then
+            point = fix.point
+        end
+        if type(fix.relPoint) == "string" then
+            relPoint = fix.relPoint
+        end
+        x = tonumber(fix.x) or x
+        y = tonumber(fix.y) or y
+    end
+    GameTooltip:ClearAllPoints()
+    GameTooltip:SetPoint(point, UIParent, relPoint, x, y)
+end
 
 local function GetAttuneSettings()
     local global = OmniInventoryDB and OmniInventoryDB.global
@@ -1075,13 +1126,14 @@ function ItemButton:OnEnter(button)
     end
 
     button.__omniUsesCustomTooltip = true
-    GameTooltip:SetOwner(button, CustomItemTooltipAnchor())
+    ItemButton.SetOmniItemTooltipOwner(button)
     if button.itemInfo.hyperlink then
         GameTooltip:SetHyperlink(button.itemInfo.hyperlink)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Bank Item (Offline)", 0.5, 0.5, 0.5)
     end
     GameTooltip:Show()
+    ItemButton.FinalizeOmniItemTooltipLayout()
     UpdateTooltipCompareState()
 
     if Omni.Frame and Omni.Frame.HighlightItem then
