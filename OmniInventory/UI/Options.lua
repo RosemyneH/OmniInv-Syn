@@ -26,14 +26,34 @@ local function RefreshAllInventory()
     end
 end
 
-local TOOLTIP_PLACEMENT_CYCLE = { "addon", "right", "left", "fixed" }
+local TOOLTIP_PLACEMENT_CYCLE = {
+    "right",
+    "left",
+    "fixed_br",
+    "fixed_bl",
+    "fixed_tl",
+    "fixed_tr",
+}
 
 local TOOLTIP_PLACEMENT_LABEL = {
-    addon = "Addon hook (ANCHOR_NONE)",
     right = "Right of slot",
     left = "Left of slot",
-    fixed = "Fixed on screen",
+    fixed_br = "Fixed (bottom-right)",
+    fixed_bl = "Fixed (bottom-left)",
+    fixed_tl = "Fixed (top-left)",
+    fixed_tr = "Fixed (top-right)",
+    fixed = "Fixed (bottom-right)",
 }
+
+local function IsFixedTooltipPlacementMode(mode)
+    return mode == "fixed_br" or mode == "fixed_bl" or mode == "fixed_tl" or mode == "fixed_tr"
+        or mode == "fixed"
+end
+
+-- ʕ •ᴥ•ʔ✿ Keep in sync with ItemButton.FinalizeOmniItemTooltipLayout clamp ✿ ʕ •ᴥ•ʔ
+local TOOLTIP_FIXED_X_MAX = 400
+local TOOLTIP_FIXED_Y_MAX = 400
+local TOOLTIP_PLACEMENT_TO_FIXED_SLIDER_GAP = 72
 
 local function GetTooltipPlacementButtonLabel(mode)
     return TOOLTIP_PLACEMENT_LABEL[mode] or mode
@@ -41,7 +61,7 @@ end
 
 local function CycleTooltipPlacementSetting()
     local cur = Omni.ItemButton and Omni.ItemButton.GetResolvedTooltipPlacement
-        and Omni.ItemButton.GetResolvedTooltipPlacement() or "addon"
+        and Omni.ItemButton.GetResolvedTooltipPlacement() or "right"
     local idx = 1
     for i, v in ipairs(TOOLTIP_PLACEMENT_CYCLE) do
         if v == cur then
@@ -52,7 +72,6 @@ local function CycleTooltipPlacementSetting()
     local nextPl = TOOLTIP_PLACEMENT_CYCLE[(idx % #TOOLTIP_PLACEMENT_CYCLE) + 1]
     if Omni.Data then
         Omni.Data:Set("itemTooltipPlacement", nextPl)
-        Omni.Data:Set("tooltipAddonCompatibility", nextPl == "addon")
     end
 end
 
@@ -495,20 +514,19 @@ function Settings:CreateControls(parent)
     yOffset = yOffset - SPACING - 4
 
     local tipPlacementHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tipPlacementHeader:SetPoint("TOPLEFT", 14, yOffset)
-    tipPlacementHeader:SetWidth(300)
-    tipPlacementHeader:SetJustifyH("LEFT")
-    tipPlacementHeader:SetText("Item tooltips (list view, offline link, guild bank)")
+    tipPlacementHeader:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    tipPlacementHeader:SetWidth(260)
+    tipPlacementHeader:SetJustifyH("CENTER")
+    tipPlacementHeader:SetText("Item tooltips (bags, bank, guild bank, offline)")
 
     local tipPlacementBtn = CreateFrame("Button", "OmniTooltipPlacementBtn", parent, "UIPanelButtonTemplate")
     tipPlacementBtn:SetSize(260, 22)
-    tipPlacementBtn:SetPoint("TOPLEFT", 14, yOffset - 18)
+    tipPlacementBtn:SetPoint("TOP", parent, "TOP", 0, yOffset - 18)
     tipPlacementBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Tooltip placement", 1, 0.82, 0)
-        GameTooltip:AddLine("Live bag, bank, bank bags, and keyring still use Blizzard’s slot tooltips only.", 1, 1, 1, true)
-        GameTooltip:AddLine("Addon hook: ANCHOR_NONE — only moves if a tooltip addon (e.g. TipTac) anchors it; otherwise use Fixed or Left/Right.", 0.75, 0.75, 0.75, true)
-        GameTooltip:AddLine("Fixed: anchor to screen using offsets below (BOTTOMLEFT of UI root). Click button to cycle modes.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Right / Left: anchor relative to the slot. Fixed modes: screen corner + X/Y insets (sliders below).", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Click the button to cycle modes.", 0.65, 0.65, 0.65, true)
         GameTooltip:Show()
     end)
     tipPlacementBtn:SetScript("OnLeave", function()
@@ -520,16 +538,16 @@ function Settings:CreateControls(parent)
     end)
     self.tooltipPlacementBtn = tipPlacementBtn
 
-    yOffset = yOffset - 44
+    yOffset = yOffset - TOOLTIP_PLACEMENT_TO_FIXED_SLIDER_GAP
 
     local tipFixedXSlider = CreateFrame("Slider", "OmniTooltipFixedXSlider", parent, "OptionsSliderTemplate")
-    tipFixedXSlider:SetPoint("TOPLEFT", 14, yOffset)
-    tipFixedXSlider:SetMinMaxValues(0, 2400)
+    tipFixedXSlider:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    tipFixedXSlider:SetMinMaxValues(0, TOOLTIP_FIXED_X_MAX)
     tipFixedXSlider:SetValueStep(1)
     tipFixedXSlider:SetWidth(200)
     _G[tipFixedXSlider:GetName() .. "Low"]:SetText("0")
-    _G[tipFixedXSlider:GetName() .. "High"]:SetText("2400")
-    _G[tipFixedXSlider:GetName() .. "Text"]:SetText("Fixed X (from left)")
+    _G[tipFixedXSlider:GetName() .. "High"]:SetText(tostring(TOOLTIP_FIXED_X_MAX))
+    _G[tipFixedXSlider:GetName() .. "Text"]:SetText("Fixed X (horizontal inset)")
     local tipFixedXValue = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tipFixedXValue:SetPoint("TOP", tipFixedXSlider, "BOTTOM", 0, 2)
     tipFixedXValue:SetText("24")
@@ -543,6 +561,9 @@ function Settings:CreateControls(parent)
             OmniInventoryDB.global.itemTooltipFixed = OmniInventoryDB.global.itemTooltipFixed or {}
             OmniInventoryDB.global.itemTooltipFixed.x = value
         end
+        if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+            Omni.ItemButton.FinalizeOmniItemTooltipLayout()
+        end
     end)
     self.tooltipFixedXSlider = tipFixedXSlider
     self.tooltipFixedXValue = tipFixedXValue
@@ -550,13 +571,13 @@ function Settings:CreateControls(parent)
     yOffset = yOffset - 36
 
     local tipFixedYSlider = CreateFrame("Slider", "OmniTooltipFixedYSlider", parent, "OptionsSliderTemplate")
-    tipFixedYSlider:SetPoint("TOPLEFT", 14, yOffset)
-    tipFixedYSlider:SetMinMaxValues(0, 1600)
+    tipFixedYSlider:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    tipFixedYSlider:SetMinMaxValues(0, TOOLTIP_FIXED_Y_MAX)
     tipFixedYSlider:SetValueStep(1)
     tipFixedYSlider:SetWidth(200)
     _G[tipFixedYSlider:GetName() .. "Low"]:SetText("0")
-    _G[tipFixedYSlider:GetName() .. "High"]:SetText("1600")
-    _G[tipFixedYSlider:GetName() .. "Text"]:SetText("Fixed Y (from bottom)")
+    _G[tipFixedYSlider:GetName() .. "High"]:SetText(tostring(TOOLTIP_FIXED_Y_MAX))
+    _G[tipFixedYSlider:GetName() .. "Text"]:SetText("Fixed Y (vertical inset)")
     local tipFixedYValue = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tipFixedYValue:SetPoint("TOP", tipFixedYSlider, "BOTTOM", 0, 2)
     tipFixedYValue:SetText("140")
@@ -569,6 +590,9 @@ function Settings:CreateControls(parent)
         if OmniInventoryDB and OmniInventoryDB.global then
             OmniInventoryDB.global.itemTooltipFixed = OmniInventoryDB.global.itemTooltipFixed or {}
             OmniInventoryDB.global.itemTooltipFixed.y = value
+        end
+        if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+            Omni.ItemButton.FinalizeOmniItemTooltipLayout()
         end
     end)
     self.tooltipFixedYSlider = tipFixedYSlider
@@ -861,7 +885,7 @@ function Settings:RefreshTooltipPlacementControls()
     if self.tooltipPlacementBtn then
         self.tooltipPlacementBtn:SetText(GetTooltipPlacementButtonLabel(mode))
     end
-    local fixedActive = (mode == "fixed")
+    local fixedActive = IsFixedTooltipPlacementMode(mode)
     local inactiveAlpha = 0.48
     local function StyleFixedSlider(slider, enabled)
         if not slider then
@@ -888,8 +912,8 @@ function Settings:UpdateValues()
     self._syncingTooltipFixedSliders = true
     if Omni.Data and self.tooltipFixedXSlider and self.tooltipFixedYSlider then
         local fix = Omni.Data:Get("itemTooltipFixed") or {}
-        local fx = tonumber(fix.x) or 24
-        local fy = tonumber(fix.y) or 140
+        local fx = math.max(0, math.min(tonumber(fix.x) or 24, TOOLTIP_FIXED_X_MAX))
+        local fy = math.max(0, math.min(tonumber(fix.y) or 140, TOOLTIP_FIXED_Y_MAX))
         self.tooltipFixedXSlider:SetValue(fx)
         self.tooltipFixedYSlider:SetValue(fy)
         if self.tooltipFixedXValue then

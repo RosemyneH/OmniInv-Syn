@@ -1,8 +1,8 @@
 -- =============================================================================
--- OmniInventory Stable Merge Sort
+-- OmniInventory Stable Item Sort
 -- =============================================================================
--- Purpose: Deterministic, stable sorting algorithm that eliminates
--- "dancing items" problem. Same inputs always produce same outputs.
+-- Purpose: Deterministic, stable ordering (no "dancing items"). Uses
+-- table.sort with index tie-break; comparators unchanged from merge era.
 -- =============================================================================
 
 local addonName, Omni = ...
@@ -10,67 +10,8 @@ local addonName, Omni = ...
 Omni.Sorter = {}
 local Sorter = Omni.Sorter
 
--- =============================================================================
--- Merge Sort Implementation (Stable)
--- =============================================================================
-
--- Merge two sorted sub-arrays into one
-local function Merge(arr, left, mid, right, comparator)
-    local n1 = mid - left + 1
-    local n2 = right - mid
-
-    -- Create temp arrays
-    local L = {}
-    local R = {}
-
-    for i = 1, n1 do
-        L[i] = arr[left + i - 1]
-    end
-    for j = 1, n2 do
-        R[j] = arr[mid + j]
-    end
-
-    -- Merge temp arrays back into arr
-    local i = 1
-    local j = 1
-    local k = left
-
-    while i <= n1 and j <= n2 do
-        -- Use <= for stability (left element wins on tie)
-        if comparator(L[i], R[j]) or not comparator(R[j], L[i]) then
-            arr[k] = L[i]
-            i = i + 1
-        else
-            arr[k] = R[j]
-            j = j + 1
-        end
-        k = k + 1
-    end
-
-    -- Copy remaining elements
-    while i <= n1 do
-        arr[k] = L[i]
-        i = i + 1
-        k = k + 1
-    end
-
-    while j <= n2 do
-        arr[k] = R[j]
-        j = j + 1
-        k = k + 1
-    end
-end
-
--- Recursive merge sort
-local function MergeSort(arr, left, right, comparator)
-    if left < right then
-        local mid = math.floor((left + right) / 2)
-
-        MergeSort(arr, left, mid, comparator)
-        MergeSort(arr, mid + 1, right, comparator)
-        Merge(arr, left, mid, right, comparator)
-    end
-end
+-- Decorate-sort-undecorate scratch (stable tie-break on original index)
+local stableSortRows = {}
 
 -- =============================================================================
 -- Comparator Functions
@@ -261,7 +202,7 @@ local COMPARATORS = {
     ilvl = ILvlComparator,
 }
 
---- Sort items using stable merge-sort
+--- Sort items (stable ordering via decorated table.sort)
 ---@param items table Array of item info tables
 ---@param mode string Optional sort mode: "category", "quality", "name", "ilvl"
 ---@return table Sorted array (new table)
@@ -289,9 +230,31 @@ function Sorter:Sort(items, mode)
         Omni.Perf:End("sorter.Sort.cache", perfCache, { itemCount = #sorted })
     end
 
-    -- Apply stable merge sort
     local perfMerge = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("sorter.Sort.merge")
-    MergeSort(sorted, 1, #sorted, comparator)
+    local n = #sorted
+    for i = 1, n do
+        local row = stableSortRows[i]
+        if not row then
+            row = {}
+            stableSortRows[i] = row
+        end
+        row.idx = i
+        row.item = sorted[i]
+    end
+    for j = n + 1, #stableSortRows do
+        stableSortRows[j] = nil
+    end
+
+    table.sort(stableSortRows, function(a, b)
+        local ia, ib = a.item, b.item
+        if comparator(ia, ib) then return true end
+        if comparator(ib, ia) then return false end
+        return a.idx < b.idx
+    end)
+
+    for i = 1, n do
+        sorted[i] = stableSortRows[i].item
+    end
     if Omni._perfEnabled and Omni.Perf then
         Omni.Perf:End("sorter.Sort.merge", perfMerge, { itemCount = #sorted })
     end
@@ -349,4 +312,4 @@ function Sorter:Init()
     -- Nothing to initialize, but maintain interface consistency
 end
 
-print("|cFF00FF00OmniInventory|r: Sorter loaded (stable merge-sort)")
+print("|cFF00FF00OmniInventory|r: Sorter loaded (stable table.sort)")

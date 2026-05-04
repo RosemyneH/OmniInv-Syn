@@ -157,7 +157,7 @@ local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
-local bagViewNeedsFreshSort = true
+local attuneEmbedReady = false
 local IsValidBagID
 -- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
 -- bag icon forced bag view. ToggleBagPreview uses it to restore the
@@ -349,6 +349,64 @@ local function RequestBurstFullRefresh()
     end)
 end
 
+local function BuildFlowItemContentSignature(items)
+    local parts = {}
+    for _, item in ipairs(items or {}) do
+        if item and not item.__empty and item.bagID and item.slotID then
+            parts[#parts + 1] = table.concat({
+                tostring(item.bagID),
+                tostring(item.slotID),
+                tostring(item.itemID or 0),
+                tostring(item.stackCount or 0),
+                tostring(item.isBound and 1 or 0),
+                tostring(item.bindType or 0),
+                tostring(item.category or ""),
+            }, "\031")
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, "\030")
+end
+
+local function GetScopedBagSlotsTotal(bagPreviewScopeSet)
+    local n = 0
+    for _, bagID in ipairs(DIM.BAG_IDS) do
+        if not bagPreviewScopeSet or bagPreviewScopeSet[bagID] then
+            n = n + (GetContainerNumSlots(bagID) or 0)
+        end
+    end
+    return n
+end
+
+local function CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
+    if not touched then
+        return 0
+    end
+    local n = 0
+    for bagID, slots in pairs(touched) do
+        if type(bagID) == "number" and (not bagPreviewScopeSet or bagPreviewScopeSet[bagID]) then
+            for _ in pairs(slots) do
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
+local function BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
+    local parts = {}
+    for _, bagID in ipairs(DIM.BAG_IDS) do
+        if not bagPreviewScopeSet or bagPreviewScopeSet[bagID] then
+            local numSlots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, numSlots do
+                local texture = GetContainerItemInfo(bagID, slotID)
+                parts[#parts + 1] = texture and "1" or "0"
+            end
+        end
+    end
+    return table.concat(parts, "")
+end
+
 local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep, filterName)
     local parts = {
         tostring(math.floor((usableWidth or 0) + 0.5)),
@@ -428,21 +486,6 @@ local function ComputeBagContentSignature()
     return table.concat(parts, "|")
 end
 
-local function ComputeShowSignature()
-    local parts = {
-        tostring(currentView or "flow"),
-        tostring(activeFilter or "none"),
-        tostring(selectedBagID or "all"),
-    }
-    if mainFrame then
-        local w, h = mainFrame:GetSize()
-        local s = mainFrame:GetScale() or 1
-        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
-    end
-    parts[#parts + 1] = ComputeBagContentSignature()
-    return table.concat(parts, "|")
-end
-
 local function RebuildPopulatedItemButtonList()
     ClearArray(itemButtons)
     IterateSlotButtons(function(_, _, btn)
@@ -474,6 +517,10 @@ local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
     end
 
     if previousInfo.quality ~= nextInfo.quality then
+        return true
+    end
+
+    if previousInfo.isBound ~= nextInfo.isBound or previousInfo.bindType ~= nextInfo.bindType then
         return true
     end
 
@@ -576,6 +623,10 @@ function Frame:InvalidateRenderCaches(opts)
         return
     end
 
+    if opts.clearLayout then
+        flowLayoutCache = nil
+    end
+
     for _, byBag in pairs(slotButtons) do
         for _, btn in pairs(byBag) do
             if btn then
@@ -638,9 +689,6 @@ function Frame:_RestoreCombatGridFallback()
     self._combatGridFallbackOriginalView = nil
     self._combatGridFallbackActive = false
     self:_RefreshViewButtonLabel()
-    if currentView == "bag" then
-        bagViewNeedsFreshSort = true
-    end
     if Frame and Frame.InvalidateRenderCaches then
         Frame:InvalidateRenderCaches({ clearLayout = true })
     end
@@ -653,6 +701,10 @@ local function IsAttuneHelperEmbedEnabled()
         global.attuneHelperEmbed = true
     end
     return not global or global.attuneHelperEmbed ~= false
+end
+
+local function IsAttuneHelperClientPresent()
+    return _G.AttuneHelperMiniFrame ~= nil or _G.AttuneHelperFrame ~= nil
 end
 
 local function IsAttuneHelperMiniNoBorderEnabled()
@@ -720,28 +772,6 @@ function Frame:HookAttuneHelperMiniSortButton()
         end
     end)
     return true
-end
-
--- ʕ •ᴥ•ʔ✿ Rebind drag-drop on embedded mini buttons so cursor items feed
--- AHSet / AHIgnore directly via AH.*, bypassing the hidden main frame. ✿ ʕ •ᴥ•ʔ
-local function GetAttuneHelperAddon()
-    local ah = _G.AH
-    if type(ah) == "table" then
-        return ah
-    end
-    -- Fallback: _G.AttuneHelper is clobbered to the main frame, so reject
-    -- frame-like handles and only accept the real addon table.
-    local legacy = _G.AttuneHelper
-    if type(legacy) == "table" and type(legacy.AddCursorItemToAHSet) == "function" then
-        return legacy
-    end
-    return nil
-end
-
-local function IsAttuneHelperAvailable()
-    return _G.AttuneHelperMiniFrame ~= nil
-        or _G.AttuneHelperFrame ~= nil
-        or GetAttuneHelperAddon() ~= nil
 end
 
 local function RestoreEmbeddedAttuneHelper()
@@ -913,6 +943,30 @@ local function GetSavedItemGap()
         return DIM.ITEM_SPACING
     end
     return math.max(DIM.ITEM_GAP_MIN, math.min(gap, DIM.ITEM_GAP_MAX))
+end
+
+local function ComputeShowSignature()
+    local parts = {
+        tostring(currentView or "flow"),
+        tostring(activeFilter or "none"),
+        tostring(selectedBagID or "all"),
+    }
+    if mainFrame then
+        local w, h = mainFrame:GetSize()
+        local s = mainFrame:GetScale() or 1
+        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
+    end
+    parts[#parts + 1] = ComputeBagContentSignature()
+    local sortMode = "category"
+    if Omni.Sorter and Omni.Sorter.GetDefaultMode then
+        sortMode = Omni.Sorter:GetDefaultMode() or "category"
+    end
+    parts[#parts + 1] = "sort:" .. tostring(sortMode)
+    parts[#parts + 1] = string.format("is:%.4f", GetSavedItemScale())
+    parts[#parts + 1] = string.format("ig:%.4f", GetSavedItemGap())
+    parts[#parts + 1] = "q:" .. tostring(searchText or "")
+    parts[#parts + 1] = "e:" .. tostring(Frame._renderCacheEpoch or 0)
+    return table.concat(parts, "|")
 end
 
 IsValidBagID = function(bagID)
@@ -2106,7 +2160,6 @@ function Frame:SetQuickFilter(filterName)
     activeFilterMissingState.since = nil
     activeFilterMissingState.count = 0
     self:InvalidateRenderCaches()
-    bagViewNeedsFreshSort = true
 
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
@@ -2299,6 +2352,11 @@ Frame._GetItemContainer = GetItemContainer
 
 local OVERFLOW_ROW_GAP = 4
 local EMPTY_SLOT_ALPHA = 1
+-- ʕ •ᴥ•ʔ✿ show_open: sync-paint first N flow cells; defer SetItem for the rest ✿ ʕ •ᴥ•ʔ
+local FLOW_SHOW_OPEN_DEFER_AFTER = 36
+
+local deferredFlowPaintQueue = {}
+local deferredFlowPaintFrame
 
 local function GetSlotButton(bagID, slotID)
     local byBag = slotButtons[bagID]
@@ -2398,7 +2456,9 @@ local function IterateSlotButtons(callback)
     for _, bagID in ipairs(DIM.BAG_IDS) do
         local byBag = slotButtons[bagID]
         if byBag then
-            for slotID, btn in pairs(byBag) do
+            local numSlots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, numSlots do
+                local btn = byBag[slotID]
                 if btn then
                     callback(bagID, slotID, btn)
                 end
@@ -2441,6 +2501,27 @@ local function RefreshVisibleAttuneOverlaysFromSlots()
     end)
 end
 
+-- ʕ •ᴥ•ʔ✿ List view has no itemButtons; flow/grid/bag only paint visible slot widgets ✿ ʕ •ᴥ•ʔ
+local function RunAttuneOverlayRefresh()
+    local attune = OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.attune
+    if attune and attune.enabled == false then
+        return
+    end
+    if not _G.GetItemLinkAttuneProgress then
+        return
+    end
+    if currentView == "list" or #itemButtons == 0 then
+        RefreshVisibleAttuneOverlaysFromSlots()
+        return
+    end
+    for i = 1, #itemButtons do
+        local btn = itemButtons[i]
+        if btn and btn.bagID and btn.slotID and btn.itemInfo and not btn.itemInfo.__empty then
+            RefreshSlotButtonFromLiveContainer(btn.bagID, btn.slotID, btn)
+        end
+    end
+end
+
 local attuneOverlayDeferFrame
 local function ScheduleDeferredAttuneOverlayRefresh()
     local attune = OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.attune
@@ -2455,7 +2536,59 @@ local function ScheduleDeferredAttuneOverlayRefresh()
     end
     attuneOverlayDeferFrame:SetScript("OnUpdate", function(self)
         self:SetScript("OnUpdate", nil)
-        RefreshVisibleAttuneOverlaysFromSlots()
+        RunAttuneOverlayRefresh()
+    end)
+end
+
+local function CancelDeferredFlowItemPaint()
+    if deferredFlowPaintFrame then
+        deferredFlowPaintFrame:SetScript("OnUpdate", nil)
+    end
+    ClearArray(deferredFlowPaintQueue)
+end
+
+local function ScheduleDeferredFlowItemPaint()
+    if #deferredFlowPaintQueue == 0 then
+        return
+    end
+    if not deferredFlowPaintFrame then
+        deferredFlowPaintFrame = CreateFrame("Frame")
+    end
+    deferredFlowPaintFrame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        if not mainFrame or not mainFrame:IsShown() then
+            ClearArray(deferredFlowPaintQueue)
+            return
+        end
+        if Omni.ItemButton and Omni.ItemButton.BeginItemRenderBatch then
+            Omni.ItemButton:BeginItemRenderBatch()
+        end
+        for i = 1, #deferredFlowPaintQueue do
+            local pair = deferredFlowPaintQueue[i]
+            local btn = pair[1]
+            local slotItem = pair[2]
+            deferredFlowPaintQueue[i] = nil
+            if btn and slotItem then
+                local ok = pcall(function()
+                    SetButtonItem(btn, slotItem)
+                    btn._oiRenderKey = ItemRenderKey(slotItem)
+                    btn:Show()
+                    local a = slotItem.__empty and EMPTY_SLOT_ALPHA or 1
+                    btn:SetAlpha(a)
+                end)
+                if not ok then
+                    pcall(SetButtonItem, btn, nil)
+                    if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                    pcall(btn.Show, btn)
+                    btn._oiRenderKey = "error"
+                end
+            end
+        end
+        ClearArray(deferredFlowPaintQueue)
+        if Omni.ItemButton and Omni.ItemButton.EndItemRenderBatch then
+            Omni.ItemButton:EndItemRenderBatch()
+        end
+        ScheduleDeferredAttuneOverlayRefresh()
     end)
 end
 
@@ -3313,6 +3446,11 @@ function Frame:UpdateEmbeddedAttuneHelper()
         return
     end
 
+    if InCombatLockdown and InCombatLockdown() then
+        self:EnsureEmbeddedAttuneHelperRetry()
+        return
+    end
+
     _G.AttuneHelperDB = _G.AttuneHelperDB or {}
     local miniModeWasEnabled = (_G.AttuneHelperDB["Mini Mode"] == 1)
     if not miniModeWasEnabled then
@@ -3337,6 +3475,9 @@ function Frame:UpdateEmbeddedAttuneHelper()
     if not miniFrame then
         host:Hide()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+        if IsAttuneHelperEmbedEnabled() and mainFrame:IsShown() then
+            self:EnsureEmbeddedAttuneHelperRetry()
+        end
         return
     end
 
@@ -3376,6 +3517,9 @@ function Frame:UpdateEmbeddedAttuneHelper()
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
     self:HookAttuneHelperMiniSortButton()
+    if miniFrame:GetParent() == host and host:IsShown() then
+        attuneEmbedReady = true
+    end
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
@@ -3542,9 +3686,6 @@ function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
     self._combatGridFallbackActive = false
     self._combatGridFallbackOriginalView = nil
-    if currentView == "bag" then
-        bagViewNeedsFreshSort = true
-    end
     self:InvalidateRenderCaches({ clearLayout = true })
 
     -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
@@ -3603,7 +3744,6 @@ function Frame:CycleSort()
         mainFrame.header.sortBtn.text:SetText(displayMode)
     end
 
-    bagViewNeedsFreshSort = true
     -- Refresh layout with new sort
     Frame:UpdateLayout()
 end
@@ -3948,18 +4088,12 @@ function Frame:UpdateLayout(changedBags, opts)
         end
     end
 
-    -- Sort items
-    if Omni.Sorter then
-        local doBagViewSort = not (currentView == "bag" and not bagViewNeedsFreshSort)
-        if doBagViewSort then
-            local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
-            items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
-            if currentView == "bag" then
-                bagViewNeedsFreshSort = false
-            end
-            if Omni._perfEnabled and Omni.Perf then
-                Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
-            end
+    -- Sort items (flow/list only: grid/bag render by physical slot index)
+    if Omni.Sorter and (currentView == "flow" or currentView == "list") then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
+        items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
         end
     end
 
@@ -3973,9 +4107,12 @@ function Frame:UpdateLayout(changedBags, opts)
     else
         -- Combined Grid/Flow rendering
         local perfRenderFlow = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderFlow")
-        self:RenderFlowView(items)
+        local flowPath = self:RenderFlowView(items, { reason = updateReason }) or "na"
         if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, { reason = updateReason })
+            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, {
+                reason = updateReason,
+                flowPath = flowPath,
+            })
         end
     end
 
@@ -4011,8 +4148,12 @@ end
 -- Flow/Grid View Rendering
 -- =============================================================================
 
-function Frame:RenderFlowView(items)
-    if not mainFrame or not mainFrame.scrollChild then return end
+function Frame:RenderFlowView(items, layoutOpts)
+    if not mainFrame or not mainFrame.scrollChild then
+        return "na"
+    end
+
+    CancelDeferredFlowItemPaint()
 
     local scrollChild = mainFrame.scrollChild
 
@@ -4054,8 +4195,6 @@ function Frame:RenderFlowView(items)
     ClearMap(headerByCategory)
 
     local freezeHeadersForVendor = false
-    -- Hide existing headers and list rows
-    for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
     if mainFrame.tradeGoodsDepositBtn then mainFrame.tradeGoodsDepositBtn:Hide() end
 
@@ -4245,6 +4384,7 @@ function Frame:RenderFlowView(items)
     local compositionSignature = nil
     local laneSignature = nil
     local canReuseLaneAssignment = false
+    local flowContentOnly = false
 
     if flowMode then
         compositionSignature = BuildFlowCompositionSignature(
@@ -4266,6 +4406,30 @@ function Frame:RenderFlowView(items)
         canReuseLaneAssignment = flowLayoutCache
             and flowLayoutCache.laneSignature == laneSignature
             and flowLayoutCache.laneAssignment ~= nil
+        if currentView == "flow" and flowLayoutCache
+                and compositionSignature
+                and flowLayoutCache.signature == compositionSignature
+                and flowLayoutCache.laneSignature == laneSignature
+                and merchantOpen == wasMerchantOpen
+                and (flowLayoutCache.renderCacheEpoch or 0) == (Frame._renderCacheEpoch or 0)
+                and flowLayoutCache.order
+                and flowLayoutCache.headerByCategory then
+            local needSplitLanes = dualCategoryLanes and #categoryOrder > 1
+            if (not needSplitLanes) or flowLayoutCache.laneAssignment then
+                flowContentOnly = true
+            end
+        end
+    end
+
+    if flowContentOnly then
+        ClearArray(categoryOrder)
+        for i = 1, #flowLayoutCache.order do
+            categoryOrder[i] = flowLayoutCache.order[i]
+        end
+        ClearMap(headerByCategory)
+        for k, v in pairs(flowLayoutCache.headerByCategory) do
+            headerByCategory[k] = v
+        end
     end
 
     -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
@@ -4282,11 +4446,14 @@ function Frame:RenderFlowView(items)
     -- on so the overflow strip still anchors at the bottom of BoE's
     -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
     local laneAssignment = nil
+    if flowContentOnly then
+        laneAssignment = flowLayoutCache.laneAssignment
+    end
     local forceVendorFrozenLanes = flowMode
         and merchantOpen
         and vendorFlowLayoutFreeze ~= nil
         and vendorFlowLayoutFreeze.laneAssignment ~= nil
-    if flowMode and dualCategoryLanes and #categoryOrder > 1 then
+    if not flowContentOnly and flowMode and dualCategoryLanes and #categoryOrder > 1 then
         if forceVendorFrozenLanes then
             laneAssignment = vendorFlowLayoutFreeze.laneAssignment
             canReuseLaneAssignment = true
@@ -4412,7 +4579,22 @@ function Frame:RenderFlowView(items)
         end
     end
 
+    if currentView ~= "flow" or not flowContentOnly then
+        for _, header in ipairs(categoryHeaders) do
+            header:Hide()
+        end
+    end
 
+    local perfFlowPath = nil
+    if currentView == "flow" and Omni._perfEnabled and Omni.Perf then
+        perfFlowPath = Omni.Perf:Begin(
+            flowContentOnly and "frame.UpdateLayout.renderFlow.content" or "frame.UpdateLayout.renderFlow.full")
+    end
+
+    if Omni.ItemButton and Omni.ItemButton.BeginItemRenderBatch then
+        Omni.ItemButton:BeginItemRenderBatch()
+    end
+    local flowSlotPaintIndex = 0
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         local isBoeAnchor = (flowMode and catName == "BoE")
@@ -4448,7 +4630,8 @@ function Frame:RenderFlowView(items)
                 local header
                 local reusedHeader = false
                 local headerSlotIndex = nil
-                if freezeHeadersForVendor and flowLayoutCache and flowLayoutCache.headerByCategory then
+                if flowLayoutCache and flowLayoutCache.headerByCategory
+                        and (freezeHeadersForVendor or flowContentOnly) then
                     local cachedIdx = flowLayoutCache.headerByCategory[catName]
                     if cachedIdx then
                         header = categoryHeaders[cachedIdx]
@@ -4488,6 +4671,14 @@ function Frame:RenderFlowView(items)
                     else
                         header:SetText(catName .. " (" .. #catItems .. ")")
                     end
+                elseif flowContentOnly and header then
+                    if currentView == "bag" then
+                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                    else
+                        header:SetText(catName .. " (" .. #catItems .. ")")
+                    end
                 end
                 header:Show()
 
@@ -4516,6 +4707,7 @@ function Frame:RenderFlowView(items)
                 local btn = (bagID and slotID) and GetSlotButton(bagID, slotID) or nil
 
                 if btn then
+                    flowSlotPaintIndex = flowSlotPaintIndex + 1
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
                     local x = laneX + col * itemStep
@@ -4523,7 +4715,64 @@ function Frame:RenderFlowView(items)
 
                     local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
                     local needsMetrics = (btn._oiLayoutScale ~= itemScale)
-                    pcall(function()
+                    local slotItem = itemInfo
+                    local nextRenderKey = ItemRenderKey(slotItem)
+                    local skipItemPaint = flowContentOnly and (btn._oiRenderKey == nextRenderKey)
+                    local deferItemPaint = (not skipItemPaint)
+                        and layoutOpts and layoutOpts.reason == "show_open"
+                        and flowSlotPaintIndex > FLOW_SHOW_OPEN_DEFER_AFTER
+
+                    if deferItemPaint then
+                        if needsReposition then
+                            btn:ClearAllPoints()
+                            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                            btn._oiLayoutX = x
+                            btn._oiLayoutY = y
+                        end
+                        if needsMetrics then
+                            ApplyItemButtonMetrics(btn, itemScale)
+                            btn._oiLayoutScale = itemScale
+                        end
+                        pcall(btn.Show, btn)
+                        btn:SetAlpha(0)
+                        deferredFlowPaintQueue[#deferredFlowPaintQueue + 1] = { btn, slotItem }
+                    elseif skipItemPaint then
+                        if flowContentOnly and not needsReposition and not needsMetrics then
+                            local targetA = (slotItem and slotItem.__empty) and EMPTY_SLOT_ALPHA or 1
+                            if not btn:IsShown() then btn:Show() end
+                            btn:SetAlpha(targetA)
+                        else
+                            if needsReposition then
+                                btn:ClearAllPoints()
+                                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                                btn._oiLayoutX = x
+                                btn._oiLayoutY = y
+                            end
+                            if needsMetrics then
+                                ApplyItemButtonMetrics(btn, itemScale)
+                                btn._oiLayoutScale = itemScale
+                            end
+                            local targetA = (slotItem and slotItem.__empty) and EMPTY_SLOT_ALPHA or 1
+                            if not btn:IsShown() then btn:Show() end
+                            btn:SetAlpha(targetA)
+                        end
+                    elseif flowContentOnly and not needsReposition and not needsMetrics then
+                        btn:SetAlpha(1)
+                        local success = pcall(function()
+                            SetButtonItem(btn, slotItem)
+                            btn._oiRenderKey = nextRenderKey
+                            btn:Show()
+                        end)
+                        if not success then
+                            pcall(SetButtonItem, btn, nil)
+                            if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                            pcall(btn.Show, btn)
+                            btn._oiRenderKey = "error"
+                        end
+                        if slotItem and slotItem.__empty then
+                            btn:SetAlpha(EMPTY_SLOT_ALPHA)
+                        end
+                    else
                         if needsReposition then
                             btn:ClearAllPoints()
                             btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
@@ -4535,22 +4784,20 @@ function Frame:RenderFlowView(items)
                             btn._oiLayoutScale = itemScale
                         end
                         btn:SetAlpha(1)
-                    end)
-
-                    local slotItem = itemInfo
-
-                    local nextRenderKey = ItemRenderKey(slotItem)
-                    -- ʕ •ᴥ•ʔ✿ Always SetItem: ItemRenderKey ignores attune %; ItemButton skips heavy work ✿ ʕ •ᴥ•ʔ
-                    local success = pcall(function()
-                        SetButtonItem(btn, slotItem)
-                        btn._oiRenderKey = nextRenderKey
-                        btn:Show()
-                    end)
-                    if not success then
-                        pcall(SetButtonItem, btn, nil)
-                        if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
-                        pcall(btn.Show, btn)
-                        btn._oiRenderKey = "error"
+                        local success = pcall(function()
+                            SetButtonItem(btn, slotItem)
+                            btn._oiRenderKey = nextRenderKey
+                            btn:Show()
+                        end)
+                        if not success then
+                            pcall(SetButtonItem, btn, nil)
+                            if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                            pcall(btn.Show, btn)
+                            btn._oiRenderKey = "error"
+                        end
+                        if slotItem and slotItem.__empty then
+                            btn:SetAlpha(EMPTY_SLOT_ALPHA)
+                        end
                     end
 
                     touched[bagID] = touched[bagID] or {}
@@ -4559,9 +4806,6 @@ function Frame:RenderFlowView(items)
                         usedTouchedBags[#usedTouchedBags + 1] = bagID
                     end
                     touched[bagID][slotID] = true
-                    if not slotItem then
-                        pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
-                    end
                     table.insert(itemButtons, btn)
                 end
             end
@@ -4595,6 +4839,9 @@ function Frame:RenderFlowView(items)
                 yOffset = laneY
             end
         end
+    end
+    if Omni.ItemButton and Omni.ItemButton.EndItemRenderBatch then
+        Omni.ItemButton:EndItemRenderBatch()
     end
 
     local mainBottomY
@@ -4639,47 +4886,71 @@ function Frame:RenderFlowView(items)
         overflowTop = mainBottomY - OVERFLOW_ROW_GAP
     end
 
+    local occupancySig = ""
+    local skipOverflowRepark = false
+    if flowMode then
+        occupancySig = BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
+        skipOverflowRepark = flowContentOnly
+            and not bagPreviewScopeSet
+            and flowLayoutCache
+            and flowLayoutCache.occupancySignature == occupancySig
+    end
+
     local overflowIndex = 0
-    IterateSlotButtons(function(bagID, slotID, btn)
-        if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
-            pcall(btn.SetAlpha, btn, 0)
+    if skipOverflowRepark then
+        local scopedTotal = GetScopedBagSlotsTotal(bagPreviewScopeSet)
+        local nTouched = CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
+        overflowIndex = math.max(0, scopedTotal - nTouched)
+    else
+        IterateSlotButtons(function(bagID, slotID, btn)
+            if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
+                pcall(btn.SetAlpha, btn, 0)
+                if btn._oiRenderKey ~= "empty" then
+                    pcall(SetButtonItem, btn, nil)
+                    btn._oiRenderKey = "empty"
+                end
+                return
+            end
+            local isTouched = touched[bagID] and touched[bagID][slotID]
+            if isTouched then return end
+
+            local col = overflowIndex % overflowColumns
+            local row = math.floor(overflowIndex / overflowColumns)
+            local x = overflowX + col * itemStep
+            local y = overflowTop - row * itemStep
+
+            local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+            local needsMetrics = (btn._oiLayoutScale ~= itemScale)
+            if not needsReposition and not needsMetrics and btn._oiRenderKey == "empty" then
+                local a = btn.GetAlpha and btn:GetAlpha() or 0
+                if a < 0.01 then
+                    pcall(btn.Show, btn)
+                    overflowIndex = overflowIndex + 1
+                    return
+                end
+            end
+            pcall(function()
+                if needsReposition then
+                    btn:ClearAllPoints()
+                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                    btn._oiLayoutX = x
+                    btn._oiLayoutY = y
+                end
+                if needsMetrics then
+                    ApplyItemButtonMetrics(btn, itemScale)
+                    btn._oiLayoutScale = itemScale
+                end
+                btn:SetAlpha(0)
+            end)
             if btn._oiRenderKey ~= "empty" then
                 pcall(SetButtonItem, btn, nil)
                 btn._oiRenderKey = "empty"
             end
-            return
-        end
-        local isTouched = touched[bagID] and touched[bagID][slotID]
-        if isTouched then return end
+            pcall(btn.Show, btn)
 
-        local col = overflowIndex % overflowColumns
-        local row = math.floor(overflowIndex / overflowColumns)
-        local x = overflowX + col * itemStep
-        local y = overflowTop - row * itemStep
-
-        local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
-        local needsMetrics = (btn._oiLayoutScale ~= itemScale)
-        pcall(function()
-            if needsReposition then
-                btn:ClearAllPoints()
-                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                btn._oiLayoutX = x
-                btn._oiLayoutY = y
-            end
-            if needsMetrics then
-                ApplyItemButtonMetrics(btn, itemScale)
-                btn._oiLayoutScale = itemScale
-            end
-            btn:SetAlpha(0)
+            overflowIndex = overflowIndex + 1
         end)
-        if btn._oiRenderKey ~= "empty" then
-            pcall(SetButtonItem, btn, nil)
-            btn._oiRenderKey = "empty"
-        end
-        pcall(btn.Show, btn)
-
-        overflowIndex = overflowIndex + 1
-    end)
+    end
 
     local overflowRows = math.ceil(overflowIndex / math.max(overflowColumns, 1))
     local overflowExtent = overflowRows > 0
@@ -4699,6 +4970,20 @@ function Frame:RenderFlowView(items)
     local deepestY = math.min(mainBottomY, overflowBottom)
     scrollChild:SetHeight(math.abs(deepestY) + itemGap)
 
+    if perfFlowPath and Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End(
+            flowContentOnly and "frame.UpdateLayout.renderFlow.content" or "frame.UpdateLayout.renderFlow.full",
+            perfFlowPath,
+            {
+                flowContentOnly = flowContentOnly == true,
+                overflowSkipped = skipOverflowRepark == true,
+            })
+    end
+
+    if #deferredFlowPaintQueue > 0 then
+        ScheduleDeferredFlowItemPaint()
+    end
+
     if flowMode then
         flowLayoutCache = {
             signature = compositionSignature,
@@ -4706,6 +4991,9 @@ function Frame:RenderFlowView(items)
             laneAssignment = laneAssignment,
             headerByCategory = headerByCategory,
             order = categoryOrder,
+            renderCacheEpoch = Frame._renderCacheEpoch or 0,
+            itemContentSignature = BuildFlowItemContentSignature(items),
+            occupancySignature = occupancySig,
         }
         if merchantOpen and vendorFlowLayoutFreeze and laneAssignment then
             vendorFlowLayoutFreeze.laneAssignment = laneAssignment
@@ -4714,6 +5002,10 @@ function Frame:RenderFlowView(items)
         flowLayoutCache = nil
     end
     wasMerchantOpen = merchantOpen
+    if currentView == "flow" then
+        return flowContentOnly and "content" or "full"
+    end
+    return "na"
 end
 
 -- =============================================================================
@@ -4829,7 +5121,11 @@ function Frame:RenderListView(items)
                 local alpha = (i % 2 == 0) and 0.15 or 0.1
                 self.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
                 self.__omniUsesCustomTooltip = false
-                GameTooltip:Hide()
+                if Omni.ItemButton and Omni.ItemButton.HideTooltipIfOwnedBy then
+                    Omni.ItemButton.HideTooltipIfOwnedBy(self)
+                elseif GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == self then
+                    GameTooltip:Hide()
+                end
                 if ResetCursor then
                     ResetCursor()
                 end
@@ -5117,11 +5413,11 @@ function Frame:UpdateSlotCount()
         slots:SetTextColor(1, 1, 1, 1)
     end
 
-    if self.UpdateFooterCustomButtons then
-        self:UpdateFooterCustomButtons()
-    end
     if self.UpdateEmbeddedAttuneHelper then
         self:UpdateEmbeddedAttuneHelper()
+    end
+    if self.UpdateFooterCustomButtons then
+        self:UpdateFooterCustomButtons()
     end
 end
 
@@ -5169,35 +5465,46 @@ function Frame:Show()
     -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
     pcall(mainFrame.Show, mainFrame)
 
+    if mainFrame:IsShown() and IsAttuneHelperEmbedEnabled() then
+        self:UpdateEmbeddedAttuneHelper()
+    end
+
     local sig = ComputeShowSignature()
-    local forceFullShowForAttune = IsAttuneHelperEmbedEnabled() and IsAttuneHelperAvailable()
-    local requiresSortedShow = (currentView == "flow")
-        or (currentView == "bag" and bagViewNeedsFreshSort)
+    -- ʕ •ᴥ•ʔ✿ Fast-show skips full layout; first embed after login needs that pass
+    -- (init_prewarm runs while hidden, so AH was Restore()d). Gate until latched. ✿ ʕ •ᴥ•ʔ
+    local attuneFastOk = (not IsAttuneHelperEmbedEnabled())
+        or (not IsAttuneHelperClientPresent())
+        or attuneEmbedReady
+    -- ʕ •ᴥ•ʔ✿ Flow/list need collect+categorize+sort every open; fast path skips
+    -- that so attune/bind/equip-set lanes and ordering stay wrong. Grid/bag
+    -- are slot-indexed only. ✿ ʕ •ᴥ•ʔ
+    local viewAllowsFastShow = (currentView == "grid" or currentView == "bag")
     local canFastShow = hasRenderedOnce
         and not pendingCombatRender
         and lastRenderedShowSignature ~= nil
         and sig == lastRenderedShowSignature
-        and not forceFullShowForAttune
-        and not requiresSortedShow
+        and attuneFastOk
+        and viewAllowsFastShow
 
     if canFastShow then
-        RebuildPopulatedItemButtonList()
         self:UpdateBagIconTextures()
         self:UpdateBagIconVisuals()
         self:UpdateSlotCount()
         self:UpdateMoney()
+        self:RefreshCombatContent({ _trigger = true })
         if searchText and searchText ~= "" then
             self:ApplySearch(searchText)
         end
     else
         self:UpdateLayout(nil, { reason = "show_open" })
     end
-    if not InCombat() then
-        self:UpdateEmbeddedAttuneHelper()
-        if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+    if IsAttuneHelperEmbedEnabled() and mainFrame and mainFrame:IsShown()
+            and IsAttuneHelperClientPresent() and not attuneEmbedReady then
+        self:EnsureEmbeddedAttuneHelperRetry()
     end
-    RefreshVisibleAttuneOverlaysFromSlots()
-    ScheduleDeferredAttuneOverlayRefresh()
+    if #deferredFlowPaintQueue == 0 then
+        ScheduleDeferredAttuneOverlayRefresh()
+    end
 end
 
 function Frame:Hide()
@@ -5216,10 +5523,8 @@ function Frame:Hide()
         end
         host:Hide()
     end
-    flowLayoutCache = nil
     vendorFlowLayoutFreeze = nil
     wasMerchantOpen = false
-    bagViewNeedsFreshSort = true
     ClearMap(optimisticFlowRefreshWatches)
     ClearArray(itemButtons)
 
@@ -5273,7 +5578,6 @@ function Frame:SetBagFilter(bagID)
     OmniInventoryDB.char.settings.selectedBagID = selectedBagID
 
     self:UpdateBagIconVisuals()
-    bagViewNeedsFreshSort = true
     self:UpdateLayout()
 end
 

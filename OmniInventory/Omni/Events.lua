@@ -187,6 +187,9 @@ function Events:Init()
     -- The callback receives a table of modified bagIDs
 
     self:RegisterBucketEvent("BAG_UPDATE", function(modifiedBags)
+        if Omni.API and Omni.API.ClearContainerBindScanCache then
+            Omni.API:ClearContainerBindScanCache()
+        end
         local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("events.BAG_UPDATE.flush")
         local hasPlayerBagChange = false
         local hasBankBagChange = false

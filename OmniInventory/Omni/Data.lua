@@ -22,13 +22,10 @@ local defaults = {
         scale = 1.0,
         opacity = 0.95,
         highlightNewItems = false,
-        -- ʕ •ᴥ•ʔ✿ Legacy: used when itemTooltipPlacement is unset (see ItemButton tooltip resolver) ✿ ʕ •ᴥ•ʔ
-        tooltipAddonCompatibility = true,
-        -- ʕ •ᴥ•ʔ✿ nil = derive from tooltipAddonCompatibility; else addon|right|left|fixed ✿ ʕ •ᴥ•ʔ
-        itemTooltipPlacement = nil,
+        -- ʕ •ᴥ•ʔ✿ right | left | fixed_br | fixed_bl | fixed_tl | fixed_tr (ItemButton) ✿ ʕ •ᴥ•ʔ
+        itemTooltipPlacement = "right",
+        -- ʕ •ᴥ•ʔ✿ x = pixels inset from bottom-right; y = up from bottom ✿ ʕ •ᴥ•ʔ
         itemTooltipFixed = {
-            point = "BOTTOMLEFT",
-            relPoint = "BOTTOMLEFT",
             x = 24,
             y = 140,
         },
@@ -126,6 +123,18 @@ function Data:Init()
     MergeDefaults(OmniInventoryDB.global, defaults.global)
     MergeDefaults(OmniInventoryDB.char, defaults.char)
     MergeDefaults(OmniInventoryDB.realm, defaults.realm)
+
+    -- ʕ •ᴥ•ʔ✿ One-shot: retire addon-hook placement + legacy compat flag ✿ ʕ •ᴥ•ʔ
+    do
+        local g = OmniInventoryDB.global
+        local pl = g.itemTooltipPlacement
+        if pl == nil or pl == "addon" then
+            g.itemTooltipPlacement = "right"
+        elseif pl == "fixed" then
+            g.itemTooltipPlacement = "fixed_br"
+        end
+        g.tooltipAddonCompatibility = nil
+    end
 
     local att = OmniInventoryDB.global.attune
     if att and defaults.global.attune and defaults.global.attune.forgeColors then
