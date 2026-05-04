@@ -3965,6 +3965,13 @@ function Frame:UpdateLayout(changedBags, opts)
                 mainFrame.combatHint:SetText("Bag contents will appear after combat.")
             end
         end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                skipped = "combat_refresh",
+                reason = updateReason,
+                view = currentView or "unknown",
+            })
+        end
         return
     end
 
@@ -4001,6 +4008,13 @@ function Frame:UpdateLayout(changedBags, opts)
                 and (now - lastOptimisticFlowRefreshAt) <= DIM.OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
             if allowBurstFull and not suppressBurst then
                 RequestBurstFullRefresh()
+            end
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                    skipped = "incremental_slot_refresh",
+                    reason = updateReason,
+                    view = currentView or "unknown",
+                })
             end
             return
         end
