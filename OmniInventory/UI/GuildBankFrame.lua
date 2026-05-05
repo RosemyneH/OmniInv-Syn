@@ -1351,7 +1351,6 @@ function GuildBankFrame:RenderFlowView(items)
     local hInset = 8
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
-    local dualCategoryLanes = true
     local laneGap = 10
 
     local function columnsForLaneWidth(laneW)
@@ -1384,6 +1383,8 @@ function GuildBankFrame:RenderFlowView(items)
             return (infoA.priority or 99) < (infoB.priority or 99)
         end)
     end
+
+    local dualCategoryLanes = #categoryOrder > 1
 
     local headerIndex = 0
     for _, catName in ipairs(categoryOrder) do
@@ -1592,15 +1593,33 @@ function GuildBankFrame:CreateMainFrame()
     if frame.flowScroll.EnableMouseWheel then
         frame.flowScroll:EnableMouseWheel(true)
     end
+    frame.flowScroll:SetScript("OnMouseWheel", function(self, delta)
+        local bar = _G[self:GetName() .. "ScrollBar"]
+        if not bar then return end
+        local step = 28
+        bar:SetValue(bar:GetValue() - (delta * step))
+    end)
+
     local flowSb = _G["OmniGuildBankFlowScrollScrollBar"]
     if flowSb then
-        flowSb:Hide()
+        flowSb:ClearAllPoints()
+        flowSb:SetPoint("TOPRIGHT", frame.flowScroll, "TOPRIGHT", 0, -16)
+        flowSb:SetPoint("BOTTOMRIGHT", frame.flowScroll, "BOTTOMRIGHT", 0, 16)
         flowSb:SetAlpha(0)
+        flowSb:SetWidth(1)
         flowSb:EnableMouse(false)
-        flowSb:SetScript("OnShow", function(sb)
-            sb:Hide()
-            sb:SetAlpha(0)
-        end)
+        local flowSbUp = _G["OmniGuildBankFlowScrollScrollBarScrollUpButton"]
+        local flowSbDown = _G["OmniGuildBankFlowScrollScrollBarScrollDownButton"]
+        if flowSbUp then
+            flowSbUp:SetAlpha(0)
+            flowSbUp:EnableMouse(false)
+        end
+        if flowSbDown then
+            flowSbDown:SetAlpha(0)
+            flowSbDown:EnableMouse(false)
+        end
+        local flowThumb = flowSb:GetThumbTexture()
+        if flowThumb then flowThumb:SetAlpha(0) end
     end
     local flowSbBd = _G["OmniGuildBankFlowScrollScrollBarBackdrop"]
     if flowSbBd and flowSbBd.Hide then

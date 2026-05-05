@@ -1015,7 +1015,6 @@ function BankFrame:RenderFlowView(items)
     local itemStep = itemSize + itemGap
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
-    local dualCategoryLanes = true
     local laneGap = 10
 
     local function columnsForLaneWidth(laneW)
@@ -1047,6 +1046,8 @@ function BankFrame:RenderFlowView(items)
             return (infoA.priority or 99) < (infoB.priority or 99)
         end)
     end
+
+    local dualCategoryLanes = #categoryOrder > 1
 
     local headerIndex = 0
     for _, catName in ipairs(categoryOrder) do
