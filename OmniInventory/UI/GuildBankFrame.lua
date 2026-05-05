@@ -46,6 +46,11 @@ local FRAME_HEIGHT = HEADER_HEIGHT + SEARCH_HEIGHT + FOOTER_HEIGHT
                     + (ROWS_PER_TAB * (SLOT_SIZE + SLOT_SPACING))
                     + PADDING * 3 + 24 + TAB_SUMMARY_HEIGHT
 
+local GUILDBANK_FRAME_MIN_WIDTH = math.min(FRAME_WIDTH, math.max(400,
+    TAB_COLUMN_WIDTH + 6 + PADDING * 2 + 8 + 300))
+local GUILDBANK_FRAME_MIN_HEIGHT = math.min(FRAME_HEIGHT, math.max(240,
+    HEADER_HEIGHT + SEARCH_HEIGHT + FOOTER_HEIGHT + TAB_SUMMARY_HEIGHT + 120))
+
 local QUALITY_COLORS = {
     [0] = { 0.62, 0.62, 0.62 },
     [1] = { 1.00, 1.00, 1.00 },
@@ -310,11 +315,14 @@ end
 local function SavePosition()
     if not frame then return end
     local point, _, _, x, y = frame:GetPoint()
+    local width, height = frame:GetSize()
     local db = GetDB()
     db.position = {
         point = point or "CENTER",
         x = x or 0,
         y = y or 0,
+        width = width,
+        height = height,
         userMoved = frame.userMoved or false,
     }
 end
@@ -323,7 +331,11 @@ local function LoadPosition()
     if not frame then return end
     local db = GetDB()
     local pos = db.position
-    if pos and pos.userMoved then
+    if not pos then return end
+    if pos.width and pos.height then
+        frame:SetSize(pos.width, pos.height)
+    end
+    if pos.userMoved then
         frame.userMoved = true
         frame:ClearAllPoints()
         frame:SetPoint(pos.point or "CENTER", UIParent, pos.point or "CENTER",
@@ -821,13 +833,26 @@ local function CreateSlotButton(parent, slotIndex)
     btn:SetScript("OnClick", GuildBankSlotOnClick)
 
     btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        self.__omniUsesCustomTooltip = true
+        if Omni.ItemButton and Omni.ItemButton.SetOmniItemTooltipOwner then
+            Omni.ItemButton.SetOmniItemTooltipOwner(self)
+        else
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        end
         local t = self.gbTab or currentTab
         local s = self.gbSlot or self.slotIndex
         GameTooltip:SetGuildBankItem(t, s)
+        GameTooltip:Show()
+        if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+            Omni.ItemButton.FinalizeOmniItemTooltipLayout()
+        end
+        if Omni.ItemButton and Omni.ItemButton.RefreshCompareTooltips then
+            Omni.ItemButton:RefreshCompareTooltips()
+        end
     end)
 
-    btn:SetScript("OnLeave", function()
+    btn:SetScript("OnLeave", function(self)
+        self.__omniUsesCustomTooltip = false
         GameTooltip:Hide()
         if ResetCursor then ResetCursor() end
     end)
@@ -1010,7 +1035,8 @@ local function CreateHeader(parent)
         self:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("View: Flow / Grid", 1, 1, 1)
-        GameTooltip:AddLine("Flow: categories like the main bag. Grid: 7x14 bank layout.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Flow: categories like the main bag (scroll + wheel when tall). Grid: 7x14.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Resize the window with the grip at the bottom-right corner.", 0.65, 0.65, 0.65, true)
         GameTooltip:Show()
     end)
     header.viewModeBtn:SetScript("OnLeave", function(self)
@@ -1039,6 +1065,26 @@ local function CreateHeader(parent)
     end)
 
     parent.header = header
+end
+
+local function CreateResizeHandle(parent)
+    local handle = CreateFrame("Button", nil, parent)
+    handle:SetSize(16, 16)
+    handle:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -2, 2)
+    handle:SetFrameLevel((parent.GetFrameLevel and parent:GetFrameLevel() or 0) + 15)
+    handle:EnableMouse(true)
+    handle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    handle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    handle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    handle:SetScript("OnMouseDown", function()
+        parent:StartSizing("BOTTOMRIGHT")
+    end)
+    handle:SetScript("OnMouseUp", function()
+        parent:StopMovingOrSizing()
+        SavePosition()
+        GuildBankFrame:UpdateLayout()
+    end)
+    parent.resizeHandle = handle
 end
 
 local function CreateSearchBar(parent)
@@ -1141,7 +1187,6 @@ local function CreateFooter(parent)
     footer.moneyBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     StyleFooterRibbonButton(footer.moneyBtn)
     footer.moneyBtn._tooltipTitle = "Guild Funds"
-    footer.moneyBtn._tooltipSub = "Left-click: withdraw | Right-click: deposit"
     footer.moneyBtn:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
             StaticPopup_Show("OMNI_GUILDBANK_DEPOSIT_MONEY")
@@ -1159,8 +1204,9 @@ local function CreateFooter(parent)
             GameTooltip:AddLine(self._withdrawText, 0.75, 0.75, 0.75)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Left-click: Withdraw", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("Right-click: Deposit", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Left-click: Withdraw", 1, 0.52, 0.52)
+        GameTooltip:AddLine("Right-click: Deposit", 0.45, 0.92, 0.52)
+        GameTooltip:AddLine("Popups: |cFFFFFFFFall|r — all carry gold in, max allowed out", 0.65, 0.65, 0.65)
         GameTooltip:Show()
     end)
     footer.moneyBtn:SetScript("OnLeave", function(self)
@@ -1305,7 +1351,6 @@ function GuildBankFrame:RenderFlowView(items)
     local hInset = 8
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
-    local dualCategoryLanes = true
     local laneGap = 10
 
     local function columnsForLaneWidth(laneW)
@@ -1338,6 +1383,8 @@ function GuildBankFrame:RenderFlowView(items)
             return (infoA.priority or 99) < (infoB.priority or 99)
         end)
     end
+
+    local dualCategoryLanes = #categoryOrder > 1
 
     local headerIndex = 0
     for _, catName in ipairs(categoryOrder) do
@@ -1424,6 +1471,24 @@ function GuildBankFrame:RenderFlowView(items)
 
     local bottomY = dualCategoryLanes and math.min(yLeft, yRight) or yOffset
     scrollChild:SetHeight(math.max(1, math.abs(bottomY) + ITEM_SPACING))
+    local sf = frame.flowScroll
+    if sf then
+        if sf.UpdateScrollChildRect then
+            sf:UpdateScrollChildRect()
+        else
+            local sb = _G["OmniGuildBankFlowScrollScrollBar"]
+            local ch = scrollChild:GetHeight() or 1
+            local vh = sf:GetHeight() or 1
+            local maxVal = math.max(0, ch - vh)
+            if sb and sb.SetMinMaxValues then
+                sb:SetMinMaxValues(0, maxVal)
+            end
+            local cur = sf.GetVerticalScroll and sf:GetVerticalScroll() or 0
+            if cur > maxVal and sf.SetVerticalScroll then
+                sf:SetVerticalScroll(maxVal)
+            end
+        end
+    end
 end
 
 function GuildBankFrame:RefreshItemArea()
@@ -1470,6 +1535,8 @@ function GuildBankFrame:CreateMainFrame()
     frame:SetFrameLevel(120)
     frame:EnableMouse(true)
     frame:SetMovable(true)
+    frame:SetResizable(true)
+    frame:SetMinResize(GUILDBANK_FRAME_MIN_WIDTH, GUILDBANK_FRAME_MIN_HEIGHT)
     frame:SetClampedToScreen(true)
 
     frame:SetBackdrop({
@@ -1490,6 +1557,7 @@ function GuildBankFrame:CreateMainFrame()
     CreateHeader(frame)
     CreateSearchBar(frame)
     CreateFooter(frame)
+    CreateResizeHandle(frame)
 
     frame.tabColumn = CreateFrame("Frame", nil, frame)
     frame.tabColumn:SetPoint("TOPLEFT", frame.searchBar, "BOTTOMLEFT", 0, -PADDING)
@@ -1522,13 +1590,36 @@ function GuildBankFrame:CreateMainFrame()
     frame.flowScroll = CreateFrame("ScrollFrame", "OmniGuildBankFlowScroll", frame.rightPanel, "UIPanelScrollFrameTemplate")
     frame.flowScroll:SetPoint("TOPLEFT", frame.rightPanel, "TOPLEFT", 0, 0)
     frame.flowScroll:SetPoint("BOTTOMRIGHT", frame.rightPanelBottom, "TOPRIGHT", 0, 0)
+    if frame.flowScroll.EnableMouseWheel then
+        frame.flowScroll:EnableMouseWheel(true)
+    end
+    frame.flowScroll:SetScript("OnMouseWheel", function(self, delta)
+        local bar = _G[self:GetName() .. "ScrollBar"]
+        if not bar then return end
+        local step = 28
+        bar:SetValue(bar:GetValue() - (delta * step))
+    end)
+
     local flowSb = _G["OmniGuildBankFlowScrollScrollBar"]
     if flowSb then
         flowSb:ClearAllPoints()
-        flowSb:Hide()
-        flowSb:SetScript("OnShow", function(sb)
-            sb:Hide()
-        end)
+        flowSb:SetPoint("TOPRIGHT", frame.flowScroll, "TOPRIGHT", 0, -16)
+        flowSb:SetPoint("BOTTOMRIGHT", frame.flowScroll, "BOTTOMRIGHT", 0, 16)
+        flowSb:SetAlpha(0)
+        flowSb:SetWidth(1)
+        flowSb:EnableMouse(false)
+        local flowSbUp = _G["OmniGuildBankFlowScrollScrollBarScrollUpButton"]
+        local flowSbDown = _G["OmniGuildBankFlowScrollScrollBarScrollDownButton"]
+        if flowSbUp then
+            flowSbUp:SetAlpha(0)
+            flowSbUp:EnableMouse(false)
+        end
+        if flowSbDown then
+            flowSbDown:SetAlpha(0)
+            flowSbDown:EnableMouse(false)
+        end
+        local flowThumb = flowSb:GetThumbTexture()
+        if flowThumb then flowThumb:SetAlpha(0) end
     end
     local flowSbBd = _G["OmniGuildBankFlowScrollScrollBarBackdrop"]
     if flowSbBd and flowSbBd.Hide then
@@ -1588,6 +1679,9 @@ function GuildBankFrame:SelectTab(index)
     local numTabs = GetNumGuildBankTabs() or 0
     if index < 1 or index > numTabs then return end
     currentTab = index
+    if frame and frame.flowScroll then
+        frame.flowScroll:SetVerticalScroll(0)
+    end
     if SetCurrentGuildBankTab then SetCurrentGuildBankTab(index) end
     if QueryGuildBankTab then QueryGuildBankTab(index) end
     if QueryGuildBankText then QueryGuildBankText(index) end
@@ -2106,8 +2200,30 @@ local function ParseGuildBankMoneyInputToCopper(raw)
     return nil
 end
 
+-- ʕ •ᴥ•ʔ✿ "all" = full carry gold (deposit) or min(vault, daily cap) (withdraw). ✿ ʕ •ᴥ•ʔ
+local function ResolveGuildBankMoneyInput(raw, intent)
+    if not raw then return nil end
+    local s = string.lower(string.gsub(string.gsub(tostring(raw), "^%s+", ""), "%s+$", ""))
+    if s == "all" then
+        if intent == "deposit" then
+            local carry = GetMoney and GetMoney() or 0
+            return ClampGuildBankMoneyCopper(carry)
+        end
+        if intent == "withdraw" then
+            local vault = GetGuildBankMoney and GetGuildBankMoney() or 0
+            local cap = GetGuildBankWithdrawMoney and GetGuildBankWithdrawMoney() or 0
+            if cap == -1 then
+                return ClampGuildBankMoneyCopper(vault)
+            end
+            return ClampGuildBankMoneyCopper(math.min(vault, cap))
+        end
+        return nil
+    end
+    return ParseGuildBankMoneyInputToCopper(raw)
+end
+
 StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
-    text = "Deposit amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
+    text = "|cFF33DD33Deposit|r — Amount (gold default). Examples: 50, 50g, 5k, 12g34s, or |cFFFFFFFFall|r for all carry gold.",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
@@ -2116,14 +2232,14 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
     whileDead = 0,
     hideOnEscape = 1,
     OnAccept = function(self)
-        local amt = ParseGuildBankMoneyInputToCopper(self.editBox:GetText())
+        local amt = ResolveGuildBankMoneyInput(self.editBox:GetText(), "deposit")
         if amt and amt > 0 and DepositGuildBankMoney then
             DepositGuildBankMoney(amt)
         end
     end,
     EditBoxOnEnterPressed = function(self)
         local parent = self:GetParent()
-        local amt = ParseGuildBankMoneyInputToCopper(self:GetText())
+        local amt = ResolveGuildBankMoneyInput(self:GetText(), "deposit")
         if amt and amt > 0 and DepositGuildBankMoney then
             DepositGuildBankMoney(amt)
             parent:Hide()
@@ -2132,7 +2248,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_DEPOSIT_MONEY"] = {
 }
 
 StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
-    text = "Withdraw amount (default gold; e.g. 50, 50g, 5k, 12g34s):",
+    text = "|cFFFF4444Withdraw|r — Amount (gold default). Examples: 50, 50g, 5k, 12g34s, or |cFFFFFFFFall|r for max (vault and your daily limit).",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = 1,
@@ -2141,14 +2257,14 @@ StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
     whileDead = 0,
     hideOnEscape = 1,
     OnAccept = function(self)
-        local amt = ParseGuildBankMoneyInputToCopper(self.editBox:GetText())
+        local amt = ResolveGuildBankMoneyInput(self.editBox:GetText(), "withdraw")
         if amt and amt > 0 and WithdrawGuildBankMoney then
             WithdrawGuildBankMoney(amt)
         end
     end,
     EditBoxOnEnterPressed = function(self)
         local parent = self:GetParent()
-        local amt = ParseGuildBankMoneyInputToCopper(self:GetText())
+        local amt = ResolveGuildBankMoneyInput(self:GetText(), "withdraw")
         if amt and amt > 0 and WithdrawGuildBankMoney then
             WithdrawGuildBankMoney(amt)
             parent:Hide()

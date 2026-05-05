@@ -30,6 +30,10 @@ local RESIST_ICON_TEXTURES = {
 }
 local RESIST_ICON_FALLBACK = "Interface\\Icons\\Spell_Holy_MagicalSentry"
 
+local TEXTURE_QUEST_AVAILABLE = "Interface\\GossipFrame\\AvailableQuestIcon"
+local TEXTURE_QUEST_DAILY = "Interface\\GossipFrame\\DailyQuestIcon"
+local QUEST_STARTER_ICON_SIZE = 20
+
 local FORGE_LEVEL_MAP = { BASE = 0, TITANFORGED = 1, WARFORGED = 2, LIGHTFORGED = 3 }
 local FORGE_LEVEL_NAMES = { [0] = "BASE", [1] = "TITANFORGED", [2] = "WARFORGED", [3] = "LIGHTFORGED" }
 local FORGE_LETTERS = { [1] = "T", [2] = "W", [3] = "L" }
@@ -113,6 +117,140 @@ local function GetButtonLimbo()
     return buttonLimbo
 end
 
+local VALID_ITEM_TOOLTIP_PLACEMENT = {
+    right = true,
+    left = true,
+    fixed = true,
+    fixed_br = true,
+    fixed_bl = true,
+    fixed_tl = true,
+    fixed_tr = true,
+}
+
+local function NormalizeTooltipPlacement(p)
+    if p == "fixed" then
+        return "fixed_br"
+    end
+    return p
+end
+
+local function IsFixedScreenTooltipPlacement(p)
+    p = NormalizeTooltipPlacement(p)
+    return p == "fixed_br" or p == "fixed_bl" or p == "fixed_tl" or p == "fixed_tr"
+end
+
+local function GetResolvedItemTooltipPlacement()
+    if Omni and Omni.Data and Omni.Data.Get then
+        local p = Omni.Data:Get("itemTooltipPlacement")
+        if type(p) == "string" and VALID_ITEM_TOOLTIP_PLACEMENT[p] then
+            return NormalizeTooltipPlacement(p)
+        end
+    end
+    return "right"
+end
+
+-- ʕ •ᴥ•ʔ✿ Real container slots (bags, bank, bank bags, keyring); main bank is bagID -1. ✿ ʕ •ᴥ•ʔ
+local function IsLiveContainerFrameSlot(bagID, slotID)
+    if bagID == nil or slotID == nil then
+        return false
+    end
+    if bagID == -2 or bagID == -1 then
+        return true
+    end
+    if bagID >= 0 and bagID <= 11 then
+        return true
+    end
+    return false
+end
+
+local questScanTooltip
+local function GetQuestScanTooltip()
+    if not questScanTooltip then
+        questScanTooltip = CreateFrame("GameTooltip", "OmniItemQuestScanTooltip", nil, "GameTooltipTemplate")
+        questScanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    end
+    return questScanTooltip
+end
+local function GetItemStartsQuestTooltipMarker()
+    return ITEM_STARTS_QUEST
+end
+
+local function BagSlotTooltipMentionsStartsQuest(bagID, slotID)
+    local marker = GetItemStartsQuestTooltipMarker()
+    if not marker or not bagID or not slotID then
+        return false
+    end
+    if not IsLiveContainerFrameSlot(bagID, slotID) then
+        return false
+    end
+    local tip = GetQuestScanTooltip()
+    tip:ClearLines()
+    tip:SetBagItem(bagID, slotID)
+    local prefix = "OmniItemQuestScanTooltipTextLeft"
+    for i = 1, tip:NumLines() do
+        local left = _G[prefix .. i]
+        if left then
+            local text = left:GetText()
+            if text and string.find(text, marker, 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ʕ •ᴥ•ʔ✿ nil = hide; "available" / "daily" after ITEMS_STARTS_QUEST line + quest id ✿ ʕ •ᴥ•ʔ
+local function GetQuestStarterOverlayKind(bagID, slotID)
+    if not BagSlotTooltipMentionsStartsQuest(bagID, slotID) then
+        return nil
+    end
+    local questId
+    if GetContainerItemQuestInfo then
+        local _, qId = GetContainerItemQuestInfo(bagID, slotID)
+        questId = qId
+    end
+    if questId and questId > 0 and type(IsDailyQuest) == "function" and IsDailyQuest(questId) then
+        return "daily"
+    end
+    return "available"
+end
+
+local function LayoutQuestStarterIcon(button)
+    local icon = button.questStarterIcon
+    if not icon or not icon:IsShown() then
+        return
+    end
+    icon:ClearAllPoints()
+    if button.accountIcon and button.accountIcon:IsShown() then
+        icon:SetPoint("TOPLEFT", button.accountIcon, "TOPRIGHT", 2, 0)
+    else
+        icon:SetPoint("TOPLEFT", button, "TOPLEFT", -3, -2)
+    end
+end
+
+local function UpdateQuestStarterIcon(button, itemInfo)
+    if not button or not button.questStarterIcon then
+        return
+    end
+    local icon = button.questStarterIcon
+    if not itemInfo or itemInfo.__empty or not itemInfo.bagID or not itemInfo.slotID then
+        icon:Hide()
+        return
+    end
+    local kind = GetQuestStarterOverlayKind(itemInfo.bagID, itemInfo.slotID)
+    if not kind then
+        icon:Hide()
+        return
+    end
+    if kind == "daily" then
+        icon:SetTexture(TEXTURE_QUEST_DAILY)
+    else
+        icon:SetTexture(TEXTURE_QUEST_AVAILABLE)
+    end
+    icon:Show()
+    LayoutQuestStarterIcon(button)
+end
+
 local function UpdateTooltipCompareState()
     if not GameTooltip or not GameTooltip:IsShown() then
         return
@@ -130,41 +268,7 @@ local function UpdateTooltipCompareState()
             if ShoppingTooltip2 then ShoppingTooltip2:Hide() end
         end
     end
-end
-
-local function GetTooltipSidePreference()
-    if Omni and Omni.Data and Omni.Data.Get then
-        local side = Omni.Data:Get("tooltipSide")
-        if side == "left" or side == "right" then
-            return side
-        end
-    end
-    return "right"
-end
-
-local function GetPreferredTooltipAnchor(button)
-    local preferred = GetTooltipSidePreference()
-    local anchor = preferred == "left" and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
-    if not button or not UIParent then
-        return anchor
-    end
-
-    local parentWidth = UIParent.GetWidth and UIParent:GetWidth() or 0
-    local buttonLeft = button.GetLeft and button:GetLeft() or nil
-    local buttonRight = button.GetRight and button:GetRight() or nil
-    local REQUIRED_TOOLTIP_GAP = 320
-
-    if preferred == "right" and parentWidth > 0 and buttonRight then
-        if (parentWidth - buttonRight) < REQUIRED_TOOLTIP_GAP then
-            return "ANCHOR_LEFT"
-        end
-    elseif preferred == "left" and buttonLeft then
-        if buttonLeft < REQUIRED_TOOLTIP_GAP then
-            return "ANCHOR_RIGHT"
-        end
-    end
-
-    return anchor
+    ItemButton.FinalizeOmniItemTooltipLayout()
 end
 
 local modifierTooltipFrame = CreateFrame("Frame")
@@ -172,6 +276,74 @@ modifierTooltipFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierTooltipFrame:SetScript("OnEvent", function()
     UpdateTooltipCompareState()
 end)
+
+function ItemButton.GetResolvedTooltipPlacement()
+    return GetResolvedItemTooltipPlacement()
+end
+
+function ItemButton.SetOmniItemTooltipOwner(owner)
+    if not owner or not GameTooltip then
+        return
+    end
+    local placement = GetResolvedItemTooltipPlacement()
+    if IsFixedScreenTooltipPlacement(placement) then
+        GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+    elseif placement == "left" then
+        GameTooltip:SetOwner(owner, "ANCHOR_LEFT")
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    end
+end
+
+function ItemButton.HideTooltipIfOwnedBy(owner)
+    if not owner or not GameTooltip or not GameTooltip.GetOwner then
+        return false
+    end
+    if GameTooltip:GetOwner() ~= owner then
+        return false
+    end
+    GameTooltip:Hide()
+    if GameTooltip_HideShoppingTooltips then
+        GameTooltip_HideShoppingTooltips(GameTooltip)
+    else
+        if ShoppingTooltip1 then ShoppingTooltip1:Hide() end
+        if ShoppingTooltip2 then ShoppingTooltip2:Hide() end
+    end
+    return true
+end
+
+function ItemButton.FinalizeOmniItemTooltipLayout()
+    local placement = GetResolvedItemTooltipPlacement()
+    if not IsFixedScreenTooltipPlacement(placement) then
+        return
+    end
+    if not GameTooltip or not GameTooltip:IsShown() then
+        return
+    end
+    local owner = GameTooltip.GetOwner and GameTooltip:GetOwner()
+    if not owner or owner.__omniUsesCustomTooltip ~= true then
+        return
+    end
+    local fix = Omni.Data and Omni.Data.Get and Omni.Data:Get("itemTooltipFixed")
+    -- ʕ •ᴥ•ʔ✿ X/Y = inset toward screen center from the anchored corner (caps match options sliders) ✿ ʕ •ᴥ•ʔ
+    local FIXED_X_MAX, FIXED_Y_MAX = 400, 400
+    local hInset = 24
+    local vInset = 140
+    if type(fix) == "table" then
+        hInset = math.max(0, math.min(tonumber(fix.x) or hInset, FIXED_X_MAX))
+        vInset = math.max(0, math.min(tonumber(fix.y) or vInset, FIXED_Y_MAX))
+    end
+    GameTooltip:ClearAllPoints()
+    if placement == "fixed_br" then
+        GameTooltip:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -hInset, vInset)
+    elseif placement == "fixed_bl" then
+        GameTooltip:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", hInset, vInset)
+    elseif placement == "fixed_tl" then
+        GameTooltip:SetPoint("TOPLEFT", UIParent, "TOPLEFT", hInset, -vInset)
+    elseif placement == "fixed_tr" then
+        GameTooltip:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -hInset, -vInset)
+    end
+end
 
 local function GetAttuneSettings()
     local global = OmniInventoryDB and OmniInventoryDB.global
@@ -181,6 +353,8 @@ local function GetAttuneSettings()
     end
     return attune
 end
+
+local batchAttuneToken = nil
 
 local function BuildAttuneSettingsToken()
     local settings = GetAttuneSettings()
@@ -204,6 +378,14 @@ local function BuildAttuneSettingsToken()
         tostring(textColor.b or 1),
         tostring(textColor.a or 1),
     }, ":")
+end
+
+function ItemButton:BeginItemRenderBatch()
+    batchAttuneToken = BuildAttuneSettingsToken()
+end
+
+function ItemButton:EndItemRenderBatch()
+    batchAttuneToken = nil
 end
 
 local function GetItemIDFromLink(itemLink)
@@ -260,7 +442,7 @@ local function IsAttunableByAccount(itemID)
     return false
 end
 
--- ʕ •ᴥ•ʔ✿ Strictly use hyperlink attune progress API ✿ ʕ •ᴥ•ʔ
+-- ʕ •ᴥ•ʔ✿ Hyperlink progress only — variant-aware ✿ ʕ •ᴥ•ʔ
 local function GetAttuneProgress(itemLink)
     if itemLink and _G.GetItemLinkAttuneProgress then
         local progress = GetItemLinkAttuneProgress(itemLink)
@@ -540,6 +722,10 @@ function ItemButton:Create(parent)
     button.pinIcon:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     button.pinIcon:Hide()
 
+    button.questStarterIcon = button:CreateTexture(nil, "OVERLAY", nil, 3)
+    button.questStarterIcon:SetSize(QUEST_STARTER_ICON_SIZE, QUEST_STARTER_ICON_SIZE)
+    button.questStarterIcon:Hide()
+
     button.attuneBarFill = button:CreateTexture(nil, "OVERLAY")
     button.attuneBarFill:SetTexture("Interface\\Buttons\\WHITE8X8")
     button.attuneBarFill:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 2, 2)
@@ -590,11 +776,8 @@ function ItemButton:Create(parent)
 
     button.itemInfo = nil
 
-    -- ʕ •ᴥ•ʔ✿ HookScript on OnClick / OnEnter so the template's built-in
-    -- secure ContainerFrameItemButton_OnClick (use / pickup / equip / swap /
-    -- modified-clicks) and standard tooltip handler still run; ours adds
-    -- the OmniInventory pin-toggle on shift+rclick and our richer tooltip
-    -- compare logic on top. The template owns drag in combat too. ✿ ʕ •ᴥ•ʔ
+    -- ʕ •ᴥ•ʔ✿ HookScript after template: OnClick adds shift+rclick pin; OnEnter
+    -- rebuilds GameTooltip (SetBagItem / hyperlink) so placement matches Omni settings. ✿ ʕ •ᴥ•ʔ
     button:HookScript("OnMouseDown", function(self)
         ItemButton:OnMouseDown(self)
     end)
@@ -624,6 +807,19 @@ function ItemButton:Create(parent)
     button:HookScript("OnReceiveDrag", function(self)
         ItemButton:OnReceiveDrag(self)
     end)
+
+    -- ʕ •ᴥ•ʔ✿ GameTooltip_OnUpdate calls owner:UpdateTooltip (~TOOLTIP_UPDATE_TIME).
+    -- Default ContainerFrameItemButton_OnEnter uses GetParent():GetID() for the
+    -- bag; BANK_CONTAINER (-1) can round-trip wrong from Frame:GetID on some
+    -- builds, so the refresh clears the tip while hover continues. Rebuild from
+    -- itemInfo like our OnEnter hook. ✿ ʕ •ᴥ•ʔ
+    button.UpdateTooltip = function(self)
+        if self.itemInfo then
+            ItemButton:OnEnter(self)
+        elseif _G.ContainerFrameItemButton_OnEnter then
+            _G.ContainerFrameItemButton_OnEnter(self)
+        end
+    end
 
     return button
 end
@@ -790,10 +986,12 @@ function ItemButton:SetItem(button, itemInfo)
     button.itemInfo = itemInfo
 
     if itemInfo and itemInfo.__empty then
+        local prevBagID = button.bagID
         local prevSlotID = button.slotID
         button.bagID = itemInfo.bagID
         button.slotID = itemInfo.slotID
-        if itemInfo.slotID and button.SetID and prevSlotID ~= itemInfo.slotID then
+        if itemInfo.slotID and button.SetID
+                and (prevBagID ~= itemInfo.bagID or prevSlotID ~= itemInfo.slotID) then
             pcall(button.SetID, button, itemInfo.slotID)
         end
 
@@ -811,6 +1009,7 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        if button.questStarterIcon then button.questStarterIcon:Hide() end
         button.__lastRenderKey = nil
         return
     end
@@ -830,6 +1029,7 @@ function ItemButton:SetItem(button, itemInfo)
         HideAttuneDisplay(button)
         if button.forgeText then button.forgeText:Hide() end
         HideItemCooldown(button)
+        if button.questStarterIcon then button.questStarterIcon:Hide() end
         button.__lastRenderKey = nil
         return
     end
@@ -837,10 +1037,23 @@ function ItemButton:SetItem(button, itemInfo)
     pcall(button.EnableMouse, button, true)
 
     local isPinned = itemInfo.itemID and Omni.Data and Omni.Data:IsPinned(itemInfo.itemID) or false
-    local attuneSettings = GetAttuneSettings()
-    local attuneEnabled = attuneSettings and attuneSettings.enabled
-    local attuneToken = BuildAttuneSettingsToken()
     local renderKey = button.__lastRenderKey
+    local questOverlayKind
+    if renderKey
+            and renderKey.bagID == itemInfo.bagID
+            and renderKey.slotID == itemInfo.slotID
+            and renderKey.hyperlink == itemInfo.hyperlink
+            and renderKey.iconFileID == itemInfo.iconFileID
+            and renderKey.stackCount == itemInfo.stackCount
+            and renderKey.quality == itemInfo.quality
+            and renderKey.isNew == itemInfo.isNew
+            and renderKey.isQuickFiltered == itemInfo.isQuickFiltered
+            and renderKey.itemID == itemInfo.itemID then
+        questOverlayKind = renderKey.questOverlayKind
+    else
+        questOverlayKind = GetQuestStarterOverlayKind(itemInfo.bagID, itemInfo.slotID)
+    end
+    local attuneToken = batchAttuneToken or BuildAttuneSettingsToken()
     if renderKey
             and renderKey.hyperlink == itemInfo.hyperlink
             and renderKey.iconFileID == itemInfo.iconFileID
@@ -852,11 +1065,14 @@ function ItemButton:SetItem(button, itemInfo)
             and renderKey.bagID == itemInfo.bagID
             and renderKey.slotID == itemInfo.slotID
             and renderKey.isPinned == isPinned
+            and renderKey.questOverlayKind == questOverlayKind
             and renderKey.attuneToken == attuneToken then
-        if attuneEnabled then
-            UpdateAttuneDisplay(button, itemInfo)
-            UpdateForgeDisplay(button, itemInfo)
-        end
+        -- ʕ •ᴥ•ʔ✿ Must match full path: UpdateAttuneDisplay applies settings.enabled
+        -- internally. Gating on attuneEnabled here skipped paint when .enabled was
+        -- nil in SavedVariables (defaults not merged yet). ✿ ʕ •ᴥ•ʔ
+        UpdateAttuneDisplay(button, itemInfo)
+        UpdateForgeDisplay(button, itemInfo)
+        UpdateQuestStarterIcon(button, itemInfo)
         self:UpdateCooldown(button)
         return
     end
@@ -895,14 +1111,13 @@ function ItemButton:SetItem(button, itemInfo)
     -- pipeline. Both calls are protected on this client and therefore are
     -- only safe to issue out of combat -- the render path is combat-gated
     -- in UI/Frame.lua so we never reach SetItem during lockdown. ✿ ʕ •ᴥ•ʔ
+    local prevBagID = button.bagID
     local prevSlotID = button.slotID
     button.bagID = itemInfo.bagID
     button.slotID = itemInfo.slotID
-    -- ʕ •ᴥ•ʔ✿ Skip redundant SetID in combat: the call is protected on
-    -- this client, and during a combat content-refresh the slot index
-    -- has not changed (we only rebind the slotID on structural renders,
-    -- which are combat-gated). pcall absorbs the error regardless. ✿ ʕ •ᴥ•ʔ
-    if itemInfo.slotID and button.SetID and prevSlotID ~= itemInfo.slotID then
+    -- ʕ •ᴥ•ʔ✿ SetID must track bag moves (same slot index, different bag). pcall in combat. ✿ ʕ •ᴥ•ʔ
+    if itemInfo.slotID and button.SetID
+            and (prevBagID ~= itemInfo.bagID or prevSlotID ~= itemInfo.slotID) then
         pcall(button.SetID, button, itemInfo.slotID)
     end
 
@@ -926,6 +1141,7 @@ function ItemButton:SetItem(button, itemInfo)
     end
 
     UpdateAttuneDisplay(button, itemInfo)
+    UpdateQuestStarterIcon(button, itemInfo)
     UpdateForgeDisplay(button, itemInfo)
     self:UpdateCooldown(button)
 
@@ -940,6 +1156,7 @@ function ItemButton:SetItem(button, itemInfo)
         bagID = itemInfo.bagID,
         slotID = itemInfo.slotID,
         isPinned = isPinned,
+        questOverlayKind = questOverlayKind,
         attuneToken = attuneToken,
     }
 end
@@ -1065,41 +1282,39 @@ end
 function ItemButton:OnEnter(button)
     if not button or not button.itemInfo then return end
 
-    local bagID = button.bagID
-    local slotID = button.slotID
+    button.__omniUsesCustomTooltip = true
+    local info = button.itemInfo
+    local bagID, slotID = info.bagID, info.slotID
 
-    GameTooltip:SetOwner(button, GetPreferredTooltipAnchor(button))
-
-    if bagID and bagID >= 0 then
-        -- Standard online item
-        GameTooltip:SetBagItem(bagID, slotID)
-    elseif button.itemInfo.hyperlink then
-        -- Offline/Bank item
-        GameTooltip:SetHyperlink(button.itemInfo.hyperlink)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Bank Item (Offline)", 0.5, 0.5, 0.5)
+    ItemButton.SetOmniItemTooltipOwner(button)
+    if GameTooltip.ClearLines then
+        GameTooltip:ClearLines()
     end
 
-    -- Hook for Auctionator (if it doesn't hook automatically)
-    if Auctionator and Auctionator.ShowTooltip then
-         -- Auctionator usually hooks SetBagItem/SetHyperlink, but we can allow extra logic here if needed
+    local shown = false
+    if IsLiveContainerFrameSlot(bagID, slotID) and slotID then
+        GameTooltip:SetBagItem(bagID, slotID)
+        if GameTooltip.NumLines then
+            shown = GameTooltip:NumLines() > 0
+        else
+            shown = true
+        end
+    end
+
+    if not shown and info.hyperlink then
+        GameTooltip:SetHyperlink(info.hyperlink)
+        if not IsLiveContainerFrameSlot(bagID, slotID) then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Bank Item (Offline)", 0.5, 0.5, 0.5)
+        end
     end
 
     GameTooltip:Show()
+    ItemButton.FinalizeOmniItemTooltipLayout()
     UpdateTooltipCompareState()
-    if bagID and bagID >= 0 and slotID and MerchantFrame and MerchantFrame:IsShown() and (not CursorHasItem or not CursorHasItem()) then
-        if ShowContainerSellCursor then
-            ShowContainerSellCursor(bagID, slotID)
-        elseif CursorUpdate then
-            CursorUpdate(button)
-        end
-    elseif CursorUpdate then
-        CursorUpdate(button)
-    end
 
-    -- Highlight in search
     if Omni.Frame and Omni.Frame.HighlightItem then
-        Omni.Frame:HighlightItem(button.itemInfo)
+        Omni.Frame:HighlightItem(info)
     end
 
     button.__emptyDropHighlightHovering = true
@@ -1111,10 +1326,16 @@ function ItemButton:OnLeave(button)
     if button.emptyDropHighlight then
         button.emptyDropHighlight:Hide()
     end
-    GameTooltip:Hide()
+
+    button.__omniUsesCustomTooltip = false
+    ItemButton.HideTooltipIfOwnedBy(button)
     if ResetCursor then
         ResetCursor()
     end
+end
+
+function ItemButton:RefreshCompareTooltips()
+    UpdateTooltipCompareState()
 end
 
 -- ʕ •ᴥ•ʔ✿ ContainerFrameItemButtonTemplate already handles OnDragStart and
@@ -1136,6 +1357,7 @@ function ItemButton:Reset(button)
     button.itemInfo = nil
     button.__lastRenderKey = nil
     button.__omniActionStateKey = nil
+    button.__omniUsesCustomTooltip = nil
     button.__emptyDropHighlightHovering = false
     button.bagID = nil
     button.slotID = nil
@@ -1172,5 +1394,28 @@ function ItemButton:UpdateGuildBankSlotDecorations(button, itemInfo)
     UpdateAttuneDisplay(button, itemInfo or {})
     UpdateForgeDisplay(button, itemInfo or {})
 end
+
+-- ʕ •ᴥ•ʔ✿ Blizzard refreshes bag/guild/hyperlink tooltips on a timer and re-anchors;
+-- post-hook re-applies fixed screen-corner UIParent offset without a per-frame loop. ✿ ʕ •ᴥ•ʔ
+local function RegisterOmniFixedTooltipReanchorHooks()
+    if Omni._omniFixedTooltipReanchorHooks then
+        return
+    end
+    if not (GameTooltip and hooksecurefunc) then
+        return
+    end
+    Omni._omniFixedTooltipReanchorHooks = true
+    hooksecurefunc(GameTooltip, "SetBagItem", function()
+        ItemButton.FinalizeOmniItemTooltipLayout()
+    end)
+    hooksecurefunc(GameTooltip, "SetHyperlink", function()
+        ItemButton.FinalizeOmniItemTooltipLayout()
+    end)
+    hooksecurefunc(GameTooltip, "SetGuildBankItem", function()
+        ItemButton.FinalizeOmniItemTooltipLayout()
+    end)
+end
+
+RegisterOmniFixedTooltipReanchorHooks()
 
 print("|cFF00FF00OmniInventory|r: ItemButton loaded")

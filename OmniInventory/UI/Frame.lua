@@ -5,32 +5,137 @@
 -- footer, and window management (move, resize, position persistence).
 -- =============================================================================
 
-local addonName, Omni = ...
+local Omni = select(2, ...)
 
 Omni.Frame = {}
 local Frame = Omni.Frame
 
--- =============================================================================
--- Constants
--- =============================================================================
+-- ʕ •ᴥ•ʔ✿ Single table: WoW Lua allows only 200 chunk locals ✿ ʕ •ᴥ•ʔ
+local DIM = {
+    FRAME_MIN_WIDTH = 350,
+    FRAME_MIN_HEIGHT = 300,
+    FRAME_DEFAULT_WIDTH = 450,
+    FRAME_DEFAULT_HEIGHT = 400,
+    HEADER_HEIGHT = 24,
+    FOOTER_HEIGHT = 24,
+    SEARCH_HEIGHT = 24,
+    PADDING = 8,
+    ITEM_SIZE = 37,
+    ITEM_SPACING = 4,
+    ITEM_SCALE_MIN = 0.5,
+    ITEM_SCALE_MAX = 2.0,
+    ITEM_GAP_MIN = 0,
+    ITEM_GAP_MAX = 20,
+    DEFAULT_VIEW_MODE = "flow",
+    BAG_ICON_SIZE = 18,
+    BAG_IDS = { 0, 1, 2, 3, 4 },
+    FORCE_EMPTY_EVENT_TIMEOUT = 0.35,
+    FORCE_EMPTY_MAX_LOCK_RETRIES = 20,
+    FORCE_EMPTY_MAX_MOVE_RETRIES = 6,
+    BURST_FULL_REFRESH_DELAY = 0.20,
+    FORCED_FULL_REFRESH_COOLDOWN = 0.20,
+    OPTIMISTIC_FLOW_REFRESH_TIMEOUT = 0.75,
+    OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25,
+    RIBBON_BTN_HEIGHT = 20,
+    RIBBON_ICON_BTN_SIZE = 20,
+    RIBBON_TEXT_BTN_WIDTH = 46,
+    RIBBON_GAP = 3,
+    RIBBON_SEP_GAP = 5,
+    KEYRING_BAG_ID = -2,
+    SETTINGS_ICON = "Interface\\Icons\\Trade_Engineering",
+    KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03",
+    FIND_DUNGEON_ICON = "Interface\\Icons\\INV_Misc_Map_01",
+    FIND_DUNGEON_BASE_COMMAND = ".finddungeon",
+    FIND_DUNGEON_POPUP_WIDTH = 372,
+    FIND_DUNGEON_POPUP_HEIGHT = 308,
+    FIND_DUNGEON_POPUP_PAD = 10,
+    FIND_DUNGEON_POPUP_HEADER = 22,
+    FIND_DUNGEON_SECTION_WIDTH = 112,
+    FIND_DUNGEON_SECTION_GAP = 8,
+    FIND_DUNGEON_BUTTON_HEIGHT = 20,
+    FIND_DUNGEON_BUTTON_GAP = 4,
+    FIND_DUNGEON_SECTION_TITLE_GAP = 16,
+    FIND_DUNGEON_CUSTOM_ROW_HEIGHT = 22,
+    FIND_DUNGEON_CUSTOM_RUN_WIDTH = 60,
+    FIND_DUNGEON_STATUS_HEIGHT = 26,
+    FIND_DUNGEON_STATUS_DEFAULT = "Rare+ unattuned loot, minus the slash-command archaeology.",
+    FIND_DUNGEON_SUBTITLE_TEXT = "Pick a preset, or type your own filters below.",
+    FIND_DUNGEON_MYTHIC_COLOR = { 0.35, 0.65, 1.00 },
+    KEYRING_COLS = 8,
+    KEYRING_CELL = 30,
+    KEYRING_CELL_GAP = 2,
+    KEYRING_PAD = 10,
+    KEYRING_HEADER = 22,
+    FILTER_HEIGHT = 22,
+    FILTER_BUTTON_HEIGHT = 18,
+    FILTER_BUTTON_SPACING = 2,
+    FILTER_BUTTON_START_X = 4,
+    FILTER_TEXT_PADDING_MAX = 10,
+    FILTER_TEXT_PADDING_MIN = 3,
+    FILTER_BUTTON_MIN_WIDTH = 22,
+    FILTER_FONT_PATH = "Fonts\\FRIZQT__.TTF",
+    FILTER_FONT_SIZES = { 10, 9, 8, 7 },
+    FILTER_ROW_SPACING = 2,
+    FILTER_ROW_TOP_PAD = 2,
+    FILTER_ROW_BOTTOM_PAD = 2,
+    FILTER_NEUTRAL_COLOR = { 0.75, 0.75, 0.75 },
+    FOOTER_BTN_SIZE = 20,
+    FOOTER_BTN_GAP = 3,
+    FOOTER_SEP_GAP = 5,
+    MONEY_SAFETY_GAP = 8,
+    HONOR_PER_ARENA_POINT = 62,
+    STONE_KEEPER_SHARDS_PER_100K_HONOR = 300,
+    STONE_KEEPER_SHARD_ITEM_ID = 43228,
+    WINTERGRASP_MARK_OF_HONOR_ITEM_ID = 43589,
+}
 
-local FRAME_MIN_WIDTH = 350
-local FRAME_MIN_HEIGHT = 300
-local FRAME_DEFAULT_WIDTH = 450
-local FRAME_DEFAULT_HEIGHT = 400
-local HEADER_HEIGHT = 24
-local FOOTER_HEIGHT = 24
-local SEARCH_HEIGHT = 24
-local PADDING = 8
-local ITEM_SIZE = 37
-local ITEM_SPACING = 4
-local ITEM_SCALE_MIN = 0.5
-local ITEM_SCALE_MAX = 2.0
-local ITEM_GAP_MIN = 0
-local ITEM_GAP_MAX = 20
-local DEFAULT_VIEW_MODE = "flow"
-local BAG_ICON_SIZE = 18
-local BAG_IDS = { 0, 1, 2, 3, 4 }
+DIM.SEP_SLOT_WIDTH = 1 + DIM.FOOTER_SEP_GAP * 2
+DIM.OVERFLOW_SLOT_COST = DIM.FOOTER_BTN_SIZE + DIM.FOOTER_BTN_GAP
+
+DIM.FIND_DUNGEON_PRESETS = {
+    {
+        title = "Vanilla",
+        titleColor = { 1.00, 0.82, 0.00 },
+        buttons = {
+            { label = "Dungeons", filters = "vanilla notraid" },
+            { label = "Raids", filters = "vanilla raid" },
+        },
+    },
+    {
+        title = "TBC",
+        titleColor = { 0.28, 0.85, 0.55 },
+        buttons = {
+            { label = "Normal", filters = "tbc notheroic notmythic notraid" },
+            { label = "Heroic", filters = "tbc heroic" },
+            { label = "Raids", filters = "tbc raid" },
+            { label = "Mythic", filters = "tbc mythic", accentColor = DIM.FIND_DUNGEON_MYTHIC_COLOR },
+        },
+    },
+    {
+        title = "WotLK",
+        titleColor = { 0.45, 0.78, 1.00 },
+        buttons = {
+            { label = "Normal", filters = "wotlk notheroic notraid notmythic" },
+            { label = "Heroic", filters = "wotlk heroic notraid" },
+            { label = "Raids", filters = "wotlk raid" },
+            { label = "10M", filters = "wotlk raid not25-man" },
+            { label = "25M", filters = "wotlk raid 25-man" },
+            { label = "Mythic", filters = "wotlk mythic", accentColor = DIM.FIND_DUNGEON_MYTHIC_COLOR },
+        },
+    },
+}
+
+DIM.TRACKED_TOOLTIP_CURRENCIES = {
+    { key = "frost",      label = "Emblem of Frost",            itemID = 49426, color = { 0.70, 0.95, 1.00 } },
+    { key = "triumph",    label = "Emblem of Triumph",          itemID = 47241, color = { 1.00, 0.90, 0.45 } },
+    { key = "conquest",   label = "Emblem of Conquest",         itemID = 45624, color = { 1.00, 0.78, 0.42 } },
+    { key = "valor",      label = "Emblem of Valor",            itemID = 40753, color = { 1.00, 0.70, 0.30 } },
+    { key = "heroism",    label = "Emblem of Heroism",          itemID = 40752, color = { 0.90, 0.85, 0.80 } },
+    { key = "justice",    label = "Badge of Justice",           itemID = 29434, color = { 0.95, 0.95, 0.95 } },
+    { key = "seal",       label = "Champion's Seal",            itemID = 24131, color = { 0.95, 0.82, 0.35 } },
+    { key = "venture",    label = "Venture Coin",               itemID = 37836, color = { 0.40, 1.00, 0.70 } },
+    { key = "wgMark",     label = "Wintergrasp Mark of Honor",  itemID = DIM.WINTERGRASP_MARK_OF_HONOR_ITEM_ID, color = { 0.65, 0.90, 1.00 } },
+}
 
 -- =============================================================================
 -- Frame State
@@ -47,12 +152,12 @@ local slotButtons = {}
 local itemButtons = {}  -- Flat list of populated slot buttons (search / cooldown)
 local categoryHeaders = {}  -- Active category header FontStrings
 local listRows = {}  -- Track list row frames
-local currentView = DEFAULT_VIEW_MODE
+local currentView = DIM.DEFAULT_VIEW_MODE
 local currentMode = "bags"
 local isSearchActive = false
 local searchText = ""
 local selectedBagID = nil
-local bagViewNeedsFreshSort = true
+local attuneEmbedReady = false
 local IsValidBagID
 -- ʕ •ᴥ•ʔ✿ Remembers the view mode the user was on before clicking a
 -- bag icon forced bag view. ToggleBagPreview uses it to restore the
@@ -60,9 +165,6 @@ local IsValidBagID
 local preBagViewMode = nil
 local forceEmptyFrame = nil
 local forceEmptyJob = nil
-local FORCE_EMPTY_EVENT_TIMEOUT = 0.35
-local FORCE_EMPTY_MAX_LOCK_RETRIES = 20
-local FORCE_EMPTY_MAX_MOVE_RETRIES = 6
 
 -- ʕ •ᴥ•ʔ✿ Combat-safety state ✿ ʕ •ᴥ•ʔ
 --
@@ -85,14 +187,10 @@ local pendingCombatRender = false
 local burstRefreshFrame = nil
 local burstRefreshElapsed = 0
 local burstRefreshPending = false
-local BURST_FULL_REFRESH_DELAY = 0.20
-local FORCED_FULL_REFRESH_COOLDOWN = 0.20
 local lastForcedFullRefreshAt = 0
 local optimisticFlowRefreshFrame = nil
 local optimisticFlowRefreshWatches = {}
 local lastOptimisticFlowRefreshAt = 0
-local OPTIMISTIC_FLOW_REFRESH_TIMEOUT = 0.75
-local OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW = 0.25
 local flowLayoutCache = nil
 local vendorFlowLayoutFreeze = nil
 local wasMerchantOpen = false
@@ -219,7 +317,7 @@ end
 
 local function TryForceFullRefresh(reason)
     local now = (GetTime and GetTime()) or 0
-    if now > 0 and lastForcedFullRefreshAt > 0 and (now - lastForcedFullRefreshAt) < FORCED_FULL_REFRESH_COOLDOWN then
+    if now > 0 and lastForcedFullRefreshAt > 0 and (now - lastForcedFullRefreshAt) < DIM.FORCED_FULL_REFRESH_COOLDOWN then
         return false
     end
     lastForcedFullRefreshAt = now
@@ -240,7 +338,7 @@ local function RequestBurstFullRefresh()
 
     burstRefreshFrame:SetScript("OnUpdate", function(self, elapsed)
         burstRefreshElapsed = burstRefreshElapsed + (elapsed or 0)
-        if burstRefreshElapsed < BURST_FULL_REFRESH_DELAY then
+        if burstRefreshElapsed < DIM.BURST_FULL_REFRESH_DELAY then
             return
         end
 
@@ -249,6 +347,64 @@ local function RequestBurstFullRefresh()
         burstRefreshElapsed = 0
         TryForceFullRefresh("burst_full")
     end)
+end
+
+local function BuildFlowItemContentSignature(items)
+    local parts = {}
+    for _, item in ipairs(items or {}) do
+        if item and not item.__empty and item.bagID and item.slotID then
+            parts[#parts + 1] = table.concat({
+                tostring(item.bagID),
+                tostring(item.slotID),
+                tostring(item.itemID or 0),
+                tostring(item.stackCount or 0),
+                tostring(item.isBound and 1 or 0),
+                tostring(item.bindType or 0),
+                tostring(item.category or ""),
+            }, "\031")
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, "\030")
+end
+
+local function GetScopedBagSlotsTotal(bagPreviewScopeSet)
+    local n = 0
+    for _, bagID in ipairs(DIM.BAG_IDS) do
+        if not bagPreviewScopeSet or bagPreviewScopeSet[bagID] then
+            n = n + (GetContainerNumSlots(bagID) or 0)
+        end
+    end
+    return n
+end
+
+local function CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
+    if not touched then
+        return 0
+    end
+    local n = 0
+    for bagID, slots in pairs(touched) do
+        if type(bagID) == "number" and (not bagPreviewScopeSet or bagPreviewScopeSet[bagID]) then
+            for _ in pairs(slots) do
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
+local function BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
+    local parts = {}
+    for _, bagID in ipairs(DIM.BAG_IDS) do
+        if not bagPreviewScopeSet or bagPreviewScopeSet[bagID] then
+            local numSlots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, numSlots do
+                local texture = GetContainerItemInfo(bagID, slotID)
+                parts[#parts + 1] = texture and "1" or "0"
+            end
+        end
+    end
+    return table.concat(parts, "")
 end
 
 local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep, filterName)
@@ -317,7 +473,7 @@ end
 
 local function ComputeBagContentSignature()
     local parts = {}
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         local numSlots = GetContainerNumSlots(bagID) or 0
         parts[#parts + 1] = "b" .. tostring(bagID) .. ":" .. tostring(numSlots)
         for slotID = 1, numSlots do
@@ -327,21 +483,6 @@ local function ComputeBagContentSignature()
             end
         end
     end
-    return table.concat(parts, "|")
-end
-
-local function ComputeShowSignature()
-    local parts = {
-        tostring(currentView or "flow"),
-        tostring(activeFilter or "none"),
-        tostring(selectedBagID or "all"),
-    }
-    if mainFrame then
-        local w, h = mainFrame:GetSize()
-        local s = mainFrame:GetScale() or 1
-        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
-    end
-    parts[#parts + 1] = ComputeBagContentSignature()
     return table.concat(parts, "|")
 end
 
@@ -376,6 +517,10 @@ local function DoesFlowSlotChangeRequireRelayout(previousInfo, nextInfo)
     end
 
     if previousInfo.quality ~= nextInfo.quality then
+        return true
+    end
+
+    if previousInfo.isBound ~= nextInfo.isBound or previousInfo.bindType ~= nextInfo.bindType then
         return true
     end
 
@@ -427,7 +572,7 @@ local function StartOptimisticFlowRefreshWatcher()
 
         for watchKey, watch in pairs(optimisticFlowRefreshWatches) do
             watch.elapsed = (watch.elapsed or 0) + (elapsed or 0)
-            if watch.elapsed >= OPTIMISTIC_FLOW_REFRESH_TIMEOUT then
+            if watch.elapsed >= DIM.OPTIMISTIC_FLOW_REFRESH_TIMEOUT then
                 optimisticFlowRefreshWatches[watchKey] = nil
             else
                 local waitingOnCursor = watch.waitForCursorClear
@@ -478,6 +623,10 @@ function Frame:InvalidateRenderCaches(opts)
         return
     end
 
+    if opts.clearLayout then
+        flowLayoutCache = nil
+    end
+
     for _, byBag in pairs(slotButtons) do
         for _, btn in pairs(byBag) do
             if btn then
@@ -497,8 +646,8 @@ end
 
 local function ApplyItemButtonMetrics(btn, itemScale)
     if not btn then return end
-    local scale = math.max(ITEM_SCALE_MIN, math.min(itemScale or 1, ITEM_SCALE_MAX))
-    local size = ITEM_SIZE * scale
+    local scale = math.max(DIM.ITEM_SCALE_MIN, math.min(itemScale or 1, DIM.ITEM_SCALE_MAX))
+    local size = DIM.ITEM_SIZE * scale
     pcall(function()
         btn:SetScale(1)
         btn:SetSize(size, size)
@@ -512,7 +661,7 @@ local function NormalizeViewMode(mode)
     if mode == "grid" or mode == "flow" or mode == "list" or mode == "bag" then
         return mode
     end
-    return DEFAULT_VIEW_MODE
+    return DIM.DEFAULT_VIEW_MODE
 end
 
 function Frame:_RefreshViewButtonLabel()
@@ -540,9 +689,6 @@ function Frame:_RestoreCombatGridFallback()
     self._combatGridFallbackOriginalView = nil
     self._combatGridFallbackActive = false
     self:_RefreshViewButtonLabel()
-    if currentView == "bag" then
-        bagViewNeedsFreshSort = true
-    end
     if Frame and Frame.InvalidateRenderCaches then
         Frame:InvalidateRenderCaches({ clearLayout = true })
     end
@@ -555,6 +701,10 @@ local function IsAttuneHelperEmbedEnabled()
         global.attuneHelperEmbed = true
     end
     return not global or global.attuneHelperEmbed ~= false
+end
+
+local function IsAttuneHelperClientPresent()
+    return _G.AttuneHelperMiniFrame ~= nil or _G.AttuneHelperFrame ~= nil
 end
 
 local function IsAttuneHelperMiniNoBorderEnabled()
@@ -622,28 +772,6 @@ function Frame:HookAttuneHelperMiniSortButton()
         end
     end)
     return true
-end
-
--- ʕ •ᴥ•ʔ✿ Rebind drag-drop on embedded mini buttons so cursor items feed
--- AHSet / AHIgnore directly via AH.*, bypassing the hidden main frame. ✿ ʕ •ᴥ•ʔ
-local function GetAttuneHelperAddon()
-    local ah = _G.AH
-    if type(ah) == "table" then
-        return ah
-    end
-    -- Fallback: _G.AttuneHelper is clobbered to the main frame, so reject
-    -- frame-like handles and only accept the real addon table.
-    local legacy = _G.AttuneHelper
-    if type(legacy) == "table" and type(legacy.AddCursorItemToAHSet) == "function" then
-        return legacy
-    end
-    return nil
-end
-
-local function IsAttuneHelperAvailable()
-    return _G.AttuneHelperMiniFrame ~= nil
-        or _G.AttuneHelperFrame ~= nil
-        or GetAttuneHelperAddon() ~= nil
 end
 
 local function RestoreEmbeddedAttuneHelper()
@@ -805,16 +933,40 @@ local function GetSavedItemScale()
     if type(scale) ~= "number" then
         return 1
     end
-    return math.max(ITEM_SCALE_MIN, math.min(scale, ITEM_SCALE_MAX))
+    return math.max(DIM.ITEM_SCALE_MIN, math.min(scale, DIM.ITEM_SCALE_MAX))
 end
 
 local function GetSavedItemGap()
     local settings = OmniInventoryDB and OmniInventoryDB.char and OmniInventoryDB.char.settings
     local gap = settings and settings.itemGap
     if type(gap) ~= "number" then
-        return ITEM_SPACING
+        return DIM.ITEM_SPACING
     end
-    return math.max(ITEM_GAP_MIN, math.min(gap, ITEM_GAP_MAX))
+    return math.max(DIM.ITEM_GAP_MIN, math.min(gap, DIM.ITEM_GAP_MAX))
+end
+
+local function ComputeShowSignature()
+    local parts = {
+        tostring(currentView or "flow"),
+        tostring(activeFilter or "none"),
+        tostring(selectedBagID or "all"),
+    }
+    if mainFrame then
+        local w, h = mainFrame:GetSize()
+        local s = mainFrame:GetScale() or 1
+        parts[#parts + 1] = string.format("f:%.1f:%.1f:%.3f", w or 0, h or 0, s)
+    end
+    parts[#parts + 1] = ComputeBagContentSignature()
+    local sortMode = "category"
+    if Omni.Sorter and Omni.Sorter.GetDefaultMode then
+        sortMode = Omni.Sorter:GetDefaultMode() or "category"
+    end
+    parts[#parts + 1] = "sort:" .. tostring(sortMode)
+    parts[#parts + 1] = string.format("is:%.4f", GetSavedItemScale())
+    parts[#parts + 1] = string.format("ig:%.4f", GetSavedItemGap())
+    parts[#parts + 1] = "q:" .. tostring(searchText or "")
+    parts[#parts + 1] = "e:" .. tostring(Frame._renderCacheEpoch or 0)
+    return table.concat(parts, "|")
 end
 
 IsValidBagID = function(bagID)
@@ -859,7 +1011,7 @@ function Frame:CreateMainFrame()
 
     -- Main window
     mainFrame = CreateFrame("Frame", "OmniInventoryFrame", UIParent)
-    mainFrame:SetSize(FRAME_DEFAULT_WIDTH, FRAME_DEFAULT_HEIGHT)
+    mainFrame:SetSize(DIM.FRAME_DEFAULT_WIDTH, DIM.FRAME_DEFAULT_HEIGHT)
     mainFrame:SetPoint("CENTER")
     mainFrame:SetFrameStrata("HIGH")
     mainFrame:SetFrameLevel(100)
@@ -867,7 +1019,7 @@ function Frame:CreateMainFrame()
     mainFrame:SetMovable(true)
     mainFrame:SetResizable(true)
     mainFrame:SetClampedToScreen(true)
-    mainFrame:SetMinResize(FRAME_MIN_WIDTH, FRAME_MIN_HEIGHT)
+    mainFrame:SetMinResize(DIM.FRAME_MIN_WIDTH, DIM.FRAME_MIN_HEIGHT)
 
     -- Backdrop
     mainFrame:SetBackdrop({
@@ -897,7 +1049,7 @@ function Frame:CreateMainFrame()
     -- message can never punch out of the frame like the old banner did. ✿ ʕ •ᴥ•ʔ
     mainFrame.combatHint = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     mainFrame.combatHint:ClearAllPoints()
-    mainFrame.combatHint:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, FOOTER_HEIGHT + PADDING + 6)
+    mainFrame.combatHint:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, DIM.FOOTER_HEIGHT + DIM.PADDING + 6)
     mainFrame.combatHint:SetWidth(220)
     mainFrame.combatHint:SetJustifyH("CENTER")
     mainFrame.combatHint:SetJustifyV("MIDDLE")
@@ -926,65 +1078,6 @@ end
 -- =============================================================================
 -- Header (power ribbon)
 -- =============================================================================
-
-local RIBBON_BTN_HEIGHT = 20
-local RIBBON_ICON_BTN_SIZE = 20
-local RIBBON_TEXT_BTN_WIDTH = 46
-local RIBBON_GAP = 3
-local RIBBON_SEP_GAP = 5
-local KEYRING_BAG_ID = -2
-local SETTINGS_ICON = "Interface\\Icons\\Trade_Engineering"
-local KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03"
-local FIND_DUNGEON_ICON = "Interface\\Icons\\INV_Misc_Map_01"
-local FIND_DUNGEON_BASE_COMMAND = ".finddungeon"
-local FIND_DUNGEON_POPUP_WIDTH = 372
-local FIND_DUNGEON_POPUP_HEIGHT = 308
-local FIND_DUNGEON_POPUP_PAD = 10
-local FIND_DUNGEON_POPUP_HEADER = 22
-local FIND_DUNGEON_SECTION_WIDTH = 112
-local FIND_DUNGEON_SECTION_GAP = 8
-local FIND_DUNGEON_BUTTON_HEIGHT = 20
-local FIND_DUNGEON_BUTTON_GAP = 4
-local FIND_DUNGEON_SECTION_TITLE_GAP = 16
-local FIND_DUNGEON_CUSTOM_ROW_HEIGHT = 22
-local FIND_DUNGEON_CUSTOM_RUN_WIDTH = 60
-local FIND_DUNGEON_STATUS_HEIGHT = 26
-local FIND_DUNGEON_STATUS_DEFAULT = "Rare+ unattuned loot, minus the slash-command archaeology."
-local FIND_DUNGEON_SUBTITLE_TEXT = "Pick a preset, or type your own filters below."
-local FIND_DUNGEON_MYTHIC_COLOR = { 0.35, 0.65, 1.00 }
-
-local FIND_DUNGEON_PRESETS = {
-    {
-        title = "Vanilla",
-        titleColor = { 1.00, 0.82, 0.00 },
-        buttons = {
-            { label = "Dungeons", filters = "vanilla notraid" },
-            { label = "Raids", filters = "vanilla raid" },
-        },
-    },
-    {
-        title = "TBC",
-        titleColor = { 0.28, 0.85, 0.55 },
-        buttons = {
-            { label = "Normal", filters = "tbc notheroic notmythic notraid" },
-            { label = "Heroic", filters = "tbc heroic" },
-            { label = "Raids", filters = "tbc raid" },
-            { label = "Mythic", filters = "tbc mythic", accentColor = FIND_DUNGEON_MYTHIC_COLOR },
-        },
-    },
-    {
-        title = "WotLK",
-        titleColor = { 0.45, 0.78, 1.00 },
-        buttons = {
-            { label = "Normal", filters = "wotlk notheroic notraid notmythic" },
-            { label = "Heroic", filters = "wotlk heroic notraid" },
-            { label = "Raids", filters = "wotlk raid" },
-            { label = "10M", filters = "wotlk raid not25-man" },
-            { label = "25M", filters = "wotlk raid 25-man" },
-            { label = "Mythic", filters = "wotlk mythic", accentColor = FIND_DUNGEON_MYTHIC_COLOR },
-        },
-    },
-}
 
 local function StyleRibbonButton(btn)
     btn:SetBackdrop({
@@ -1016,7 +1109,7 @@ end
 
 local function CreateRibbonTextButton(parent, label, tooltipTitle, tooltipSub, onClick)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(RIBBON_TEXT_BTN_WIDTH, RIBBON_BTN_HEIGHT)
+    btn:SetSize(DIM.RIBBON_TEXT_BTN_WIDTH, DIM.RIBBON_BTN_HEIGHT)
     StyleRibbonButton(btn)
 
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1031,7 +1124,7 @@ end
 
 local function CreateRibbonIconButton(parent, iconTexture, tooltipTitle, tooltipSub, onClick)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(RIBBON_ICON_BTN_SIZE, RIBBON_ICON_BTN_SIZE)
+    btn:SetSize(DIM.RIBBON_ICON_BTN_SIZE, DIM.RIBBON_ICON_BTN_SIZE)
     StyleRibbonButton(btn)
 
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
@@ -1070,7 +1163,7 @@ end
 
 local function CreateFindDungeonPopupButton(parent, width, label, tooltipTitle, tooltipSub, onClick, accentColor)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(width, FIND_DUNGEON_BUTTON_HEIGHT)
+    btn:SetSize(width, DIM.FIND_DUNGEON_BUTTON_HEIGHT)
     StyleRibbonButton(btn)
     btn._accentColor = accentColor
 
@@ -1109,9 +1202,9 @@ end
 local function BuildFindDungeonCommand(filters)
     local normalized = NormalizeFindDungeonFilters(filters)
     if normalized == "" then
-        return FIND_DUNGEON_BASE_COMMAND
+        return DIM.FIND_DUNGEON_BASE_COMMAND
     end
-    return FIND_DUNGEON_BASE_COMMAND .. " " .. normalized
+    return DIM.FIND_DUNGEON_BASE_COMMAND .. " " .. normalized
 end
 
 local function PrepareChatCommand(command)
@@ -1163,9 +1256,9 @@ end
 
 function Frame:CreateHeader()
     local header = CreateFrame("Frame", nil, mainFrame)
-    header:SetHeight(HEADER_HEIGHT)
-    header:SetPoint("TOPLEFT", PADDING, -PADDING)
-    header:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+    header:SetHeight(DIM.HEADER_HEIGHT)
+    header:SetPoint("TOPLEFT", DIM.PADDING, -DIM.PADDING)
+    header:SetPoint("TOPRIGHT", -DIM.PADDING, -DIM.PADDING)
 
     header.bg = header:CreateTexture(nil, "BACKGROUND")
     header.bg:SetAllPoints()
@@ -1186,19 +1279,19 @@ function Frame:CreateHeader()
     header.viewBtn = CreateRibbonTextButton(header, "Flow",
         "View Mode", "Click to cycle Grid / Flow / List / Bag",
         function() Frame:CycleView() end)
-    header.viewBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -RIBBON_GAP, 0)
+    header.viewBtn:SetPoint("RIGHT", header.closeBtn, "LEFT", -DIM.RIBBON_GAP, 0)
 
     header.sortBtn = CreateRibbonTextButton(header, "Sort",
         "Sort Mode", "Click to cycle the active sort",
         function() Frame:CycleSort() end)
-    header.sortBtn:SetPoint("RIGHT", header.viewBtn, "LEFT", -RIBBON_GAP, 0)
+    header.sortBtn:SetPoint("RIGHT", header.viewBtn, "LEFT", -DIM.RIBBON_GAP, 0)
 
     header.sortBtn:HookScript("OnEnter", function(self)
         local mode = Omni.Sorter and Omni.Sorter:GetDefaultMode() or "category"
         self._tooltipSub = "Current: " .. mode
     end)
 
-    header.optBtn = CreateRibbonIconButton(header, SETTINGS_ICON,
+    header.optBtn = CreateRibbonIconButton(header, DIM.SETTINGS_ICON,
         "Settings", "Open the OmniInventory settings panel",
         function()
             if Omni.Settings then
@@ -1207,36 +1300,36 @@ function Frame:CreateHeader()
                 print("|cFF00FF00OmniInventory|r: Settings not loaded")
             end
         end)
-    header.optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -RIBBON_GAP, 0)
+    header.optBtn:SetPoint("RIGHT", header.sortBtn, "LEFT", -DIM.RIBBON_GAP, 0)
 
-    header.keyBtn = CreateRibbonIconButton(header, KEYRING_ICON,
+    header.keyBtn = CreateRibbonIconButton(header, DIM.KEYRING_ICON,
         "Keyring", "Open keyring popup",
         function() Frame:ToggleKeyring() end)
-    header.keyBtn:SetPoint("RIGHT", header.optBtn, "LEFT", -RIBBON_GAP, 0)
+    header.keyBtn:SetPoint("RIGHT", header.optBtn, "LEFT", -DIM.RIBBON_GAP, 0)
 
     -- Separator line between ribbon actions and bag slot icons
     header.ribbonSep = header:CreateTexture(nil, "OVERLAY")
     header.ribbonSep:SetTexture("Interface\\Buttons\\WHITE8X8")
     header.ribbonSep:SetVertexColor(0.35, 0.35, 0.35, 1)
     header.ribbonSep:SetSize(1, 14)
-    header.ribbonSep:SetPoint("RIGHT", header.keyBtn, "LEFT", -RIBBON_SEP_GAP, 0)
+    header.ribbonSep:SetPoint("RIGHT", header.keyBtn, "LEFT", -DIM.RIBBON_SEP_GAP, 0)
 
     header.bagButtons = {}
     header.bagBar = CreateFrame("Frame", nil, header)
-    header.bagBar:SetSize((BAG_ICON_SIZE + 2) * #BAG_IDS, BAG_ICON_SIZE)
-    header.bagBar:SetPoint("RIGHT", header.ribbonSep, "LEFT", -RIBBON_SEP_GAP, 0)
+    header.bagBar:SetSize((DIM.BAG_ICON_SIZE + 2) * #DIM.BAG_IDS, DIM.BAG_ICON_SIZE)
+    header.bagBar:SetPoint("RIGHT", header.ribbonSep, "LEFT", -DIM.RIBBON_SEP_GAP, 0)
 
-    header.findDungeonBtn = CreateRibbonIconButton(header, FIND_DUNGEON_ICON,
+    header.findDungeonBtn = CreateRibbonIconButton(header, DIM.FIND_DUNGEON_ICON,
         "Dungeon Radar",
         "Sniff out attunable dungeons without typing dot commands like a cave scribe.",
         function() Frame:ToggleFindDungeonPopup() end)
-    header.findDungeonBtn:SetPoint("RIGHT", header.bagBar, "LEFT", -RIBBON_GAP, 0)
+    header.findDungeonBtn:SetPoint("RIGHT", header.bagBar, "LEFT", -DIM.RIBBON_GAP, 0)
     header.title:SetPoint("RIGHT", header.findDungeonBtn, "LEFT", -6, 0)
 
-    for index, bagID in ipairs(BAG_IDS) do
+    for index, bagID in ipairs(DIM.BAG_IDS) do
         local bagBtn = CreateFrame("Button", nil, header.bagBar)
-        bagBtn:SetSize(BAG_ICON_SIZE, BAG_ICON_SIZE)
-        bagBtn:SetPoint("LEFT", (index - 1) * (BAG_ICON_SIZE + 2), 0)
+        bagBtn:SetSize(DIM.BAG_ICON_SIZE, DIM.BAG_ICON_SIZE)
+        bagBtn:SetPoint("LEFT", (index - 1) * (DIM.BAG_ICON_SIZE + 2), 0)
         bagBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         bagBtn:RegisterForDrag("LeftButton")
         bagBtn.bagID = bagID
@@ -1319,7 +1412,7 @@ end
 function Frame:UpdateBagIconTextures()
     if not mainFrame or not mainFrame.header or not mainFrame.header.bagButtons then return end
 
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         local bagBtn = mainFrame.header.bagButtons[bagID]
         if bagBtn and bagBtn.icon then
             bagBtn.icon:SetTexture(GetBagIconTexture(bagID))
@@ -1334,7 +1427,7 @@ function Frame:UpdateBagIconVisuals()
         mainFrame.header.bagBar:Show()
     end
 
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         local bagBtn = mainFrame.header.bagButtons[bagID]
         if bagBtn then
             local r, g, b = 0.4, 0.4, 0.4
@@ -1360,7 +1453,7 @@ function Frame:SetFindDungeonStatus(message, r, g, b)
     end
 
     local status = mainFrame.findDungeonPopup.status
-    status:SetText(message or FIND_DUNGEON_STATUS_DEFAULT)
+    status:SetText(message or DIM.FIND_DUNGEON_STATUS_DEFAULT)
     status:SetTextColor(r or 0.78, g or 0.78, b or 0.78, 1)
 end
 
@@ -1416,7 +1509,7 @@ function Frame:CreateFindDungeonPopup()
     popup:SetFrameStrata("DIALOG")
     popup:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
     popup:SetPoint("TOPRIGHT", mainFrame, "TOPLEFT", -6, 0)
-    popup:SetSize(FIND_DUNGEON_POPUP_WIDTH, FIND_DUNGEON_POPUP_HEIGHT)
+    popup:SetSize(DIM.FIND_DUNGEON_POPUP_WIDTH, DIM.FIND_DUNGEON_POPUP_HEIGHT)
     popup:SetClampedToScreen(true)
     popup:EnableMouse(true)
     popup:SetBackdrop({
@@ -1429,17 +1522,17 @@ function Frame:CreateFindDungeonPopup()
     popup:SetBackdropBorderColor(0.45, 0.38, 0.15, 1)
 
     popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    popup.title:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -6)
+    popup.title:SetPoint("TOPLEFT", DIM.FIND_DUNGEON_POPUP_PAD, -6)
     popup.title:SetText("|cFFFFCC00Dungeon Radar|r")
 
     popup.subtitle = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     popup.subtitle:SetPoint("TOPLEFT", popup.title, "BOTTOMLEFT", 0, -4)
-    popup.subtitle:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -FIND_DUNGEON_POPUP_PAD - 18, -4)
-    popup.subtitle:SetWidth(FIND_DUNGEON_POPUP_WIDTH - (FIND_DUNGEON_POPUP_PAD * 2) - 18)
+    popup.subtitle:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -DIM.FIND_DUNGEON_POPUP_PAD - 18, -4)
+    popup.subtitle:SetWidth(DIM.FIND_DUNGEON_POPUP_WIDTH - (DIM.FIND_DUNGEON_POPUP_PAD * 2) - 18)
     popup.subtitle:SetJustifyH("LEFT")
     popup.subtitle:SetJustifyV("TOP")
     popup.subtitle:SetTextColor(0.78, 0.78, 0.78, 1)
-    popup.subtitle:SetText(FIND_DUNGEON_SUBTITLE_TEXT)
+    popup.subtitle:SetText(DIM.FIND_DUNGEON_SUBTITLE_TEXT)
 
     popup.closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
     popup.closeBtn:SetSize(18, 18)
@@ -1447,15 +1540,15 @@ function Frame:CreateFindDungeonPopup()
     popup.closeBtn:SetScript("OnClick", function() popup:Hide() end)
 
     popup.sections = {}
-    for index, section in ipairs(FIND_DUNGEON_PRESETS) do
+    for index, section in ipairs(DIM.FIND_DUNGEON_PRESETS) do
         local sectionFrame = CreateFrame("Frame", nil, popup)
-        sectionFrame:SetSize(FIND_DUNGEON_SECTION_WIDTH, 150)
+        sectionFrame:SetSize(DIM.FIND_DUNGEON_SECTION_WIDTH, 150)
         sectionFrame:SetPoint(
             "TOPLEFT",
             popup,
             "TOPLEFT",
-            FIND_DUNGEON_POPUP_PAD + (index - 1) * (FIND_DUNGEON_SECTION_WIDTH + FIND_DUNGEON_SECTION_GAP),
-            -(FIND_DUNGEON_POPUP_HEADER + 26)
+            DIM.FIND_DUNGEON_POPUP_PAD + (index - 1) * (DIM.FIND_DUNGEON_SECTION_WIDTH + DIM.FIND_DUNGEON_SECTION_GAP),
+            -(DIM.FIND_DUNGEON_POPUP_HEADER + 26)
         )
 
         sectionFrame.title = sectionFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1469,12 +1562,12 @@ function Frame:CreateFindDungeonPopup()
         )
 
         sectionFrame.buttons = {}
-        local yOffset = -FIND_DUNGEON_SECTION_TITLE_GAP
+        local yOffset = -DIM.FIND_DUNGEON_SECTION_TITLE_GAP
         for _, def in ipairs(section.buttons) do
             local command = BuildFindDungeonCommand(def.filters)
             local btn = CreateFindDungeonPopupButton(
                 sectionFrame,
-                FIND_DUNGEON_SECTION_WIDTH,
+                DIM.FIND_DUNGEON_SECTION_WIDTH,
                 def.label,
                 section.title .. " " .. def.label,
                 command,
@@ -1483,7 +1576,7 @@ function Frame:CreateFindDungeonPopup()
             )
             btn:SetPoint("TOPLEFT", 0, yOffset)
             table.insert(sectionFrame.buttons, btn)
-            yOffset = yOffset - (FIND_DUNGEON_BUTTON_HEIGHT + FIND_DUNGEON_BUTTON_GAP)
+            yOffset = yOffset - (DIM.FIND_DUNGEON_BUTTON_HEIGHT + DIM.FIND_DUNGEON_BUTTON_GAP)
         end
 
         popup.sections[index] = sectionFrame
@@ -1493,27 +1586,27 @@ function Frame:CreateFindDungeonPopup()
     popup.divider:SetTexture("Interface\\Buttons\\WHITE8X8")
     popup.divider:SetVertexColor(0.35, 0.35, 0.35, 1)
     popup.divider:SetHeight(1)
-    popup.divider:SetPoint("LEFT", FIND_DUNGEON_POPUP_PAD, 0)
-    popup.divider:SetPoint("RIGHT", -FIND_DUNGEON_POPUP_PAD, 0)
+    popup.divider:SetPoint("LEFT", DIM.FIND_DUNGEON_POPUP_PAD, 0)
+    popup.divider:SetPoint("RIGHT", -DIM.FIND_DUNGEON_POPUP_PAD, 0)
     popup.divider:SetPoint("TOP", popup, "TOP", 0, -212)
 
     popup.customLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    popup.customLabel:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -224)
+    popup.customLabel:SetPoint("TOPLEFT", DIM.FIND_DUNGEON_POPUP_PAD, -224)
     popup.customLabel:SetText("Custom filters")
 
     popup.customHint = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    popup.customHint:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -224)
+    popup.customHint:SetPoint("TOPRIGHT", -DIM.FIND_DUNGEON_POPUP_PAD, -224)
     popup.customHint:SetTextColor(0.65, 0.65, 0.65, 1)
     popup.customHint:SetText("Omni adds .finddungeon for you")
 
     popup.customRow = CreateFrame("Frame", nil, popup)
-    popup.customRow:SetHeight(FIND_DUNGEON_CUSTOM_ROW_HEIGHT)
-    popup.customRow:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -242)
-    popup.customRow:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -242)
+    popup.customRow:SetHeight(DIM.FIND_DUNGEON_CUSTOM_ROW_HEIGHT)
+    popup.customRow:SetPoint("TOPLEFT", DIM.FIND_DUNGEON_POPUP_PAD, -242)
+    popup.customRow:SetPoint("TOPRIGHT", -DIM.FIND_DUNGEON_POPUP_PAD, -242)
 
     popup.customInput = CreateFrame("Frame", nil, popup.customRow)
     popup.customInput:SetPoint("TOPLEFT", 0, 0)
-    popup.customInput:SetPoint("BOTTOMRIGHT", -FIND_DUNGEON_CUSTOM_RUN_WIDTH - 6, 0)
+    popup.customInput:SetPoint("BOTTOMRIGHT", -DIM.FIND_DUNGEON_CUSTOM_RUN_WIDTH - 6, 0)
     popup.customInput:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -1545,7 +1638,7 @@ function Frame:CreateFindDungeonPopup()
 
     popup.customRunBtn = CreateFindDungeonPopupButton(
         popup.customRow,
-        FIND_DUNGEON_CUSTOM_RUN_WIDTH,
+        DIM.FIND_DUNGEON_CUSTOM_RUN_WIDTH,
         "Run",
         "Custom .finddungeon",
         "Run the filters typed on the left.",
@@ -1554,19 +1647,19 @@ function Frame:CreateFindDungeonPopup()
     popup.customRunBtn:SetPoint("TOPRIGHT", 0, 0)
 
     popup.status = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    popup.status:SetHeight(FIND_DUNGEON_STATUS_HEIGHT)
-    popup.status:SetPoint("TOPLEFT", FIND_DUNGEON_POPUP_PAD, -272)
-    popup.status:SetPoint("TOPRIGHT", -FIND_DUNGEON_POPUP_PAD, -272)
+    popup.status:SetHeight(DIM.FIND_DUNGEON_STATUS_HEIGHT)
+    popup.status:SetPoint("TOPLEFT", DIM.FIND_DUNGEON_POPUP_PAD, -272)
+    popup.status:SetPoint("TOPRIGHT", -DIM.FIND_DUNGEON_POPUP_PAD, -272)
     popup.status:SetJustifyH("LEFT")
     popup.status:SetJustifyV("TOP")
     popup.status:SetTextColor(0.78, 0.78, 0.78, 1)
-    popup.status:SetText(FIND_DUNGEON_STATUS_DEFAULT)
+    popup.status:SetText(DIM.FIND_DUNGEON_STATUS_DEFAULT)
 
     popup:Hide()
     mainFrame.findDungeonPopup = popup
 
     popup:SetScript("OnShow", function()
-        Frame:SetFindDungeonStatus(FIND_DUNGEON_STATUS_DEFAULT, 0.78, 0.78, 0.78)
+        Frame:SetFindDungeonStatus(DIM.FIND_DUNGEON_STATUS_DEFAULT, 0.78, 0.78, 0.78)
     end)
 
     tinsert(UISpecialFrames, "OmniFindDungeonPopup")
@@ -1588,12 +1681,6 @@ end
 -- =============================================================================
 -- Keyring Popup (bagID -2)
 -- =============================================================================
-
-local KEYRING_COLS = 8
-local KEYRING_CELL = 30
-local KEYRING_CELL_GAP = 2
-local KEYRING_PAD = 10
-local KEYRING_HEADER = 22
 
 local function UpdateKeyringButtonForge(btn)
     -- ʕ ● ᴥ ●ʔ Keyring items have no forge/attune data; simplify styling ʕ ● ᴥ ●ʔ
@@ -1617,8 +1704,8 @@ function Frame:CreateKeyringPopup()
     -- even when the bag is docked near the bottom of the display. ✿ ʕ •ᴥ•ʔ
     popup:SetPoint("BOTTOMLEFT", mainFrame, "TOPLEFT", 0, 4)
     popup:SetSize(
-        KEYRING_PAD * 2 + KEYRING_COLS * (KEYRING_CELL + KEYRING_CELL_GAP) - KEYRING_CELL_GAP,
-        KEYRING_HEADER + KEYRING_PAD + KEYRING_CELL + KEYRING_CELL_GAP
+        DIM.KEYRING_PAD * 2 + DIM.KEYRING_COLS * (DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP) - DIM.KEYRING_CELL_GAP,
+        DIM.KEYRING_HEADER + DIM.KEYRING_PAD + DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP
     )
     popup:SetClampedToScreen(true)
     popup:EnableMouse(true)
@@ -1632,7 +1719,7 @@ function Frame:CreateKeyringPopup()
     popup:SetBackdropBorderColor(0.45, 0.38, 0.15, 1)
 
     popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    popup.title:SetPoint("TOPLEFT", KEYRING_PAD, -6)
+    popup.title:SetPoint("TOPLEFT", DIM.KEYRING_PAD, -6)
     popup.title:SetText("|cFFFFCC00Keyring|r")
 
     popup.empty = popup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1649,9 +1736,9 @@ function Frame:CreateKeyringPopup()
     -- to the keyring bag when a key is clicked. An explicit size keeps the
     -- child item buttons inside a non-zero hit region. ✿ ʕ •ᴥ•ʔ
     popup.container = CreateFrame("Frame", nil, popup)
-    popup.container:SetPoint("TOPLEFT", KEYRING_PAD, -(KEYRING_HEADER + 2))
-    popup.container:SetPoint("BOTTOMRIGHT", -KEYRING_PAD, KEYRING_PAD)
-    popup.container:SetID(KEYRING_BAG_ID)
+    popup.container:SetPoint("TOPLEFT", DIM.KEYRING_PAD, -(DIM.KEYRING_HEADER + 2))
+    popup.container:SetPoint("BOTTOMRIGHT", -DIM.KEYRING_PAD, DIM.KEYRING_PAD)
+    popup.container:SetID(DIM.KEYRING_BAG_ID)
 
     popup.buttons = {}
     popup:Hide()
@@ -1679,13 +1766,13 @@ function Frame:UpdateKeyring()
         return
     end
 
-    local slots = GetContainerNumSlots(KEYRING_BAG_ID) or 0
+    local slots = GetContainerNumSlots(DIM.KEYRING_BAG_ID) or 0
 
     if slots <= 0 then
         popup.empty:SetText("You have no keyring.")
         popup.empty:Show()
         for _, btn in ipairs(popup.buttons) do pcall(btn.Hide, btn) end
-        popup:SetSize(240, KEYRING_HEADER + KEYRING_PAD * 2 + 40)
+        popup:SetSize(240, DIM.KEYRING_HEADER + DIM.KEYRING_PAD * 2 + 40)
         return
     end
 
@@ -1696,21 +1783,21 @@ function Frame:UpdateKeyring()
         if not btn then
             btn = Omni.ItemButton and Omni.ItemButton:Create(popup.container)
                 or CreateFrame("Button", nil, popup.container, "ContainerFrameItemButtonTemplate")
-            btn:SetSize(KEYRING_CELL, KEYRING_CELL)
+            btn:SetSize(DIM.KEYRING_CELL, DIM.KEYRING_CELL)
             if btn.SetID then pcall(btn.SetID, btn, slotID) end
             popup.buttons[slotID] = btn
         end
 
-        local col = (slotID - 1) % KEYRING_COLS
-        local row = math.floor((slotID - 1) / KEYRING_COLS)
+        local col = (slotID - 1) % DIM.KEYRING_COLS
+        local row = math.floor((slotID - 1) / DIM.KEYRING_COLS)
         btn:ClearAllPoints()
         btn:SetPoint("TOPLEFT", popup.container, "TOPLEFT",
-            col * (KEYRING_CELL + KEYRING_CELL_GAP),
-            -row * (KEYRING_CELL + KEYRING_CELL_GAP))
+            col * (DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP),
+            -row * (DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP))
 
         local info
         if OmniC_Container then
-            info = OmniC_Container.GetContainerItemInfo(KEYRING_BAG_ID, slotID)
+            info = OmniC_Container.GetContainerItemInfo(DIM.KEYRING_BAG_ID, slotID)
         end
         if info then
             if Omni.Categorizer then
@@ -1730,9 +1817,9 @@ function Frame:UpdateKeyring()
         if btn then pcall(btn.Hide, btn) end
     end
 
-    local rows = math.ceil(slots / KEYRING_COLS)
-    local width = KEYRING_PAD * 2 + KEYRING_COLS * (KEYRING_CELL + KEYRING_CELL_GAP) - KEYRING_CELL_GAP
-    local height = KEYRING_HEADER + KEYRING_PAD + rows * (KEYRING_CELL + KEYRING_CELL_GAP)
+    local rows = math.ceil(slots / DIM.KEYRING_COLS)
+    local width = DIM.KEYRING_PAD * 2 + DIM.KEYRING_COLS * (DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP) - DIM.KEYRING_CELL_GAP
+    local height = DIM.KEYRING_HEADER + DIM.KEYRING_PAD + rows * (DIM.KEYRING_CELL + DIM.KEYRING_CELL_GAP)
     popup:SetSize(width, height)
 end
 
@@ -1756,7 +1843,7 @@ end
 
 function Frame:CreateSearchBar()
     local searchBar = CreateFrame("Frame", nil, mainFrame)
-    searchBar:SetHeight(SEARCH_HEIGHT)
+    searchBar:SetHeight(DIM.SEARCH_HEIGHT)
     searchBar:SetPoint("TOPLEFT", mainFrame.header, "BOTTOMLEFT", 0, -4)
     searchBar:SetPoint("TOPRIGHT", mainFrame.header, "BOTTOMRIGHT", 0, -4)
 
@@ -1800,19 +1887,6 @@ end
 -- Quick Filter Bar
 -- =============================================================================
 
-local FILTER_HEIGHT = 22
-local FILTER_BUTTON_HEIGHT = 18
-local FILTER_BUTTON_SPACING = 2
-local FILTER_BUTTON_START_X = 4
-local FILTER_TEXT_PADDING_MAX = 10
-local FILTER_TEXT_PADDING_MIN = 3
-local FILTER_BUTTON_MIN_WIDTH = 22
-local FILTER_FONT_PATH = "Fonts\\FRIZQT__.TTF"
-local FILTER_FONT_SIZES = { 10, 9, 8, 7 }
-local FILTER_ROW_SPACING = 2
-local FILTER_ROW_TOP_PAD = 2
-local FILTER_ROW_BOTTOM_PAD = 2
-local FILTER_NEUTRAL_COLOR = { 0.75, 0.75, 0.75 }
 local activeFilter = nil  -- Current active filter
 local activeFilterMissingState = {
     since = nil,
@@ -1826,11 +1900,11 @@ local activeFilterMissingState = {
 -- after them is generated dynamically from the categories currently
 -- present in the inventory (see RebuildFilterTabs). ✿ ʕ ◕ᴥ◕ ʔ
 local SPECIAL_FILTERS = {
-    { name = "All", filter = nil, color = FILTER_NEUTRAL_COLOR },
+    { name = "All", filter = nil, color = DIM.FILTER_NEUTRAL_COLOR },
 }
 
 local function ApplyFilterButtonVisual(btn, hovered)
-    local c = btn.colorTuple or FILTER_NEUTRAL_COLOR
+    local c = btn.colorTuple or DIM.FILTER_NEUTRAL_COLOR
     local r, g, b = c[1], c[2], c[3]
     local isActive = (activeFilter == btn.filterName)
     local bgIntensity
@@ -1851,7 +1925,7 @@ end
 
 local function CreateFilterButton(parent)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetHeight(FILTER_BUTTON_HEIGHT)
+    btn:SetHeight(DIM.FILTER_BUTTON_HEIGHT)
     btn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -1874,12 +1948,12 @@ local function ResolveCategoryColor(name)
             return { r, g, b }
         end
     end
-    return FILTER_NEUTRAL_COLOR
+    return DIM.FILTER_NEUTRAL_COLOR
 end
 
 function Frame:CreateFilterBar()
     local filterBar = CreateFrame("Frame", nil, mainFrame)
-    filterBar:SetHeight(FILTER_HEIGHT)
+    filterBar:SetHeight(DIM.FILTER_HEIGHT)
     filterBar:SetPoint("TOPLEFT", mainFrame.searchBar, "BOTTOMLEFT", 0, -2)
     filterBar:SetPoint("TOPRIGHT", mainFrame.searchBar, "BOTTOMRIGHT", 0, -2)
 
@@ -1949,8 +2023,8 @@ function Frame:RebuildFilterTabs(presentCategories)
     if not barWidth or barWidth <= 0 then
         barWidth = mainFrame:GetWidth() - 16
     end
-    local rowMaxX = barWidth - FILTER_BUTTON_START_X
-    local availableWidth = barWidth - FILTER_BUTTON_START_X * 2
+    local rowMaxX = barWidth - DIM.FILTER_BUTTON_START_X
+    local availableWidth = barWidth - DIM.FILTER_BUTTON_START_X * 2
 
     -- Pre-create buttons so we can measure
     for i, def in ipairs(defs) do
@@ -1967,20 +2041,20 @@ function Frame:RebuildFilterTabs(presentCategories)
         local total = 0
         for i, def in ipairs(defs) do
             local btn = filterBar.buttons[i]
-            btn.text:SetFont(FILTER_FONT_PATH, fontSize)
-            local w = math.max(btn.text:GetStringWidth() + padding * 2, FILTER_BUTTON_MIN_WIDTH)
+            btn.text:SetFont(DIM.FILTER_FONT_PATH, fontSize)
+            local w = math.max(btn.text:GetStringWidth() + padding * 2, DIM.FILTER_BUTTON_MIN_WIDTH)
             widths[i] = w
             total = total + w
         end
-        total = total + FILTER_BUTTON_SPACING * math.max(#defs - 1, 0)
+        total = total + DIM.FILTER_BUTTON_SPACING * math.max(#defs - 1, 0)
         return widths, total
     end
 
     -- Walk (fontSize, padding) combinations from most generous to
     -- tightest; stop at the first combo where everything fits.
     local chosenWidths = nil
-    for _, fontSize in ipairs(FILTER_FONT_SIZES) do
-        for padding = FILTER_TEXT_PADDING_MAX, FILTER_TEXT_PADDING_MIN, -1 do
+    for _, fontSize in ipairs(DIM.FILTER_FONT_SIZES) do
+        for padding = DIM.FILTER_TEXT_PADDING_MAX, DIM.FILTER_TEXT_PADDING_MIN, -1 do
             local widths, total = measureForFontAndPadding(fontSize, padding)
             if total <= availableWidth then
                 chosenWidths = widths
@@ -1994,35 +2068,35 @@ function Frame:RebuildFilterTabs(presentCategories)
     -- allow the wrap logic below to push the leftovers onto row 2.
     if not chosenWidths then
         chosenWidths = measureForFontAndPadding(
-            FILTER_FONT_SIZES[#FILTER_FONT_SIZES],
-            FILTER_TEXT_PADDING_MIN
+            DIM.FILTER_FONT_SIZES[#DIM.FILTER_FONT_SIZES],
+            DIM.FILTER_TEXT_PADDING_MIN
         )
     end
 
-    local x = FILTER_BUTTON_START_X
+    local x = DIM.FILTER_BUTTON_START_X
     local row = 0
     for i, def in ipairs(defs) do
         local btn = filterBar.buttons[i]
         local finalWidth = chosenWidths[i]
 
         -- Wrap only if we couldn't shrink enough to fit on one row.
-        if x > FILTER_BUTTON_START_X and (x + finalWidth) > rowMaxX then
+        if x > DIM.FILTER_BUTTON_START_X and (x + finalWidth) > rowMaxX then
             row = row + 1
-            x = FILTER_BUTTON_START_X
+            x = DIM.FILTER_BUTTON_START_X
         end
 
-        local y = -(FILTER_ROW_TOP_PAD + row * (FILTER_BUTTON_HEIGHT + FILTER_ROW_SPACING))
+        local y = -(DIM.FILTER_ROW_TOP_PAD + row * (DIM.FILTER_BUTTON_HEIGHT + DIM.FILTER_ROW_SPACING))
 
         btn:ClearAllPoints()
         btn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", x, y)
-        btn:SetSize(finalWidth, FILTER_BUTTON_HEIGHT)
+        btn:SetSize(finalWidth, DIM.FILTER_BUTTON_HEIGHT)
 
         btn.filterName = def.filter
         btn.colorTuple = def.color
         btn:Show()
         ApplyFilterButtonVisual(btn, false)
 
-        x = x + finalWidth + FILTER_BUTTON_SPACING
+        x = x + finalWidth + DIM.FILTER_BUTTON_SPACING
     end
 
     for i = #defs + 1, #filterBar.buttons do
@@ -2030,11 +2104,11 @@ function Frame:RebuildFilterTabs(presentCategories)
     end
 
     local rowCount = (#defs > 0) and (row + 1) or 1
-    local barHeight = FILTER_ROW_TOP_PAD
-        + rowCount * FILTER_BUTTON_HEIGHT
-        + math.max(rowCount - 1, 0) * FILTER_ROW_SPACING
-        + FILTER_ROW_BOTTOM_PAD
-    filterBar:SetHeight(math.max(barHeight, FILTER_HEIGHT))
+    local barHeight = DIM.FILTER_ROW_TOP_PAD
+        + rowCount * DIM.FILTER_BUTTON_HEIGHT
+        + math.max(rowCount - 1, 0) * DIM.FILTER_ROW_SPACING
+        + DIM.FILTER_ROW_BOTTOM_PAD
+    filterBar:SetHeight(math.max(barHeight, DIM.FILTER_HEIGHT))
 
     -- ʕ •ᴥ•ʔ✿ If the active filter's category vanished from the bag
     -- (e.g. vendored every Junk item), fall back to "All" so the user
@@ -2086,7 +2160,6 @@ function Frame:SetQuickFilter(filterName)
     activeFilterMissingState.since = nil
     activeFilterMissingState.count = 0
     self:InvalidateRenderCaches()
-    bagViewNeedsFreshSort = true
 
     if mainFrame.filterBar and mainFrame.filterBar.buttons then
         for _, btn in ipairs(mainFrame.filterBar.buttons) do
@@ -2191,7 +2264,7 @@ end
 function Frame:CreateContentArea()
     local content = CreateFrame("ScrollFrame", "OmniContentScroll", mainFrame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", mainFrame.filterBar, "BOTTOMLEFT", 0, -4)
-    content:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -PADDING, PADDING + FOOTER_HEIGHT + 4)
+    content:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -DIM.PADDING, DIM.PADDING + DIM.FOOTER_HEIGHT + 4)
 
     -- Scroll child
     local scrollChild = CreateFrame("Frame", "OmniContentChild", content)
@@ -2238,7 +2311,7 @@ function Frame:CreateContentArea()
         mainFrame.itemContainers[bagID] = f
         return f
     end
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         MakeItemContainer(bagID)
     end
     MakeItemContainer(-1)
@@ -2279,6 +2352,11 @@ Frame._GetItemContainer = GetItemContainer
 
 local OVERFLOW_ROW_GAP = 4
 local EMPTY_SLOT_ALPHA = 1
+-- ʕ •ᴥ•ʔ✿ show_open: sync-paint first N flow cells; defer SetItem for the rest ✿ ʕ •ᴥ•ʔ
+local FLOW_SHOW_OPEN_DEFER_AFTER = 36
+
+local deferredFlowPaintQueue = {}
+local deferredFlowPaintFrame
 
 local function GetSlotButton(bagID, slotID)
     local byBag = slotButtons[bagID]
@@ -2350,7 +2428,7 @@ end
 local function EnsureSlotButtons()
     if InCombat() and not Frame._combatGridBootstrap then return end
 
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         slotButtons[bagID] = slotButtons[bagID] or {}
         local byBag = slotButtons[bagID]
         local numSlots = GetContainerNumSlots(bagID) or 0
@@ -2375,10 +2453,12 @@ end
 Frame._EnsureSlotButtons = EnsureSlotButtons
 
 local function IterateSlotButtons(callback)
-    for _, bagID in ipairs(BAG_IDS) do
+    for _, bagID in ipairs(DIM.BAG_IDS) do
         local byBag = slotButtons[bagID]
         if byBag then
-            for slotID, btn in pairs(byBag) do
+            local numSlots = GetContainerNumSlots(bagID) or 0
+            for slotID = 1, numSlots do
+                local btn = byBag[slotID]
                 if btn then
                     callback(bagID, slotID, btn)
                 end
@@ -2387,6 +2467,130 @@ local function IterateSlotButtons(callback)
     end
 end
 Frame._IterateSlotButtons = IterateSlotButtons
+
+-- ʕ •ᴥ•ʔ✿ Live slot query after AH embed / fast-show — layout often ran first ✿ ʕ •ᴥ•ʔ
+local function RefreshSlotButtonFromLiveContainer(bagID, slotID, btn)
+    if not btn or not OmniC_Container or not bagID or not slotID then
+        return
+    end
+    local info = OmniC_Container.GetContainerItemInfo(bagID, slotID)
+    if not info then
+        return
+    end
+    if Omni.Categorizer then
+        info.category = Omni.Categorizer:GetCategory(info)
+    end
+    if btn.itemInfo then
+        info.isQuickFiltered = btn.itemInfo.isQuickFiltered
+    end
+    SetButtonItem(btn, info)
+end
+
+local function RefreshVisibleAttuneOverlaysFromSlots()
+    local attune = OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.attune
+    if attune and attune.enabled == false then
+        return
+    end
+    if not _G.GetItemLinkAttuneProgress then
+        return
+    end
+    IterateSlotButtons(function(bagID, slotID, btn)
+        if btn and btn.itemInfo and not btn.itemInfo.__empty then
+            RefreshSlotButtonFromLiveContainer(bagID, slotID, btn)
+        end
+    end)
+end
+
+-- ʕ •ᴥ•ʔ✿ List view has no itemButtons; flow/grid/bag only paint visible slot widgets ✿ ʕ •ᴥ•ʔ
+local function RunAttuneOverlayRefresh()
+    local attune = OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.attune
+    if attune and attune.enabled == false then
+        return
+    end
+    if not _G.GetItemLinkAttuneProgress then
+        return
+    end
+    if currentView == "list" or #itemButtons == 0 then
+        RefreshVisibleAttuneOverlaysFromSlots()
+        return
+    end
+    for i = 1, #itemButtons do
+        local btn = itemButtons[i]
+        if btn and btn.bagID and btn.slotID and btn.itemInfo and not btn.itemInfo.__empty then
+            RefreshSlotButtonFromLiveContainer(btn.bagID, btn.slotID, btn)
+        end
+    end
+end
+
+local attuneOverlayDeferFrame
+local function ScheduleDeferredAttuneOverlayRefresh()
+    local attune = OmniInventoryDB and OmniInventoryDB.global and OmniInventoryDB.global.attune
+    if attune and attune.enabled == false then
+        return
+    end
+    if not _G.GetItemLinkAttuneProgress then
+        return
+    end
+    if not attuneOverlayDeferFrame then
+        attuneOverlayDeferFrame = CreateFrame("Frame")
+    end
+    attuneOverlayDeferFrame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        RunAttuneOverlayRefresh()
+    end)
+end
+
+local function CancelDeferredFlowItemPaint()
+    if deferredFlowPaintFrame then
+        deferredFlowPaintFrame:SetScript("OnUpdate", nil)
+    end
+    ClearArray(deferredFlowPaintQueue)
+end
+
+local function ScheduleDeferredFlowItemPaint()
+    if #deferredFlowPaintQueue == 0 then
+        return
+    end
+    if not deferredFlowPaintFrame then
+        deferredFlowPaintFrame = CreateFrame("Frame")
+    end
+    deferredFlowPaintFrame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        if not mainFrame or not mainFrame:IsShown() then
+            ClearArray(deferredFlowPaintQueue)
+            return
+        end
+        if Omni.ItemButton and Omni.ItemButton.BeginItemRenderBatch then
+            Omni.ItemButton:BeginItemRenderBatch()
+        end
+        for i = 1, #deferredFlowPaintQueue do
+            local pair = deferredFlowPaintQueue[i]
+            local btn = pair[1]
+            local slotItem = pair[2]
+            deferredFlowPaintQueue[i] = nil
+            if btn and slotItem then
+                local ok = pcall(function()
+                    SetButtonItem(btn, slotItem)
+                    btn._oiRenderKey = ItemRenderKey(slotItem)
+                    btn:Show()
+                    local a = slotItem.__empty and EMPTY_SLOT_ALPHA or 1
+                    btn:SetAlpha(a)
+                end)
+                if not ok then
+                    pcall(SetButtonItem, btn, nil)
+                    if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                    pcall(btn.Show, btn)
+                    btn._oiRenderKey = "error"
+                end
+            end
+        end
+        ClearArray(deferredFlowPaintQueue)
+        if Omni.ItemButton and Omni.ItemButton.EndItemRenderBatch then
+            Omni.ItemButton:EndItemRenderBatch()
+        end
+        ScheduleDeferredAttuneOverlayRefresh()
+    end)
+end
 
 function Frame:_HasAnySlotButtons()
     for _, byBag in pairs(slotButtons) do
@@ -2438,10 +2642,6 @@ end
 -- =============================================================================
 
 -- ʕ •ᴥ•ʔ✿ Footer custom launcher buttons ✿ ʕ •ᴥ•ʔ
-local FOOTER_BTN_SIZE = 20
-local FOOTER_BTN_GAP = 3
-local FOOTER_SEP_GAP = 5
-
 local FOOTER_CUSTOM_BUTTONS = {
     {
         key     = "resetInstances",
@@ -2457,13 +2657,21 @@ local FOOTER_CUSTOM_BUTTONS = {
             end
         end,
     },
-    { key = "transmog",     icon = "Interface\\Icons\\INV_Mask_01",             title = "Transmog",       sub = "Open the transmog window",     fn = "OpenTransmog"        },
-    { key = "perks",        icon = "Interface\\Icons\\Spell_Arcane_MindMastery", title = "Perks",          sub = "Open the perk manager",         fn = "OpenPerkMgr"         },
-    { key = "lootFilter",   icon = "Interface\\Icons\\INV_Misc_Coin_17",        title = "Loot Filter",    sub = "Open the loot filter",          fn = "OpenLootFilter"      },
-    { key = "resourceBank", icon = "Interface\\Icons\\INV_Misc_PlatnumDisks",   title = "Resource Bank",  sub = "Open resource summary",         fn = "OpenResourceSummary" },
-    { key = "lootDb",       icon = "Interface\\Icons\\INV_Misc_Coin_18",        title = "Loot Database",  sub = "Search the loot database",      fn = "OpenLootDb"          },
-    { key = "attuneMgr",    icon = "Interface\\Icons\\Ability_Townwatch",       title = "Attunables",     sub = "Open the attunable item list",  fn = "OpenAttuneMgr"       },
-    { key = "leaderboard",  icon = "Interface\\Icons\\INV_Misc_Trophy_Argent",  title = "Leaderboard",    sub = "Open the leaderboards",         fn = "OpenLeaderboards"    },
+    { key = "transmog",     icon = "Interface\\Icons\\INV_Mask_01",             title = "Transmog",       sub = "Open the transmog window",         fn = "OpenTransmog",        toggleFrame = "TransmogFrame"   },
+    { key = "perks",        icon = "Interface\\Icons\\Spell_Arcane_MindMastery", title = "Perks",          sub = "Open the perk manager",            fn = "OpenPerkMgr",         toggleFrame = "PerkMgrFrame"    },
+    { key = "lootFilter",   icon = "Interface\\Icons\\INV_Misc_Coin_17",        title = "Loot Filter",    sub = "Open the loot filter",             fn = "OpenLootFilter",      toggleFrame = "LFilterFrame"    },
+    { key = "resourceBank", icon = "Interface\\Icons\\INV_Misc_PlatnumDisks",   title = "Resource Bank",  sub = "Open resource summary",            fn = "OpenResourceSummary", toggleFrame = "RBankFrame"      },
+    { key = "lootDb",       icon = "Interface\\Icons\\INV_Misc_Coin_18",        title = "Loot Database",  sub = "Search the loot database",         fn = "OpenLootDb",          toggleFrame = "LootDBFrame"     },
+    { key = "attuneMgr",    icon = "Interface\\Icons\\Ability_Townwatch",       title = "Attunables",     sub = "Open the attunable item list",     fn = "OpenAttuneMgr",       toggleFrame = "AttuneMgrFrame"  },
+    { key = "leaderboard",  icon = "Interface\\Icons\\INV_Misc_Trophy_Argent",  title = "Leaderboard",    sub = "Open the leaderboards",            fn = "OpenLeaderboards",    toggleFrame = "LBoardFrame"     },
+    {
+        key         = "bountyHunter",
+        icon        = "Interface\\Icons\\INV_Misc_Coin_05",
+        title       = "Bounty Hunter Board (Preview Only)",
+        sub         = "Browse posted bounties only. You cannot place or claim bounties here—preview lets you view the board.",
+        fn          = "OpenBountyMenu",
+        toggleFrame = "BHunterFrame",
+    },
 }
 
 -- ʕ •ᴥ•ʔ✿ Third-party addon launcher ribbon (each entry owns its click).
@@ -2551,6 +2759,27 @@ local FOOTER_ADDON_BUTTONS = {
             end
         end,
     },
+    {
+        key         = "qtRunner",
+        icon        = "Interface\\Icons\\Spell_Arcane_TeleportOrgrimmar",
+        title       = "QTRunner",
+        sub         = "Open or close QTRunner settings",
+        isAvailable = function()
+            return type(_G.qtRunner) == "table" and type(_G.qtRunner.ShowSettings) == "function"
+        end,
+        onClick = function()
+            local opts = _G.qtRunnerOptionsFrame
+            if opts and opts.IsShown and opts:IsShown() and opts.Hide then
+                opts:Hide()
+                return
+            end
+            if type(_G.qtRunner) == "table" and type(_G.qtRunner.ShowSettings) == "function" then
+                _G.qtRunner:ShowSettings()
+            else
+                print("|cFF00FF00OmniInventory|r: QTRunner is not loaded.")
+            end
+        end,
+    },
 }
 
 local function IsFooterCustomButtonEnabled(key)
@@ -2600,7 +2829,7 @@ end
 
 local function CreateFooterMiniButton(parent, def)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(FOOTER_BTN_SIZE, FOOTER_BTN_SIZE)
+    btn:SetSize(DIM.FOOTER_BTN_SIZE, DIM.FOOTER_BTN_SIZE)
 
     local trim = def.trimIcon ~= false
     btn:SetNormalTexture(def.icon)
@@ -2636,20 +2865,24 @@ local function CreateFooterMiniButton(parent, def)
     else
         btn.__openFn = def.fn
         btn.__closeFn = def.fn:gsub("^Open", "Close")
-        btn.__isOpen = false
+        btn.__toggleFrame = def.toggleFrame
         btn:SetScript("OnClick", function(self)
             local openFn = _G[self.__openFn]
             local closeFn = _G[self.__closeFn]
+            local toggleFrName = self.__toggleFrame
+            local toggleFr = toggleFrName and _G[toggleFrName]
 
-            if self.__isOpen and type(closeFn) == "function" then
-                closeFn()
-                self.__isOpen = false
+            if toggleFr and toggleFr.IsShown and toggleFr:IsShown() then
+                if type(closeFn) == "function" then
+                    closeFn()
+                elseif toggleFr.Hide then
+                    toggleFr:Hide()
+                end
                 return
             end
 
             if type(openFn) == "function" then
                 openFn()
-                self.__isOpen = true
             else
                 print("|cFF00FF00OmniInventory|r: " .. self.__openFn .. "() is not available on this client.")
             end
@@ -2662,23 +2895,6 @@ local function CreateFooterMiniButton(parent, def)
     end
     return btn
 end
-
-local HONOR_PER_ARENA_POINT = 62
-local STONE_KEEPER_SHARDS_PER_100K_HONOR = 300
-local STONE_KEEPER_SHARD_ITEM_ID = 43228
-local WINTERGRASP_MARK_OF_HONOR_ITEM_ID = 43589
-
-local TRACKED_TOOLTIP_CURRENCIES = {
-    { key = "frost",      label = "Emblem of Frost",            itemID = 49426, color = { 0.70, 0.95, 1.00 } },
-    { key = "triumph",    label = "Emblem of Triumph",          itemID = 47241, color = { 1.00, 0.90, 0.45 } },
-    { key = "conquest",   label = "Emblem of Conquest",         itemID = 45624, color = { 1.00, 0.78, 0.42 } },
-    { key = "valor",      label = "Emblem of Valor",            itemID = 40753, color = { 1.00, 0.70, 0.30 } },
-    { key = "heroism",    label = "Emblem of Heroism",          itemID = 40752, color = { 0.90, 0.85, 0.80 } },
-    { key = "justice",    label = "Badge of Justice",           itemID = 29434, color = { 0.95, 0.95, 0.95 } },
-    { key = "seal",       label = "Champion's Seal",            itemID = 24131, color = { 0.95, 0.82, 0.35 } },
-    { key = "venture",    label = "Venture Coin",               itemID = 37836, color = { 0.40, 1.00, 0.70 } },
-    { key = "wgMark",     label = "Wintergrasp Mark of Honor",  itemID = WINTERGRASP_MARK_OF_HONOR_ITEM_ID, color = { 0.65, 0.90, 1.00 } },
-}
 
 local function AddThousandsSeparators(value)
     local str = tostring(math.floor(tonumber(value) or 0))
@@ -2764,7 +2980,7 @@ local function GetStoneKeeperShardCount()
         end
     end
     if GetItemCount then
-        return GetItemCount(STONE_KEEPER_SHARD_ITEM_ID, true) or 0
+        return GetItemCount(DIM.STONE_KEEPER_SHARD_ITEM_ID, true) or 0
     end
     return 0
 end
@@ -2794,8 +3010,8 @@ local function CollectTooltipCurrencies()
         },
     }
 
-    for i = 1, #TRACKED_TOOLTIP_CURRENCIES do
-        local entry = TRACKED_TOOLTIP_CURRENCIES[i]
+    for i = 1, #DIM.TRACKED_TOOLTIP_CURRENCIES do
+        local entry = DIM.TRACKED_TOOLTIP_CURRENCIES[i]
         rows[#rows + 1] = {
             key = entry.key,
             label = entry.label,
@@ -2809,7 +3025,7 @@ local function CollectTooltipCurrencies()
         key = "stoneKeeperShard",
         label = "Stone Keeper's Shard",
         value = GetStoneKeeperShardCount(),
-        itemID = STONE_KEEPER_SHARD_ITEM_ID,
+        itemID = DIM.STONE_KEEPER_SHARD_ITEM_ID,
         color = { 0.80, 0.80, 1.00 },
     }
 
@@ -2845,9 +3061,9 @@ local function ShowFooterMoneyTooltip(owner)
 
         local honor = GetCurrentHonorPoints()
         local stoneKeeperShards = GetStoneKeeperShardCount()
-        local honorFromShards = math.floor(stoneKeeperShards * (100000 / STONE_KEEPER_SHARDS_PER_100K_HONOR))
+        local honorFromShards = math.floor(stoneKeeperShards * (100000 / DIM.STONE_KEEPER_SHARDS_PER_100K_HONOR))
         local totalHonor = honor + honorFromShards
-        local arenaFromTotalHonor = math.floor(totalHonor / HONOR_PER_ARENA_POINT)
+        local arenaFromTotalHonor = math.floor(totalHonor / DIM.HONOR_PER_ARENA_POINT)
 
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Conversions", 0.8, 0.7, 1)
@@ -2879,9 +3095,9 @@ end
 
 function Frame:CreateFooter()
     local footer = CreateFrame("Frame", nil, mainFrame)
-    footer:SetHeight(FOOTER_HEIGHT)
-    footer:SetPoint("BOTTOMLEFT", PADDING, PADDING)
-    footer:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    footer:SetHeight(DIM.FOOTER_HEIGHT)
+    footer:SetPoint("BOTTOMLEFT", DIM.PADDING, DIM.PADDING)
+    footer:SetPoint("BOTTOMRIGHT", -DIM.PADDING, DIM.PADDING)
 
     footer.bg = footer:CreateTexture(nil, "BACKGROUND")
     footer.bg:SetAllPoints()
@@ -2898,7 +3114,7 @@ function Frame:CreateFooter()
     -- ʕ •ᴥ•ʔ✿ FontString has no EnableMouse in 3.3.5a — use a button as hit box for the ! ✿ ʕ •ᴥ•ʔ
     footer.bagFullAlert = CreateFrame("Button", nil, footer)
     footer.bagFullAlert:SetPoint("LEFT", 6, 0)
-    footer.bagFullAlert:SetHeight(FOOTER_HEIGHT)
+    footer.bagFullAlert:SetHeight(DIM.FOOTER_HEIGHT)
     footer.bagFullAlert:SetWidth(16)
     footer.bagFullAlert:EnableMouse(true)
     footer.bagFullAlert.label = footer.bagFullAlert:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2966,7 +3182,7 @@ function Frame:CreateFooter()
 
     footer.moneyHitBox = CreateFrame("Button", nil, footer)
     footer.moneyHitBox:SetPoint("RIGHT", footer.money, "RIGHT", 2, 0)
-    footer.moneyHitBox:SetHeight(FOOTER_HEIGHT)
+    footer.moneyHitBox:SetHeight(DIM.FOOTER_HEIGHT)
     footer.moneyHitBox:SetWidth(90)
     footer.moneyHitBox:EnableMouse(true)
     footer.moneyHitBox:SetScript("OnEnter", function(self)
@@ -2992,7 +3208,7 @@ function Frame:CreateFooter()
     footer.overflowPopup:Hide()
 
     footer.overflowBtn = CreateFrame("Button", nil, footer)
-    footer.overflowBtn:SetSize(FOOTER_BTN_SIZE, FOOTER_BTN_SIZE)
+    footer.overflowBtn:SetSize(DIM.FOOTER_BTN_SIZE, DIM.FOOTER_BTN_SIZE)
     footer.overflowBtn:SetNormalTexture("Interface\\Buttons\\WHITE8X8")
     local overflowTex = footer.overflowBtn:GetNormalTexture()
     if overflowTex then
@@ -3021,9 +3237,6 @@ end
 
 -- ʕノ•ᴥ•ʔノ Lays out custom + addon launcher buttons between AH embed host and money.
 -- Buttons that don't fit are re-parented into an overflow flyout, toggled by a » tile.
-local SEP_SLOT_WIDTH     = 1 + FOOTER_SEP_GAP * 2
-local MONEY_SAFETY_GAP   = 8
-local OVERFLOW_SLOT_COST = FOOTER_BTN_SIZE + FOOTER_BTN_GAP
 
 local function SyncBagFullAlertHitBox(footer)
     local b = footer.bagFullAlert
@@ -3067,7 +3280,7 @@ local function ComputeRibbonAvailableWidth(footer)
         leftEdge = 6 + slotsBlock
     end
 
-    local moneyReserve = (footer.money:GetStringWidth() or 0) + 6 + MONEY_SAFETY_GAP
+    local moneyReserve = (footer.money:GetStringWidth() or 0) + 6 + DIM.MONEY_SAFETY_GAP
     return footerWidth - leftEdge - moneyReserve
 end
 
@@ -3113,25 +3326,25 @@ function Frame:UpdateFooterCustomButtons()
     local inlineAnchor, inlineAnchorGap
     if footer.attuneHelperHost and footer.attuneHelperHost:IsShown() then
         inlineAnchor    = footer.attuneHelperHost
-        inlineAnchorGap = FOOTER_SEP_GAP
+        inlineAnchorGap = DIM.FOOTER_SEP_GAP
     else
         inlineAnchor    = footer.slots
-        inlineAnchorGap = FOOTER_SEP_GAP + 2
+        inlineAnchorGap = DIM.FOOTER_SEP_GAP + 2
     end
 
     local items = CollectRibbonItems(footer)
     local totalNeededWidth = 0
     for _, item in ipairs(items) do
         if item.kind == "sep" then
-            totalNeededWidth = totalNeededWidth + SEP_SLOT_WIDTH
+            totalNeededWidth = totalNeededWidth + DIM.SEP_SLOT_WIDTH
         else
-            totalNeededWidth = totalNeededWidth + FOOTER_BTN_SIZE + FOOTER_BTN_GAP
+            totalNeededWidth = totalNeededWidth + DIM.FOOTER_BTN_SIZE + DIM.FOOTER_BTN_GAP
         end
     end
 
     local available     = ComputeRibbonAvailableWidth(footer)
     local mustOverflow  = totalNeededWidth > available
-    local inlineBudget  = mustOverflow and (available - OVERFLOW_SLOT_COST) or available
+    local inlineBudget  = mustOverflow and (available - DIM.OVERFLOW_SLOT_COST) or available
 
     local inlinePrev        = nil
     local runningWidth      = 0
@@ -3143,7 +3356,7 @@ function Frame:UpdateFooterCustomButtons()
         obj:SetParent(footer)
         if kind == "sep" then
             if inlinePrev then
-                obj:SetPoint("LEFT", inlinePrev, "RIGHT", FOOTER_SEP_GAP, 0)
+                obj:SetPoint("LEFT", inlinePrev, "RIGHT", DIM.FOOTER_SEP_GAP, 0)
             else
                 obj:SetPoint("LEFT", inlineAnchor, "RIGHT", inlineAnchorGap, 0)
             end
@@ -3152,7 +3365,7 @@ function Frame:UpdateFooterCustomButtons()
             inlinePrev = obj
         else
             if inlinePrev then
-                local gap = (inlinePrev == lastInlineSep) and FOOTER_SEP_GAP or FOOTER_BTN_GAP
+                local gap = (inlinePrev == lastInlineSep) and DIM.FOOTER_SEP_GAP or DIM.FOOTER_BTN_GAP
                 obj:SetPoint("LEFT", inlinePrev, "RIGHT", gap, 0)
             else
                 obj:SetPoint("LEFT", inlineAnchor, "RIGHT", inlineAnchorGap, 0)
@@ -3163,13 +3376,13 @@ function Frame:UpdateFooterCustomButtons()
     end
 
     for i, item in ipairs(items) do
-        local cost = (item.kind == "sep") and SEP_SLOT_WIDTH or (FOOTER_BTN_SIZE + FOOTER_BTN_GAP)
+        local cost = (item.kind == "sep") and DIM.SEP_SLOT_WIDTH or (DIM.FOOTER_BTN_SIZE + DIM.FOOTER_BTN_GAP)
         local nextItem = items[i + 1]
 
         local wouldOverflow = (runningWidth + cost) > inlineBudget
         -- A sep alone at the tail is meaningless; if the next button won't fit, overflow the sep too
         if item.kind == "sep" and nextItem and nextItem.kind == "btn" then
-            local btnCost = FOOTER_BTN_SIZE + FOOTER_BTN_GAP
+            local btnCost = DIM.FOOTER_BTN_SIZE + DIM.FOOTER_BTN_GAP
             if (runningWidth + cost + btnCost) > inlineBudget then
                 wouldOverflow = true
             end
@@ -3190,15 +3403,15 @@ function Frame:UpdateFooterCustomButtons()
 
     if mustOverflow and #overflowButtons > 0 then
         local attachAnchor = inlinePrev or inlineAnchor
-        local attachGap    = inlinePrev and FOOTER_BTN_GAP or inlineAnchorGap
+        local attachGap    = inlinePrev and DIM.FOOTER_BTN_GAP or inlineAnchorGap
         footer.overflowBtn:ClearAllPoints()
         footer.overflowBtn:SetPoint("LEFT", attachAnchor, "RIGHT", attachGap, 0)
         footer.overflowBtn:Show()
 
         local popup = footer.overflowPopup
         local popupPad = 4
-        local popupWidth = popupPad * 2 + #overflowButtons * FOOTER_BTN_SIZE + (#overflowButtons - 1) * FOOTER_BTN_GAP
-        local popupHeight = popupPad * 2 + FOOTER_BTN_SIZE
+        local popupWidth = popupPad * 2 + #overflowButtons * DIM.FOOTER_BTN_SIZE + (#overflowButtons - 1) * DIM.FOOTER_BTN_GAP
+        local popupHeight = popupPad * 2 + DIM.FOOTER_BTN_SIZE
         popup:ClearAllPoints()
         popup:SetSize(popupWidth, popupHeight)
         popup:SetPoint("BOTTOMRIGHT", footer.overflowBtn, "TOPRIGHT", 2, 4)
@@ -3208,7 +3421,7 @@ function Frame:UpdateFooterCustomButtons()
             btn:ClearAllPoints()
             btn:SetParent(popup)
             if prevPopupBtn then
-                btn:SetPoint("LEFT", prevPopupBtn, "RIGHT", FOOTER_BTN_GAP, 0)
+                btn:SetPoint("LEFT", prevPopupBtn, "RIGHT", DIM.FOOTER_BTN_GAP, 0)
             else
                 btn:SetPoint("LEFT", popupPad, 0)
             end
@@ -3230,6 +3443,11 @@ function Frame:UpdateEmbeddedAttuneHelper()
     if not IsAttuneHelperEmbedEnabled() or not mainFrame:IsShown() then
         RestoreEmbeddedAttuneHelper()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+        return
+    end
+
+    if InCombatLockdown and InCombatLockdown() then
+        self:EnsureEmbeddedAttuneHelperRetry()
         return
     end
 
@@ -3257,6 +3475,9 @@ function Frame:UpdateEmbeddedAttuneHelper()
     if not miniFrame then
         host:Hide()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+        if IsAttuneHelperEmbedEnabled() and mainFrame:IsShown() then
+            self:EnsureEmbeddedAttuneHelperRetry()
+        end
         return
     end
 
@@ -3296,6 +3517,9 @@ function Frame:UpdateEmbeddedAttuneHelper()
     host:SetSize(miniFrame:GetWidth(), miniFrame:GetHeight())
     host:Show()
     self:HookAttuneHelperMiniSortButton()
+    if miniFrame:GetParent() == host and host:IsShown() then
+        attuneEmbedReady = true
+    end
     if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
 end
 
@@ -3414,7 +3638,7 @@ end
 
 function Frame:SetItemScale(scale)
     if InCombat() then return false end
-    scale = math.max(ITEM_SCALE_MIN, math.min(scale or 1, ITEM_SCALE_MAX))
+    scale = math.max(DIM.ITEM_SCALE_MIN, math.min(scale or 1, DIM.ITEM_SCALE_MAX))
 
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.char = OmniInventoryDB.char or {}
@@ -3433,7 +3657,7 @@ end
 
 function Frame:SetItemGap(gap)
     if InCombat() then return false end
-    gap = math.max(ITEM_GAP_MIN, math.min(gap or ITEM_SPACING, ITEM_GAP_MAX))
+    gap = math.max(DIM.ITEM_GAP_MIN, math.min(gap or DIM.ITEM_SPACING, DIM.ITEM_GAP_MAX))
 
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.char = OmniInventoryDB.char or {}
@@ -3462,9 +3686,6 @@ function Frame:SetView(mode)
     currentView = NormalizeViewMode(mode)
     self._combatGridFallbackActive = false
     self._combatGridFallbackOriginalView = nil
-    if currentView == "bag" then
-        bagViewNeedsFreshSort = true
-    end
     self:InvalidateRenderCaches({ clearLayout = true })
 
     -- ʕ •ᴥ•ʔ✿ Any explicit view change away from "bag" invalidates the
@@ -3523,7 +3744,6 @@ function Frame:CycleSort()
         mainFrame.header.sortBtn.text:SetText(displayMode)
     end
 
-    bagViewNeedsFreshSort = true
     -- Refresh layout with new sort
     Frame:UpdateLayout()
 end
@@ -3745,6 +3965,13 @@ function Frame:UpdateLayout(changedBags, opts)
                 mainFrame.combatHint:SetText("Bag contents will appear after combat.")
             end
         end
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                skipped = "combat_refresh",
+                reason = updateReason,
+                view = currentView or "unknown",
+            })
+        end
         return
     end
 
@@ -3778,9 +4005,16 @@ function Frame:UpdateLayout(changedBags, opts)
             local suppressBurst = allowBurstFull
                 and lastOptimisticFlowRefreshAt > 0
                 and now > 0
-                and (now - lastOptimisticFlowRefreshAt) <= OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
+                and (now - lastOptimisticFlowRefreshAt) <= DIM.OPTIMISTIC_FLOW_REFRESH_SUPPRESS_WINDOW
             if allowBurstFull and not suppressBurst then
                 RequestBurstFullRefresh()
+            end
+            if Omni._perfEnabled and Omni.Perf then
+                Omni.Perf:End("frame.UpdateLayout.total", perfTotal, {
+                    skipped = "incremental_slot_refresh",
+                    reason = updateReason,
+                    view = currentView or "unknown",
+                })
             end
             return
         end
@@ -3868,18 +4102,12 @@ function Frame:UpdateLayout(changedBags, opts)
         end
     end
 
-    -- Sort items
-    if Omni.Sorter then
-        local doBagViewSort = not (currentView == "bag" and not bagViewNeedsFreshSort)
-        if doBagViewSort then
-            local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
-            items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
-            if currentView == "bag" then
-                bagViewNeedsFreshSort = false
-            end
-            if Omni._perfEnabled and Omni.Perf then
-                Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
-            end
+    -- Sort items (flow/list only: grid/bag render by physical slot index)
+    if Omni.Sorter and (currentView == "flow" or currentView == "list") then
+        local perfSort = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.sort")
+        items = Omni.Sorter:Sort(items, Omni.Sorter:GetDefaultMode())
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("frame.UpdateLayout.sort", perfSort, { itemCount = #items, reason = updateReason })
         end
     end
 
@@ -3893,9 +4121,12 @@ function Frame:UpdateLayout(changedBags, opts)
     else
         -- Combined Grid/Flow rendering
         local perfRenderFlow = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.renderFlow")
-        self:RenderFlowView(items)
+        local flowPath = self:RenderFlowView(items, { reason = updateReason }) or "na"
         if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, { reason = updateReason })
+            Omni.Perf:End("frame.UpdateLayout.renderFlow", perfRenderFlow, {
+                reason = updateReason,
+                flowPath = flowPath,
+            })
         end
     end
 
@@ -3931,8 +4162,12 @@ end
 -- Flow/Grid View Rendering
 -- =============================================================================
 
-function Frame:RenderFlowView(items)
-    if not mainFrame or not mainFrame.scrollChild then return end
+function Frame:RenderFlowView(items, layoutOpts)
+    if not mainFrame or not mainFrame.scrollChild then
+        return "na"
+    end
+
+    CancelDeferredFlowItemPaint()
 
     local scrollChild = mainFrame.scrollChild
 
@@ -3974,8 +4209,6 @@ function Frame:RenderFlowView(items)
     ClearMap(headerByCategory)
 
     local freezeHeadersForVendor = false
-    -- Hide existing headers and list rows
-    for _, header in ipairs(categoryHeaders) do header:Hide() end
     for _, row in ipairs(listRows) do row:Hide() end
     if mainFrame.tradeGoodsDepositBtn then mainFrame.tradeGoodsDepositBtn:Hide() end
 
@@ -3987,7 +4220,7 @@ function Frame:RenderFlowView(items)
     local dualCategoryLanes = (currentView ~= "grid")
     local laneGap = 10
     local itemScale = self:GetItemScale()
-    local itemSize = ITEM_SIZE * itemScale
+    local itemSize = DIM.ITEM_SIZE * itemScale
     local itemStep = itemSize + itemGap
 
     local function columnsForLaneWidth(laneW)
@@ -4021,7 +4254,7 @@ function Frame:RenderFlowView(items)
             end
         end
 
-        for _, bagID in ipairs(BAG_IDS) do
+        for _, bagID in ipairs(DIM.BAG_IDS) do
             local numSlots = GetContainerNumSlots(bagID) or 0
             for slotID = 1, numSlots do
                 local info = itemBySlot[bagID] and itemBySlot[bagID][slotID] or nil
@@ -4039,7 +4272,7 @@ function Frame:RenderFlowView(items)
             table.insert(bagScope, selectedBagID)
             bagPreviewScopeSet[selectedBagID] = true
         else
-            for _, bagID in ipairs(BAG_IDS) do
+            for _, bagID in ipairs(DIM.BAG_IDS) do
                 table.insert(bagScope, bagID)
                 bagPreviewScopeSet[bagID] = true
             end
@@ -4165,6 +4398,7 @@ function Frame:RenderFlowView(items)
     local compositionSignature = nil
     local laneSignature = nil
     local canReuseLaneAssignment = false
+    local flowContentOnly = false
 
     if flowMode then
         compositionSignature = BuildFlowCompositionSignature(
@@ -4186,6 +4420,30 @@ function Frame:RenderFlowView(items)
         canReuseLaneAssignment = flowLayoutCache
             and flowLayoutCache.laneSignature == laneSignature
             and flowLayoutCache.laneAssignment ~= nil
+        if currentView == "flow" and flowLayoutCache
+                and compositionSignature
+                and flowLayoutCache.signature == compositionSignature
+                and flowLayoutCache.laneSignature == laneSignature
+                and merchantOpen == wasMerchantOpen
+                and (flowLayoutCache.renderCacheEpoch or 0) == (Frame._renderCacheEpoch or 0)
+                and flowLayoutCache.order
+                and flowLayoutCache.headerByCategory then
+            local needSplitLanes = dualCategoryLanes and #categoryOrder > 1
+            if (not needSplitLanes) or flowLayoutCache.laneAssignment then
+                flowContentOnly = true
+            end
+        end
+    end
+
+    if flowContentOnly then
+        ClearArray(categoryOrder)
+        for i = 1, #flowLayoutCache.order do
+            categoryOrder[i] = flowLayoutCache.order[i]
+        end
+        ClearMap(headerByCategory)
+        for k, v in pairs(flowLayoutCache.headerByCategory) do
+            headerByCategory[k] = v
+        end
     end
 
     -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
@@ -4202,11 +4460,14 @@ function Frame:RenderFlowView(items)
     -- on so the overflow strip still anchors at the bottom of BoE's
     -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
     local laneAssignment = nil
+    if flowContentOnly then
+        laneAssignment = flowLayoutCache.laneAssignment
+    end
     local forceVendorFrozenLanes = flowMode
         and merchantOpen
         and vendorFlowLayoutFreeze ~= nil
         and vendorFlowLayoutFreeze.laneAssignment ~= nil
-    if flowMode and dualCategoryLanes and #categoryOrder > 1 then
+    if not flowContentOnly and flowMode and dualCategoryLanes and #categoryOrder > 1 then
         if forceVendorFrozenLanes then
             laneAssignment = vendorFlowLayoutFreeze.laneAssignment
             canReuseLaneAssignment = true
@@ -4332,7 +4593,22 @@ function Frame:RenderFlowView(items)
         end
     end
 
+    if currentView ~= "flow" or not flowContentOnly then
+        for _, header in ipairs(categoryHeaders) do
+            header:Hide()
+        end
+    end
 
+    local perfFlowPath = nil
+    if currentView == "flow" and Omni._perfEnabled and Omni.Perf then
+        perfFlowPath = Omni.Perf:Begin(
+            flowContentOnly and "frame.UpdateLayout.renderFlow.content" or "frame.UpdateLayout.renderFlow.full")
+    end
+
+    if Omni.ItemButton and Omni.ItemButton.BeginItemRenderBatch then
+        Omni.ItemButton:BeginItemRenderBatch()
+    end
+    local flowSlotPaintIndex = 0
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         local isBoeAnchor = (flowMode and catName == "BoE")
@@ -4368,7 +4644,8 @@ function Frame:RenderFlowView(items)
                 local header
                 local reusedHeader = false
                 local headerSlotIndex = nil
-                if freezeHeadersForVendor and flowLayoutCache and flowLayoutCache.headerByCategory then
+                if flowLayoutCache and flowLayoutCache.headerByCategory
+                        and (freezeHeadersForVendor or flowContentOnly) then
                     local cachedIdx = flowLayoutCache.headerByCategory[catName]
                     if cachedIdx then
                         header = categoryHeaders[cachedIdx]
@@ -4408,6 +4685,14 @@ function Frame:RenderFlowView(items)
                     else
                         header:SetText(catName .. " (" .. #catItems .. ")")
                     end
+                elseif flowContentOnly and header then
+                    if currentView == "bag" then
+                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                    else
+                        header:SetText(catName .. " (" .. #catItems .. ")")
+                    end
                 end
                 header:Show()
 
@@ -4436,6 +4721,7 @@ function Frame:RenderFlowView(items)
                 local btn = (bagID and slotID) and GetSlotButton(bagID, slotID) or nil
 
                 if btn then
+                    flowSlotPaintIndex = flowSlotPaintIndex + 1
                     local col = ((i - 1) % columns)
                     local row = math.floor((i - 1) / columns)
                     local x = laneX + col * itemStep
@@ -4443,7 +4729,64 @@ function Frame:RenderFlowView(items)
 
                     local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
                     local needsMetrics = (btn._oiLayoutScale ~= itemScale)
-                    pcall(function()
+                    local slotItem = itemInfo
+                    local nextRenderKey = ItemRenderKey(slotItem)
+                    local skipItemPaint = flowContentOnly and (btn._oiRenderKey == nextRenderKey)
+                    local deferItemPaint = (not skipItemPaint)
+                        and layoutOpts and layoutOpts.reason == "show_open"
+                        and flowSlotPaintIndex > FLOW_SHOW_OPEN_DEFER_AFTER
+
+                    if deferItemPaint then
+                        if needsReposition then
+                            btn:ClearAllPoints()
+                            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                            btn._oiLayoutX = x
+                            btn._oiLayoutY = y
+                        end
+                        if needsMetrics then
+                            ApplyItemButtonMetrics(btn, itemScale)
+                            btn._oiLayoutScale = itemScale
+                        end
+                        pcall(btn.Show, btn)
+                        btn:SetAlpha(0)
+                        deferredFlowPaintQueue[#deferredFlowPaintQueue + 1] = { btn, slotItem }
+                    elseif skipItemPaint then
+                        if flowContentOnly and not needsReposition and not needsMetrics then
+                            local targetA = (slotItem and slotItem.__empty) and EMPTY_SLOT_ALPHA or 1
+                            if not btn:IsShown() then btn:Show() end
+                            btn:SetAlpha(targetA)
+                        else
+                            if needsReposition then
+                                btn:ClearAllPoints()
+                                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                                btn._oiLayoutX = x
+                                btn._oiLayoutY = y
+                            end
+                            if needsMetrics then
+                                ApplyItemButtonMetrics(btn, itemScale)
+                                btn._oiLayoutScale = itemScale
+                            end
+                            local targetA = (slotItem and slotItem.__empty) and EMPTY_SLOT_ALPHA or 1
+                            if not btn:IsShown() then btn:Show() end
+                            btn:SetAlpha(targetA)
+                        end
+                    elseif flowContentOnly and not needsReposition and not needsMetrics then
+                        btn:SetAlpha(1)
+                        local success = pcall(function()
+                            SetButtonItem(btn, slotItem)
+                            btn._oiRenderKey = nextRenderKey
+                            btn:Show()
+                        end)
+                        if not success then
+                            pcall(SetButtonItem, btn, nil)
+                            if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                            pcall(btn.Show, btn)
+                            btn._oiRenderKey = "error"
+                        end
+                        if slotItem and slotItem.__empty then
+                            btn:SetAlpha(EMPTY_SLOT_ALPHA)
+                        end
+                    else
                         if needsReposition then
                             btn:ClearAllPoints()
                             btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
@@ -4455,26 +4798,20 @@ function Frame:RenderFlowView(items)
                             btn._oiLayoutScale = itemScale
                         end
                         btn:SetAlpha(1)
-                    end)
-
-                    local slotItem = itemInfo
-
-                    local nextRenderKey = ItemRenderKey(slotItem)
-                    local success = true
-                    if btn._oiRenderKey ~= nextRenderKey then
-                        success = pcall(function()
+                        local success = pcall(function()
                             SetButtonItem(btn, slotItem)
                             btn._oiRenderKey = nextRenderKey
                             btn:Show()
                         end)
-                    else
-                        pcall(btn.Show, btn)
-                    end
-                    if not success then
-                        pcall(SetButtonItem, btn, nil)
-                        if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
-                        pcall(btn.Show, btn)
-                        btn._oiRenderKey = "error"
+                        if not success then
+                            pcall(SetButtonItem, btn, nil)
+                            if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+                            pcall(btn.Show, btn)
+                            btn._oiRenderKey = "error"
+                        end
+                        if slotItem and slotItem.__empty then
+                            btn:SetAlpha(EMPTY_SLOT_ALPHA)
+                        end
                     end
 
                     touched[bagID] = touched[bagID] or {}
@@ -4483,9 +4820,6 @@ function Frame:RenderFlowView(items)
                         usedTouchedBags[#usedTouchedBags + 1] = bagID
                     end
                     touched[bagID][slotID] = true
-                    if not slotItem then
-                        pcall(btn.SetAlpha, btn, EMPTY_SLOT_ALPHA)
-                    end
                     table.insert(itemButtons, btn)
                 end
             end
@@ -4519,6 +4853,9 @@ function Frame:RenderFlowView(items)
                 yOffset = laneY
             end
         end
+    end
+    if Omni.ItemButton and Omni.ItemButton.EndItemRenderBatch then
+        Omni.ItemButton:EndItemRenderBatch()
     end
 
     local mainBottomY
@@ -4563,47 +4900,71 @@ function Frame:RenderFlowView(items)
         overflowTop = mainBottomY - OVERFLOW_ROW_GAP
     end
 
+    local occupancySig = ""
+    local skipOverflowRepark = false
+    if flowMode then
+        occupancySig = BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
+        skipOverflowRepark = flowContentOnly
+            and not bagPreviewScopeSet
+            and flowLayoutCache
+            and flowLayoutCache.occupancySignature == occupancySig
+    end
+
     local overflowIndex = 0
-    IterateSlotButtons(function(bagID, slotID, btn)
-        if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
-            pcall(btn.SetAlpha, btn, 0)
+    if skipOverflowRepark then
+        local scopedTotal = GetScopedBagSlotsTotal(bagPreviewScopeSet)
+        local nTouched = CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
+        overflowIndex = math.max(0, scopedTotal - nTouched)
+    else
+        IterateSlotButtons(function(bagID, slotID, btn)
+            if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
+                pcall(btn.SetAlpha, btn, 0)
+                if btn._oiRenderKey ~= "empty" then
+                    pcall(SetButtonItem, btn, nil)
+                    btn._oiRenderKey = "empty"
+                end
+                return
+            end
+            local isTouched = touched[bagID] and touched[bagID][slotID]
+            if isTouched then return end
+
+            local col = overflowIndex % overflowColumns
+            local row = math.floor(overflowIndex / overflowColumns)
+            local x = overflowX + col * itemStep
+            local y = overflowTop - row * itemStep
+
+            local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
+            local needsMetrics = (btn._oiLayoutScale ~= itemScale)
+            if not needsReposition and not needsMetrics and btn._oiRenderKey == "empty" then
+                local a = btn.GetAlpha and btn:GetAlpha() or 0
+                if a < 0.01 then
+                    pcall(btn.Show, btn)
+                    overflowIndex = overflowIndex + 1
+                    return
+                end
+            end
+            pcall(function()
+                if needsReposition then
+                    btn:ClearAllPoints()
+                    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
+                    btn._oiLayoutX = x
+                    btn._oiLayoutY = y
+                end
+                if needsMetrics then
+                    ApplyItemButtonMetrics(btn, itemScale)
+                    btn._oiLayoutScale = itemScale
+                end
+                btn:SetAlpha(0)
+            end)
             if btn._oiRenderKey ~= "empty" then
                 pcall(SetButtonItem, btn, nil)
                 btn._oiRenderKey = "empty"
             end
-            return
-        end
-        local isTouched = touched[bagID] and touched[bagID][slotID]
-        if isTouched then return end
+            pcall(btn.Show, btn)
 
-        local col = overflowIndex % overflowColumns
-        local row = math.floor(overflowIndex / overflowColumns)
-        local x = overflowX + col * itemStep
-        local y = overflowTop - row * itemStep
-
-        local needsReposition = (btn._oiLayoutX ~= x) or (btn._oiLayoutY ~= y)
-        local needsMetrics = (btn._oiLayoutScale ~= itemScale)
-        pcall(function()
-            if needsReposition then
-                btn:ClearAllPoints()
-                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                btn._oiLayoutX = x
-                btn._oiLayoutY = y
-            end
-            if needsMetrics then
-                ApplyItemButtonMetrics(btn, itemScale)
-                btn._oiLayoutScale = itemScale
-            end
-            btn:SetAlpha(0)
+            overflowIndex = overflowIndex + 1
         end)
-        if btn._oiRenderKey ~= "empty" then
-            pcall(SetButtonItem, btn, nil)
-            btn._oiRenderKey = "empty"
-        end
-        pcall(btn.Show, btn)
-
-        overflowIndex = overflowIndex + 1
-    end)
+    end
 
     local overflowRows = math.ceil(overflowIndex / math.max(overflowColumns, 1))
     local overflowExtent = overflowRows > 0
@@ -4623,6 +4984,20 @@ function Frame:RenderFlowView(items)
     local deepestY = math.min(mainBottomY, overflowBottom)
     scrollChild:SetHeight(math.abs(deepestY) + itemGap)
 
+    if perfFlowPath and Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End(
+            flowContentOnly and "frame.UpdateLayout.renderFlow.content" or "frame.UpdateLayout.renderFlow.full",
+            perfFlowPath,
+            {
+                flowContentOnly = flowContentOnly == true,
+                overflowSkipped = skipOverflowRepark == true,
+            })
+    end
+
+    if #deferredFlowPaintQueue > 0 then
+        ScheduleDeferredFlowItemPaint()
+    end
+
     if flowMode then
         flowLayoutCache = {
             signature = compositionSignature,
@@ -4630,6 +5005,9 @@ function Frame:RenderFlowView(items)
             laneAssignment = laneAssignment,
             headerByCategory = headerByCategory,
             order = categoryOrder,
+            renderCacheEpoch = Frame._renderCacheEpoch or 0,
+            itemContentSignature = BuildFlowItemContentSignature(items),
+            occupancySignature = occupancySig,
         }
         if merchantOpen and vendorFlowLayoutFreeze and laneAssignment then
             vendorFlowLayoutFreeze.laneAssignment = laneAssignment
@@ -4638,6 +5016,10 @@ function Frame:RenderFlowView(items)
         flowLayoutCache = nil
     end
     wasMerchantOpen = merchantOpen
+    if currentView == "flow" then
+        return flowContentOnly and "content" or "full"
+    end
+    return "na"
 end
 
 -- =============================================================================
@@ -4728,9 +5110,20 @@ function Frame:RenderListView(items)
             row:SetScript("OnEnter", function(self)
                 self.bg:SetVertexColor(0.3, 0.3, 0.3, 1)
                 if self.itemInfo and self.itemInfo.bagID and self.itemInfo.slotID then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    self.__omniUsesCustomTooltip = true
+                    if Omni.ItemButton and Omni.ItemButton.SetOmniItemTooltipOwner then
+                        Omni.ItemButton.SetOmniItemTooltipOwner(self)
+                    else
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    end
                     GameTooltip:SetBagItem(self.itemInfo.bagID, self.itemInfo.slotID)
                     GameTooltip:Show()
+                    if Omni.ItemButton and Omni.ItemButton.FinalizeOmniItemTooltipLayout then
+                        Omni.ItemButton.FinalizeOmniItemTooltipLayout()
+                    end
+                    if Omni.ItemButton and Omni.ItemButton.RefreshCompareTooltips then
+                        Omni.ItemButton:RefreshCompareTooltips()
+                    end
                     if IsMerchantOpen() and (not CursorHasItem or not CursorHasItem()) and ShowContainerSellCursor then
                         ShowContainerSellCursor(self.itemInfo.bagID, self.itemInfo.slotID)
                     elseif CursorUpdate then
@@ -4741,7 +5134,12 @@ function Frame:RenderListView(items)
             row:SetScript("OnLeave", function(self)
                 local alpha = (i % 2 == 0) and 0.15 or 0.1
                 self.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
-                GameTooltip:Hide()
+                self.__omniUsesCustomTooltip = false
+                if Omni.ItemButton and Omni.ItemButton.HideTooltipIfOwnedBy then
+                    Omni.ItemButton.HideTooltipIfOwnedBy(self)
+                elseif GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == self then
+                    GameTooltip:Hide()
+                end
                 if ResetCursor then
                     ResetCursor()
                 end
@@ -5029,11 +5427,11 @@ function Frame:UpdateSlotCount()
         slots:SetTextColor(1, 1, 1, 1)
     end
 
-    if self.UpdateFooterCustomButtons then
-        self:UpdateFooterCustomButtons()
-    end
     if self.UpdateEmbeddedAttuneHelper then
         self:UpdateEmbeddedAttuneHelper()
+    end
+    if self.UpdateFooterCustomButtons then
+        self:UpdateFooterCustomButtons()
     end
 end
 
@@ -5081,32 +5479,45 @@ function Frame:Show()
     -- position) and remain clickable through Blizzard's secure path. ✿ ʕ •ᴥ•ʔ
     pcall(mainFrame.Show, mainFrame)
 
+    if mainFrame:IsShown() and IsAttuneHelperEmbedEnabled() then
+        self:UpdateEmbeddedAttuneHelper()
+    end
+
     local sig = ComputeShowSignature()
-    local forceFullShowForAttune = IsAttuneHelperEmbedEnabled() and IsAttuneHelperAvailable()
-    local requiresSortedShow = (currentView == "flow")
-        or (currentView == "bag" and bagViewNeedsFreshSort)
+    -- ʕ •ᴥ•ʔ✿ Fast-show skips full layout; first embed after login needs that pass
+    -- (init_prewarm runs while hidden, so AH was Restore()d). Gate until latched. ✿ ʕ •ᴥ•ʔ
+    local attuneFastOk = (not IsAttuneHelperEmbedEnabled())
+        or (not IsAttuneHelperClientPresent())
+        or attuneEmbedReady
+    -- ʕ •ᴥ•ʔ✿ Flow/list need collect+categorize+sort every open; fast path skips
+    -- that so attune/bind/equip-set lanes and ordering stay wrong. Grid/bag
+    -- are slot-indexed only. ✿ ʕ •ᴥ•ʔ
+    local viewAllowsFastShow = (currentView == "grid" or currentView == "bag")
     local canFastShow = hasRenderedOnce
         and not pendingCombatRender
         and lastRenderedShowSignature ~= nil
         and sig == lastRenderedShowSignature
-        and not forceFullShowForAttune
-        and not requiresSortedShow
+        and attuneFastOk
+        and viewAllowsFastShow
 
     if canFastShow then
-        RebuildPopulatedItemButtonList()
         self:UpdateBagIconTextures()
         self:UpdateBagIconVisuals()
         self:UpdateSlotCount()
         self:UpdateMoney()
+        self:RefreshCombatContent({ _trigger = true })
         if searchText and searchText ~= "" then
             self:ApplySearch(searchText)
         end
     else
         self:UpdateLayout(nil, { reason = "show_open" })
     end
-    if not InCombat() then
-        self:UpdateEmbeddedAttuneHelper()
-        if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
+    if IsAttuneHelperEmbedEnabled() and mainFrame and mainFrame:IsShown()
+            and IsAttuneHelperClientPresent() and not attuneEmbedReady then
+        self:EnsureEmbeddedAttuneHelperRetry()
+    end
+    if #deferredFlowPaintQueue == 0 then
+        ScheduleDeferredAttuneOverlayRefresh()
     end
 end
 
@@ -5126,10 +5537,8 @@ function Frame:Hide()
         end
         host:Hide()
     end
-    flowLayoutCache = nil
     vendorFlowLayoutFreeze = nil
     wasMerchantOpen = false
-    bagViewNeedsFreshSort = true
     ClearMap(optimisticFlowRefreshWatches)
     ClearArray(itemButtons)
 
@@ -5183,7 +5592,6 @@ function Frame:SetBagFilter(bagID)
     OmniInventoryDB.char.settings.selectedBagID = selectedBagID
 
     self:UpdateBagIconVisuals()
-    bagViewNeedsFreshSort = true
     self:UpdateLayout()
 end
 
@@ -5230,119 +5638,121 @@ function Frame:ToggleBagPreview(bagID)
     end
 end
 
-local function CanBagAcceptItem(bagID, itemFamily)
-    local _, bagFamily = GetContainerNumFreeSlots(bagID)
-    bagFamily = bagFamily or 0
+-- ʕ •ᴥ•ʔ✿ Inner scope: Lua chunk limit is 200 locals ✿ ʕ •ᴥ•ʔ
+do
+    local function canBagAcceptItem(bagID, itemFamily)
+        local _, bagFamily = GetContainerNumFreeSlots(bagID)
+        bagFamily = bagFamily or 0
 
-    if bagFamily == 0 then
+        if bagFamily == 0 then
+            return true
+        end
+        if not itemFamily or itemFamily == 0 then
+            return false
+        end
+        if bit and bit.band then
+            return bit.band(itemFamily, bagFamily) > 0
+        end
         return true
     end
-    if not itemFamily or itemFamily == 0 then
-        return false
-    end
-    if bit and bit.band then
-        return bit.band(itemFamily, bagFamily) > 0
-    end
-    return true
-end
 
-local function FindFirstOpenSlotExcludingBag(excludedBagID, itemFamily)
-    for _, bagID in ipairs(BAG_IDS) do
-        if bagID ~= excludedBagID and CanBagAcceptItem(bagID, itemFamily) then
-            local slots = GetContainerNumSlots(bagID) or 0
-            for slotID = 1, slots do
-                local texture = GetContainerItemInfo(bagID, slotID)
-                if not texture then
-                    return bagID, slotID
+    local function findFirstOpenSlotExcludingBag(excludedBagID, itemFamily)
+        for _, bagID in ipairs(DIM.BAG_IDS) do
+            if bagID ~= excludedBagID and canBagAcceptItem(bagID, itemFamily) then
+                local slots = GetContainerNumSlots(bagID) or 0
+                for slotID = 1, slots do
+                    local texture = GetContainerItemInfo(bagID, slotID)
+                    if not texture then
+                        return bagID, slotID
+                    end
                 end
             end
         end
-    end
-    return nil, nil
-end
-
-local function StopForceEmptyJob()
-    if forceEmptyFrame then
-        forceEmptyFrame:SetScript("OnUpdate", nil)
-        forceEmptyFrame:SetScript("OnEvent", nil)
-        forceEmptyFrame:UnregisterEvent("BAG_UPDATE")
-        forceEmptyFrame:UnregisterEvent("ITEM_LOCK_CHANGED")
-    end
-    forceEmptyJob = nil
-end
-
-local function FinishForceEmptyJob()
-    if not forceEmptyJob then
-        return
+        return nil, nil
     end
 
-    print(string.format("|cFF00FF00OmniInventory|r: Force-empty bag %d moved %d, blocked %d.",
-        forceEmptyJob.sourceBagID, forceEmptyJob.movedCount, forceEmptyJob.blockedCount))
-
-    StopForceEmptyJob()
-    if Frame and Frame.UpdateLayout then
-        Frame:UpdateLayout()
-    end
-end
-
-local function RunForceEmptyStep()
-    if not forceEmptyJob then
-        return
-    end
-
-    if #forceEmptyJob.slots == 0 then
-        FinishForceEmptyJob()
-        return
-    end
-
-    local sourceBagID = forceEmptyJob.sourceBagID
-    local slotEntry = table.remove(forceEmptyJob.slots, 1)
-    local slotID = slotEntry.slotID
-    local attempts = slotEntry.attempts or 0
-
-    local texture, _, isLocked = GetContainerItemInfo(sourceBagID, slotID)
-    if not texture then
-        return
-    end
-    if isLocked then
-        attempts = attempts + 1
-        if attempts >= FORCE_EMPTY_MAX_LOCK_RETRIES then
-            forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
-        else
-            slotEntry.attempts = attempts
-            table.insert(forceEmptyJob.slots, slotEntry)
+    local function stopForceEmptyJob()
+        if forceEmptyFrame then
+            forceEmptyFrame:SetScript("OnUpdate", nil)
+            forceEmptyFrame:SetScript("OnEvent", nil)
+            forceEmptyFrame:UnregisterEvent("BAG_UPDATE")
+            forceEmptyFrame:UnregisterEvent("ITEM_LOCK_CHANGED")
         end
-        return
+        forceEmptyJob = nil
     end
 
-    local itemLink = GetContainerItemLink(sourceBagID, slotID)
-    local itemFamily = (itemLink and GetItemFamily(itemLink)) or 0
-    local targetBagID, targetSlotID = FindFirstOpenSlotExcludingBag(sourceBagID, itemFamily)
-    if not targetBagID or not targetSlotID then
-        forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
-        return
-    end
-
-    PickupContainerItem(sourceBagID, slotID)
-    if CursorHasItem and CursorHasItem() then
-        PickupContainerItem(targetBagID, targetSlotID)
-    end
-
-    if CursorHasItem and CursorHasItem() then
-        ClearCursor()
-        attempts = attempts + 1
-        if attempts >= FORCE_EMPTY_MAX_MOVE_RETRIES then
-            forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
-        else
-            slotEntry.attempts = attempts
-            table.insert(forceEmptyJob.slots, slotEntry)
+    local function finishForceEmptyJob()
+        if not forceEmptyJob then
+            return
         end
-    else
-        forceEmptyJob.movedCount = forceEmptyJob.movedCount + 1
-        forceEmptyJob.awaitingEvent = true
-        forceEmptyJob.awaitElapsed = 0
+
+        print(string.format("|cFF00FF00OmniInventory|r: Force-empty bag %d moved %d, blocked %d.",
+            forceEmptyJob.sourceBagID, forceEmptyJob.movedCount, forceEmptyJob.blockedCount))
+
+        stopForceEmptyJob()
+        if Frame and Frame.UpdateLayout then
+            Frame:UpdateLayout()
+        end
     end
-end
+
+    local function runForceEmptyStep()
+        if not forceEmptyJob then
+            return
+        end
+
+        if #forceEmptyJob.slots == 0 then
+            finishForceEmptyJob()
+            return
+        end
+
+        local sourceBagID = forceEmptyJob.sourceBagID
+        local slotEntry = table.remove(forceEmptyJob.slots, 1)
+        local slotID = slotEntry.slotID
+        local attempts = slotEntry.attempts or 0
+
+        local texture, _, isLocked = GetContainerItemInfo(sourceBagID, slotID)
+        if not texture then
+            return
+        end
+        if isLocked then
+            attempts = attempts + 1
+            if attempts >= DIM.FORCE_EMPTY_MAX_LOCK_RETRIES then
+                forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+            else
+                slotEntry.attempts = attempts
+                table.insert(forceEmptyJob.slots, slotEntry)
+            end
+            return
+        end
+
+        local itemLink = GetContainerItemLink(sourceBagID, slotID)
+        local itemFamily = (itemLink and GetItemFamily(itemLink)) or 0
+        local targetBagID, targetSlotID = findFirstOpenSlotExcludingBag(sourceBagID, itemFamily)
+        if not targetBagID or not targetSlotID then
+            forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+            return
+        end
+
+        PickupContainerItem(sourceBagID, slotID)
+        if CursorHasItem and CursorHasItem() then
+            PickupContainerItem(targetBagID, targetSlotID)
+        end
+
+        if CursorHasItem and CursorHasItem() then
+            ClearCursor()
+            attempts = attempts + 1
+            if attempts >= DIM.FORCE_EMPTY_MAX_MOVE_RETRIES then
+                forceEmptyJob.blockedCount = forceEmptyJob.blockedCount + 1
+            else
+                slotEntry.attempts = attempts
+                table.insert(forceEmptyJob.slots, slotEntry)
+            end
+        else
+            forceEmptyJob.movedCount = forceEmptyJob.movedCount + 1
+            forceEmptyJob.awaitingEvent = true
+            forceEmptyJob.awaitElapsed = 0
+        end
+    end
 
 function Frame:ForceEmptyBag(sourceBagID)
     if not IsValidBagID(sourceBagID) then return end
@@ -5372,7 +5782,7 @@ function Frame:ForceEmptyBag(sourceBagID)
     end
 
     if forceEmptyJob then
-        StopForceEmptyJob()
+        stopForceEmptyJob()
     end
 
     forceEmptyJob = {
@@ -5407,14 +5817,16 @@ function Frame:ForceEmptyBag(sourceBagID)
         end
         if forceEmptyJob.awaitingEvent then
             forceEmptyJob.awaitElapsed = forceEmptyJob.awaitElapsed + (elapsed or 0)
-            if forceEmptyJob.awaitElapsed < FORCE_EMPTY_EVENT_TIMEOUT then
+            if forceEmptyJob.awaitElapsed < DIM.FORCE_EMPTY_EVENT_TIMEOUT then
                 return
             end
             forceEmptyJob.awaitingEvent = false
         end
-        RunForceEmptyStep()
+        runForceEmptyStep()
     end)
 end
+
+end -- force-empty inner scope
 
 -- =============================================================================
 -- Initialization

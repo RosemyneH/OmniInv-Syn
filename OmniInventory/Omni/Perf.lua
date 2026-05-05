@@ -81,6 +81,7 @@ function Perf:RecordValue(key, elapsedMs, context)
         table.remove(metric.samples, 1)
     end
     if type(context) == "table" then
+        metric.context = {}
         for k, v in pairs(context) do
             metric.context[k] = v
         end

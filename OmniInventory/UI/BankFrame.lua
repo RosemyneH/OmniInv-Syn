@@ -1015,7 +1015,6 @@ function BankFrame:RenderFlowView(items)
     local itemStep = itemSize + itemGap
     local sectionHeaderHeight = 20
     local sectionSpacing = 8
-    local dualCategoryLanes = true
     local laneGap = 10
 
     local function columnsForLaneWidth(laneW)
@@ -1047,6 +1046,8 @@ function BankFrame:RenderFlowView(items)
             return (infoA.priority or 99) < (infoB.priority or 99)
         end)
     end
+
+    local dualCategoryLanes = #categoryOrder > 1
 
     local headerIndex = 0
     for _, catName in ipairs(categoryOrder) do
@@ -1105,19 +1106,25 @@ function BankFrame:RenderFlowView(items)
                     local y = laneY - row * itemStep
 
                     local container = GetBankItemContainer(itemInfo.bagID or -1) or scrollChild
-                    pcall(function()
-                        if btn:GetParent() ~= container then
-                            btn:SetParent(container)
-                        end
-                        ApplyBankItemMetrics(btn, itemSize)
-                        btn:ClearAllPoints()
-                        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-                    end)
+                    if btn:GetParent() ~= container then
+                        pcall(btn.SetParent, btn, container)
+                    end
+                    pcall(ApplyBankItemMetrics, btn, itemSize)
+                    pcall(btn.ClearAllPoints, btn)
+                    pcall(btn.SetPoint, btn, "TOPLEFT", scrollChild, "TOPLEFT", x, y)
 
                     local ok = pcall(function()
                         SetButtonItem(btn, itemInfo)
                         btn:Show()
                     end)
+                    if ok then
+                        if btn:GetParent() ~= container then
+                            pcall(btn.SetParent, btn, container)
+                        end
+                        if itemInfo.slotID and btn.SetID then
+                            pcall(btn.SetID, btn, itemInfo.slotID)
+                        end
+                    end
                     if not ok then
                         pcall(SetButtonItem, btn, nil)
                         if btn.icon then btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
@@ -1153,6 +1160,7 @@ function BankFrame:RenderGridView(items)
     local scrollChild = bankFrame.scrollChild
     local previousButtons = itemButtons
     itemButtons = {}
+    local releasedPreviousToPool = false
 
     if InCombat() then
         for _, btn in ipairs(previousButtons) do
@@ -1162,6 +1170,7 @@ function BankFrame:RenderGridView(items)
         for _, btn in ipairs(previousButtons) do
             Omni.Pool:Release("ItemButton", btn)
         end
+        releasedPreviousToPool = true
     end
 
     for _, header in ipairs(categoryHeaders) do
@@ -1189,7 +1198,7 @@ function BankFrame:RenderGridView(items)
     local function renderSlot(bagID, slotID)
         index = index + 1
         local container = GetBankItemContainer(bagID) or scrollChild
-        local btn = previousButtons[index]
+        local btn = (not releasedPreviousToPool) and previousButtons[index] or nil
         if not btn then
             if InCombat() and Omni.ItemButton then
                 local createdOK, created = pcall(Omni.ItemButton.Create, Omni.ItemButton, container)
@@ -1217,18 +1226,22 @@ function BankFrame:RenderGridView(items)
         local x = itemGap + col * itemStep
         local y = -itemGap - row * itemStep
 
-        pcall(function()
-            if btn:GetParent() ~= container then
-                btn:SetParent(container)
-            end
-            ApplyBankItemMetrics(btn, itemSize)
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", x, y)
-            btn:SetAlpha(1)
-        end)
+        if btn:GetParent() ~= container then
+            pcall(btn.SetParent, btn, container)
+        end
+        pcall(ApplyBankItemMetrics, btn, itemSize)
+        pcall(btn.ClearAllPoints, btn)
+        pcall(btn.SetPoint, btn, "TOPLEFT", scrollChild, "TOPLEFT", x, y)
+        pcall(btn.SetAlpha, btn, 1)
 
         local itemInfo = itemBySlot[bagID] and itemBySlot[bagID][slotID]
         pcall(SetButtonItem, btn, itemInfo or { bagID = bagID, slotID = slotID, __empty = true })
+        if btn:GetParent() ~= container then
+            pcall(btn.SetParent, btn, container)
+        end
+        if slotID and btn.SetID then
+            pcall(btn.SetID, btn, slotID)
+        end
         pcall(btn.Show, btn)
         table.insert(itemButtons, btn)
         rendered = true
@@ -1253,11 +1266,13 @@ function BankFrame:RenderGridView(items)
         end
     end
 
-    for i = index + 1, #previousButtons do
-        local btn = previousButtons[i]
-        pcall(SetButtonItem, btn, nil)
-        pcall(btn.SetAlpha, btn, 0)
-        table.insert(itemButtons, btn)
+    if not releasedPreviousToPool then
+        for i = index + 1, #previousButtons do
+            local btn = previousButtons[i]
+            pcall(SetButtonItem, btn, nil)
+            pcall(btn.SetAlpha, btn, 0)
+            table.insert(itemButtons, btn)
+        end
     end
 
     local rows = math.ceil(index / columns)

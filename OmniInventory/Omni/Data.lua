@@ -22,7 +22,13 @@ local defaults = {
         scale = 1.0,
         opacity = 0.95,
         highlightNewItems = false,
-        tooltipSide = "right",
+        -- ʕ •ᴥ•ʔ✿ right | left | fixed_br | fixed_bl | fixed_tl | fixed_tr (ItemButton) ✿ ʕ •ᴥ•ʔ
+        itemTooltipPlacement = "right",
+        -- ʕ •ᴥ•ʔ✿ x = pixels inset from bottom-right; y = up from bottom ✿ ʕ •ᴥ•ʔ
+        itemTooltipFixed = {
+            x = 24,
+            y = 140,
+        },
         -- ʕ •ᴥ•ʔ✿ Footer: larger outlined gold + slot count; slots tint blue→red by fill ✿ ʕ •ᴥ•ʔ
         footerMoneyEmphasis = true,
         attune = {
@@ -59,12 +65,14 @@ local defaults = {
             lootDb        = true,
             attuneMgr     = true,
             leaderboard   = true,
+            bountyHunter  = true,
         },
         -- ʕ •ᴥ•ʔ✿ Third-party addon launchers (auto-hidden when the addon isn't loaded) ✿ ʕ •ᴥ•ʔ
         addonButtons = {
             scootsCraft = true,
             atlasLoot   = true,
             theJournal  = true,
+            qtRunner    = true,
         },
     },
     char = {
@@ -115,6 +123,18 @@ function Data:Init()
     MergeDefaults(OmniInventoryDB.global, defaults.global)
     MergeDefaults(OmniInventoryDB.char, defaults.char)
     MergeDefaults(OmniInventoryDB.realm, defaults.realm)
+
+    -- ʕ •ᴥ•ʔ✿ One-shot: retire addon-hook placement + legacy compat flag ✿ ʕ •ᴥ•ʔ
+    do
+        local g = OmniInventoryDB.global
+        local pl = g.itemTooltipPlacement
+        if pl == nil or pl == "addon" then
+            g.itemTooltipPlacement = "right"
+        elseif pl == "fixed" then
+            g.itemTooltipPlacement = "fixed_br"
+        end
+        g.tooltipAddonCompatibility = nil
+    end
 
     local att = OmniInventoryDB.global.attune
     if att and defaults.global.attune and defaults.global.attune.forgeColors then
