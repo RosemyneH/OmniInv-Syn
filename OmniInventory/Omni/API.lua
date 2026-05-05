@@ -105,31 +105,52 @@ end
 local scanningTooltip = CreateFrame("GameTooltip", "OmniScanningTooltip", nil, "GameTooltipTemplate")
 scanningTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
 
+local bindScanCache = {}
+
+function API:ClearContainerBindScanCache()
+    wipe(bindScanCache)
+end
+
 local SOULBOUND_TEXT = ITEM_SOULBOUND or "Soulbound"
 local BOE_TEXT = ITEM_BIND_ON_EQUIP or "Binds when equipped"
 local BOP_TEXT = ITEM_BIND_ON_PICKUP or "Binds when picked up"
 local BOA_TEXT = ITEM_BIND_TO_ACCOUNT or "Binds to account"
 
 -- ʕ •ᴥ•ʔ✿ Two-state model: soulbound -> BoP, otherwise -> BoE ✿ ʕ •ᴥ•ʔ
-local function ScanTooltipForBinding(bag, slot)
+local function ScanTooltipForBinding(bag, slot, resolvedLink)
+    local link = resolvedLink or GetContainerItemLink(bag, slot)
+    local cacheKey = link and (tostring(bag) .. "\031" .. tostring(slot) .. "\031" .. link)
+    if cacheKey then
+        local cached = bindScanCache[cacheKey]
+        if cached then
+            return cached[1], cached[2]
+        end
+    end
+
     scanningTooltip:ClearLines()
     scanningTooltip:SetBagItem(bag, slot)
 
+    local boundResult, typeResult = false, "BoE"
     for i = 2, math.min(5, scanningTooltip:NumLines()) do
         local textFrame = _G["OmniScanningTooltipTextLeft" .. i]
         if textFrame then
             local line = textFrame:GetText()
             if line then
                 if line == SOULBOUND_TEXT or line == BOP_TEXT or line == BOA_TEXT then
-                    return true, "BoP"
+                    boundResult, typeResult = true, "BoP"
+                    break
                 elseif line == BOE_TEXT then
-                    return false, "BoE"
+                    boundResult, typeResult = false, "BoE"
+                    break
                 end
             end
         end
     end
 
-    return false, "BoE"
+    if cacheKey then
+        bindScanCache[cacheKey] = { boundResult, typeResult }
+    end
+    return boundResult, typeResult
 end
 
 --- Tooltip scan on an item hyperlink (guild bank, inspect, etc.).
@@ -308,7 +329,7 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
         isBound = API:IsItemSoulbound(bagID, slotID)
         bindType = isBound and "BoP" or "BoE"
     else
-        isBound, bindType = ScanTooltipForBinding(bagID, slotID)
+        isBound, bindType = ScanTooltipForBinding(bagID, slotID, itemLink)
     end
 
     -- ʕ •ᴥ•ʔ✿ Attunability: true when anyone on the account can attune it ✿ ʕ •ᴥ•ʔ
