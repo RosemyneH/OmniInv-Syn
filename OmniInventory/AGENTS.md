@@ -227,11 +227,13 @@ If no new rule is detected → do not update the file.
 > User mandated PRG compliance. OmniInventory is a **Gold Tier** project.
 
 **Project Classification:**
+
 - **Tier**: Gold (8+ hours of work, genuine product, unique branding)
 - **Naming**: `Application-Brand-Name` format → "OmniInventory"
 - **README**: Must follow Gold tier requirements
 
 **README Structure (Gold Tier Required):**
+
 - Header with banner/icon (clickable, links to demo/repo)
 - Badges (technologies with versions, PRG tier badge)
 - Description with screenshots/GIFs
@@ -248,18 +250,21 @@ If no new rule is detected → do not update the file.
 - Footer with credits and icon
 
 **Repository Files (Required):**
+
 - `README.md` — comprehensive, follows Gold template
 - `LICENSE` — GNU GPLv3 for Gold tier
 - `.gitignore` — exclude build artifacts, editor files
 - `docs/` folder — features, ADRs, testing (MCAF)
 
 **Repository Files (Optional but Encouraged):**
+
 - `.github/CREDITS.md`
 - `.github/CHANGELOG.md`
 - `.github/CONTRIBUTING.md`
 - `.github/CODE_OF_CONDUCT.md`
 
 **Branding (Gold Tier):**
+
 - `icon.png` — 414×414px application icon
 - `banner_large.png` — 1280×260px for README header
 - `banner_social.png` — 1280×640px for GitHub social preview
@@ -267,6 +272,7 @@ If no new rule is detected → do not update the file.
 - Consistent color palette
 
 **PRG Badge for Gold:**
+
 ```markdown
 [![PRG Gold](https://img.shields.io/badge/PRG-Gold_Project-FFD700?style=for-the-badge&logo=...)](URL)
 ```
@@ -284,3 +290,4 @@ If no new rule is detected → do not update the file.
 - User wants forward-compatible architecture (3.3.5a → Retail)
 - Prefer `GetItemLinkAttuneProgress(itemlink)` over item ID-based attune APIs so affix variants resolve correctly
 - AttuneHelper mini-frame embedding must leave child button visibility/layout under AttuneHelper control; OmniInventory should only parent, show, and hide the mini frame so AH's dynamic button modes do not malform
+

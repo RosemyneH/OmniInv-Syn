@@ -3445,12 +3445,12 @@ function Frame:UpdateEmbeddedAttuneHelper()
         if self.UpdateFooterCustomButtons then self:UpdateFooterCustomButtons() end
         return
     end
-
+--[[
     if InCombatLockdown and InCombatLockdown() then
         self:EnsureEmbeddedAttuneHelperRetry()
         return
     end
-
+--]]
     _G.AttuneHelperDB = _G.AttuneHelperDB or {}
     local miniModeWasEnabled = (_G.AttuneHelperDB["Mini Mode"] == 1)
     if not miniModeWasEnabled then
