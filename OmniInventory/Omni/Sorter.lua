@@ -27,6 +27,9 @@ local function GetCategoryPriority(item)
     end
 
     if Omni.Categorizer then
+        if Omni.Categorizer.GetCategorySortIndex then
+            return Omni.Categorizer:GetCategorySortIndex(item.category)
+        end
         local catInfo = Omni.Categorizer:GetCategoryInfo(item.category)
         return catInfo and catInfo.priority or 99
     end
