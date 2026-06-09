@@ -1040,11 +1040,7 @@ function BankFrame:RenderFlowView(items)
     end
 
     if Omni.Categorizer then
-        table.sort(categoryOrder, function(a, b)
-            local infoA = Omni.Categorizer:GetCategoryInfo(a)
-            local infoB = Omni.Categorizer:GetCategoryInfo(b)
-            return (infoA.priority or 99) < (infoB.priority or 99)
-        end)
+        Omni.Categorizer:SortCategoryNames(categoryOrder)
     end
 
     local dualCategoryLanes = #categoryOrder > 1

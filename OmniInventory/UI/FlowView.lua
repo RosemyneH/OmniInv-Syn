@@ -44,13 +44,8 @@ function FlowView:GetCategoryOrder(categorizedItems)
         table.insert(order, catName)
     end
 
-    -- Sort by category priority
     if Omni.Categorizer then
-        table.sort(order, function(a, b)
-            local infoA = Omni.Categorizer:GetCategoryInfo(a)
-            local infoB = Omni.Categorizer:GetCategoryInfo(b)
-            return (infoA.priority or 99) < (infoB.priority or 99)
-        end)
+        Omni.Categorizer:SortCategoryNames(order)
     else
         table.sort(order)
     end

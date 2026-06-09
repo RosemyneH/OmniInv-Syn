@@ -1996,14 +1996,11 @@ function Frame:RebuildFilterTabs(presentCategories)
             table.insert(categoryNames, name)
         end
     end
-    table.sort(categoryNames, function(a, b)
-        local ia = Omni.Categorizer and Omni.Categorizer:GetCategoryInfo(a) or { priority = 99 }
-        local ib = Omni.Categorizer and Omni.Categorizer:GetCategoryInfo(b) or { priority = 99 }
-        if (ia.priority or 99) ~= (ib.priority or 99) then
-            return (ia.priority or 99) < (ib.priority or 99)
-        end
-        return a < b
-    end)
+    if Omni.Categorizer then
+        Omni.Categorizer:SortCategoryNames(categoryNames)
+    else
+        table.sort(categoryNames)
+    end
 
     for _, name in ipairs(categoryNames) do
         table.insert(defs, {
