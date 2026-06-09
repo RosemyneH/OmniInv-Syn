@@ -2148,7 +2148,7 @@ end
 
 function Frame:SetQuickFilter(filterName)
     -- ʕ •ᴥ•ʔ✿ Toggle semantics: clicking the active tab a second time
-    -- clears the filter so the bag "sorts back" to its normal LPT
+    -- clears the filter so the bag returns to its configured category
     -- layout without needing a separate "All" click. ✿ ʕ •ᴥ•ʔ
     if activeFilter ~= nil and activeFilter == filterName then
         filterName = nil
@@ -4077,7 +4077,7 @@ function Frame:UpdateLayout(changedBags, opts)
     -- ʕ •ᴥ•ʔ✿ When a filter tab is active, always dim the non-matching
     -- items so the selection pops. In flow mode OOC we ALSO re-order
     -- (the selected category gets pinned top-left by RenderFlowView's
-    -- LPT block), so the user sees the filter both promoted and the
+    -- ordered lane assignment), so the user sees the filter both promoted and the
     -- rest grayed out in place. If the category later empties out,
     -- RebuildFilterTabs clears activeFilter and the dim goes with it. ✿ ʕ •ᴥ•ʔ
     local quickFilter = self:GetActiveFilter()
@@ -4312,31 +4312,18 @@ function Frame:RenderFlowView(items, layoutOpts)
             table.insert(categories[cat], item)
         end
 
-        -- Sort categories
-        if Omni.Categorizer then
-            table.sort(categoryOrder, function(a, b)
-                local infoA = Omni.Categorizer:GetCategoryInfo(a)
-                local infoB = Omni.Categorizer:GetCategoryInfo(b)
-                return (infoA.priority or 99) < (infoB.priority or 99)
-            end)
+        categories["BoE"] = categories["BoE"] or {}
+        if not seenCategoryThisPass["BoE"] then
+            seenCategoryThisPass["BoE"] = true
+            usedCategoryKeys[#usedCategoryKeys + 1] = "BoE"
+            table.insert(categoryOrder, "BoE")
         end
 
-        -- ʕ •ᴥ•ʔ✿ Keep BoE inside the dual-lane flow, but pin it to the
-        -- tail of the priority order so it's the final section rendered.
-        -- We still render the BoE header even when the player holds zero
-        -- BoE equipment -- the overflow strip (where every pre-parked
-        -- empty slot button lives) anchors to BoE's lane, so any item
-        -- that lands in a previously empty slot during combat visually
-        -- appears under "BoE" inside its half-width lane. ✿ ʕ •ᴥ•ʔ
-        local reordered = {}
-        for _, catName in ipairs(categoryOrder) do
-            if catName ~= "BoE" then
-                table.insert(reordered, catName)
-            end
+        if Omni.Categorizer then
+            Omni.Categorizer:SortCategoryNames(categoryOrder)
+        else
+            table.sort(categoryOrder)
         end
-        categories["BoE"] = categories["BoE"] or {}
-        table.insert(reordered, "BoE")
-        categoryOrder = reordered
 
         if IsMerchantOpen() then
             if not vendorFlowLayoutFreeze then
@@ -4443,19 +4430,6 @@ function Frame:RenderFlowView(items, layoutOpts)
         end
     end
 
-    -- ʕ ◕ᴥ◕ ʔ✿ LPT (Longest Processing Time first) lane partitioning for
-    -- flow mode. We predict each section's height, sort categories by
-    -- height descending, and greedily assign each to the currently
-    -- shorter lane. That places the tallest sections at the top of each
-    -- lane and folds smaller categories into whichever side still has
-    -- room -- otherwise a single giant category (e.g. Attunable with 50
-    -- items) sinks one lane entirely while everything else stacks on
-    -- the other, wasting half the frame.
-    --
-    -- BoE is included in the LPT partition (so its own size balances
-    -- correctly), then bubbled to the end of whichever lane it landed
-    -- on so the overflow strip still anchors at the bottom of BoE's
-    -- lane for combat-safe slot appearance. ✿ ʕ ◕ᴥ◕ ʔ
     local laneAssignment = nil
     if flowContentOnly then
         laneAssignment = flowLayoutCache.laneAssignment
@@ -4471,84 +4445,44 @@ function Frame:RenderFlowView(items, layoutOpts)
         elseif canReuseLaneAssignment then
             laneAssignment = flowLayoutCache.laneAssignment
         end
-        local laneColumns = columnsForLaneWidth((usableWidth - laneGap) * 0.5)
-        local function sectionHeight(catName)
-            local n = categories[catName] and #categories[catName] or 0
-            if n <= 0 then
-                return sectionHeaderHeight + sectionSpacing
-            end
-            local rows = math.ceil(n / laneColumns)
-            return sectionHeaderHeight + rows * itemStep + sectionSpacing
-        end
-        local function categoryPriority(name)
-            if Omni.Categorizer then
-                local info = Omni.Categorizer:GetCategoryInfo(name)
-                return info and info.priority or 99
-            end
-            return 99
-        end
 
-        -- ʕ ◕ᴥ◕ ʔ✿ Active quick filter? Pin that category to the top of
-        -- the left lane and fold every other section around it using
-        -- greedy shortest-lane assignment (no LPT rebalance, so the
-        -- selected tab stays at top-left as the user requested). The
-        -- caller already suppresses item dimming OOC, so this re-order
-        -- is the entire "push the filter to top-left" behavior. ✿ ʕ ◕ᴥ◕ ʔ
         local pinnedCategory = nil
         if activeFilter and categories[activeFilter] then
             pinnedCategory = activeFilter
         end
 
         local leftLane, rightLane = {}, {}
-        local leftH, rightH = 0, 0
         if not laneAssignment then
             laneAssignment = {}
         end
 
+        local function assignLane(name, useRight)
+            if useRight then
+                table.insert(rightLane, name)
+                laneAssignment[name] = "right"
+            else
+                table.insert(leftLane, name)
+                laneAssignment[name] = "left"
+            end
+        end
+
         if not canReuseLaneAssignment and pinnedCategory then
-            table.insert(leftLane, pinnedCategory)
-            laneAssignment[pinnedCategory] = "left"
-            leftH = sectionHeight(pinnedCategory)
+            assignLane(pinnedCategory, false)
 
             local rest = {}
             for _, name in ipairs(categoryOrder) do
                 if name ~= pinnedCategory then table.insert(rest, name) end
             end
-            table.sort(rest, function(a, b)
-                return categoryPriority(a) < categoryPriority(b)
-            end)
+            local nextRight = true
             for _, name in ipairs(rest) do
-                if rightH < leftH then
-                    table.insert(rightLane, name)
-                    rightH = rightH + sectionHeight(name)
-                    laneAssignment[name] = "right"
-                else
-                    table.insert(leftLane, name)
-                    leftH = leftH + sectionHeight(name)
-                    laneAssignment[name] = "left"
-                end
+                assignLane(name, nextRight)
+                nextRight = not nextRight
             end
         elseif not canReuseLaneAssignment then
-            -- ʕ •ᴥ•ʔ✿ LPT: sort by predicted height descending, greedy
-            -- into shorter lane for balance. Tallest sections land at
-            -- the top of each lane. ✿ ʕ •ᴥ•ʔ
-            local byHeight = {}
-            for _, name in ipairs(categoryOrder) do table.insert(byHeight, name) end
-            table.sort(byHeight, function(a, b)
-                local ha, hb = sectionHeight(a), sectionHeight(b)
-                if ha ~= hb then return ha > hb end
-                return categoryPriority(a) < categoryPriority(b)
-            end)
-            for _, name in ipairs(byHeight) do
-                if rightH < leftH then
-                    table.insert(rightLane, name)
-                    rightH = rightH + sectionHeight(name)
-                    laneAssignment[name] = "right"
-                else
-                    table.insert(leftLane, name)
-                    leftH = leftH + sectionHeight(name)
-                    laneAssignment[name] = "left"
-                end
+            local useRight = false
+            for _, name in ipairs(categoryOrder) do
+                assignLane(name, useRight)
+                useRight = not useRight
             end
         end
 
@@ -4617,8 +4551,8 @@ function Frame:RenderFlowView(items, layoutOpts)
                 local edgePad = hInset * 0.5
                 local leftX = edgePad + itemGap
                 local rightX = edgePad + laneW + laneGap + itemGap
-                -- ʕ •ᴥ•ʔ✿ Prefer the pre-computed LPT lane assignment
-                -- (flow mode). If we don't have one (bag mode), fall
+                -- ʕ •ᴥ•ʔ✿ Prefer the pre-computed category-order lane
+                -- assignment (flow mode). If we don't have one (bag mode), fall
                 -- back to a live greedy shortest-lane check: y values
                 -- grow more negative as content stacks, so the larger
                 -- (less negative) y has more room. Ties go left. ✿ ʕ •ᴥ•ʔ
@@ -4829,8 +4763,8 @@ function Frame:RenderFlowView(items, layoutOpts)
                 -- ʕ •ᴥ•ʔ✿ Remember BoE's lane geometry. The overflow
                 -- strip anchors to BoE's x/columns (same half-width
                 -- column) but uses the lane's final bottom y (captured
-                -- after the loop), so BoE can sit at the top of its
-                -- lane per LPT without the overflow grid overlapping
+                -- after the loop), so BoE can follow configured order
+                -- without the overflow grid overlapping
                 -- the sections rendered below it. ✿ ʕ •ᴥ•ʔ
                 boeAnchor = {
                     x = laneX,
