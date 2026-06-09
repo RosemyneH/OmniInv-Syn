@@ -133,6 +133,7 @@ end
 local SECTION_COLORS = {
     view   = { 0.85, 0.90, 1.00 },
     sort   = { 0.85, 0.90, 1.00 },
+    categories = { 0.70, 1.00, 0.85 },
     misc   = { 0.78, 0.88, 1.00 },
     attune = { 1.00, 0.82, 0.00 },
     colors = { 1.00, 0.60, 0.20 },
@@ -203,6 +204,42 @@ local ADDON_BUTTON_OPTIONS = {
     { key = "theJournal",  label = "TheJournal"  },
     { key = "qtRunner",    label = "QTRunner"    },
 }
+
+local CATEGORY_ORDER_COLUMNS = 2
+local CATEGORY_ORDER_CELL_WIDTH = 126
+local CATEGORY_ORDER_CELL_HEIGHT = 22
+local CATEGORY_ORDER_CELL_GAP = 8
+local CATEGORY_ORDER_ROW_GAP = 4
+
+local function GetCategoryOrderForSettings()
+    local order = {}
+    local seen = {}
+    local function add(name)
+        if type(name) == "string" and name ~= "" and not seen[name] then
+            order[#order + 1] = name
+            seen[name] = true
+        end
+    end
+
+    if Omni.Categorizer then
+        if Omni.Categorizer.GetCategoryOrder then
+            for _, name in ipairs(Omni.Categorizer:GetCategoryOrder() or {}) do
+                add(name)
+            end
+        end
+        if Omni.Categorizer.GetAllCategories then
+            for _, info in ipairs(Omni.Categorizer:GetAllCategories() or {}) do
+                add(type(info) == "table" and info.name or info)
+            end
+        end
+    elseif OmniInventoryDB and OmniInventoryDB.global then
+        for _, name in ipairs(OmniInventoryDB.global.categoryOrder or {}) do
+            add(name)
+        end
+    end
+
+    return order
+end
 
 local function GetFooterButtonsDB()
     OmniInventoryDB = OmniInventoryDB or {}
@@ -318,6 +355,54 @@ local function CreateSectionHeader(parent, text, y, color)
         label:SetTextColor(color[1], color[2], color[3], color[4] or 1)
     end
     return label
+end
+
+local function CreateCategoryOrderCell(parent, index)
+    local cell = CreateFrame("Button", nil, parent)
+    cell:SetSize(CATEGORY_ORDER_CELL_WIDTH, CATEGORY_ORDER_CELL_HEIGHT)
+    cell:EnableMouse(true)
+    cell:RegisterForDrag("LeftButton")
+    cell:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+
+    cell.indexText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cell.indexText:SetPoint("LEFT", 5, 0)
+    cell.indexText:SetWidth(18)
+    cell.indexText:SetJustifyH("RIGHT")
+
+    cell.nameText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cell.nameText:SetPoint("LEFT", cell.indexText, "RIGHT", 5, 0)
+    cell.nameText:SetPoint("RIGHT", cell, "RIGHT", -5, 0)
+    cell.nameText:SetJustifyH("LEFT")
+
+    cell:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            Settings:BeginCategoryOrderDrag(self.orderIndex)
+        end
+    end)
+    cell:SetScript("OnMouseUp", function(self)
+        Settings:DropCategoryOrderOn(self.orderIndex)
+    end)
+    cell:SetScript("OnEnter", function(self)
+        Settings:HoverCategoryOrderCell(self.orderIndex)
+        if Settings.categoryOrderDragIndex then
+            return
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Category layout", 1, 0.82, 0)
+        GameTooltip:AddLine("Drag this tile onto another slot to reorder the flow layout.", 1, 1, 1, true)
+        GameTooltip:AddLine("Tiles map as 1,2 / 3,4 / 5,6 in the dual-lane view.", 0.75, 0.75, 0.75, true)
+        GameTooltip:Show()
+    end)
+    cell:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    cell.orderIndex = index
+    return cell
 end
 
 function Settings:CreateControls(parent)
@@ -454,7 +539,45 @@ function Settings:CreateControls(parent)
     end)
     self.sortBtn = sortBtn
 
-    yOffset = yOffset - SPACING - 20
+    yOffset = yOffset - SPACING - SECTION_GAP
+
+    CreateSectionHeader(parent, "Category Order", yOffset, SECTION_COLORS.categories)
+    yOffset = yOffset - HEADER_GAP
+
+    local categoryHint = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    categoryHint:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    categoryHint:SetWidth(260)
+    categoryHint:SetJustifyH("CENTER")
+    categoryHint:SetText("Drag tiles: row 1 = left/right, row 2 = left/right.")
+    self.categoryOrderHint = categoryHint
+
+    yOffset = yOffset - 20
+
+    self.categoryOrderRows = {}
+    local categoryOrder = GetCategoryOrderForSettings()
+    for i = 1, #categoryOrder do
+        local cell = CreateCategoryOrderCell(parent, i)
+        local col = (i - 1) % CATEGORY_ORDER_COLUMNS
+        local row = math.floor((i - 1) / CATEGORY_ORDER_COLUMNS)
+        cell:SetPoint("TOPLEFT", parent, "TOPLEFT",
+            5 + col * (CATEGORY_ORDER_CELL_WIDTH + CATEGORY_ORDER_CELL_GAP),
+            yOffset - row * (CATEGORY_ORDER_CELL_HEIGHT + CATEGORY_ORDER_ROW_GAP))
+        self.categoryOrderRows[i] = cell
+    end
+
+    local categoryRows = math.ceil(#categoryOrder / CATEGORY_ORDER_COLUMNS)
+    yOffset = yOffset - (categoryRows * (CATEGORY_ORDER_CELL_HEIGHT + CATEGORY_ORDER_ROW_GAP)) - 6
+
+    local resetCategoryOrderBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    resetCategoryOrderBtn:SetSize(140, 22)
+    resetCategoryOrderBtn:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    resetCategoryOrderBtn:SetText("Reset Order")
+    resetCategoryOrderBtn:SetScript("OnClick", function()
+        Settings:ResetCategoryOrder()
+    end)
+    self.resetCategoryOrderBtn = resetCategoryOrderBtn
+
+    yOffset = yOffset - 24
 
     -- ʕ ● ᴥ ●ʔ Category Editor intentionally hidden — custom-rule engine is disabled pending rewrite
 
@@ -877,6 +1000,119 @@ function Settings:Toggle()
     end
 end
 
+function Settings:CommitCategoryOrder(order)
+    if IsSettingEditLocked() then
+        self:RefreshCategoryOrderControls()
+        print("|cFFFF4040OmniInventory|r: Category order can only be changed out of combat.")
+        return
+    end
+    if Omni.Categorizer and Omni.Categorizer.SetCategoryOrder then
+        Omni.Categorizer:SetCategoryOrder(order)
+        self:RefreshCategoryOrderControls()
+        RefreshAllInventory()
+    end
+end
+
+function Settings:MoveCategoryOrderSlot(fromIndex, toIndex)
+    if fromIndex == toIndex then
+        return
+    end
+
+    local order = GetCategoryOrderForSettings()
+    if not order[fromIndex] or not order[toIndex] then
+        return
+    end
+
+    local moving = table.remove(order, fromIndex)
+    table.insert(order, toIndex, moving)
+    self:CommitCategoryOrder(order)
+end
+
+function Settings:BeginCategoryOrderDrag(index)
+    if IsSettingEditLocked() then
+        print("|cFFFF4040OmniInventory|r: Category order can only be changed out of combat.")
+        return
+    end
+    self.categoryOrderDragIndex = index
+    self:RefreshCategoryOrderControls()
+end
+
+function Settings:DropCategoryOrderOn(index)
+    local fromIndex = self.categoryOrderDragIndex
+    self.categoryOrderDragIndex = nil
+    if fromIndex and index and fromIndex ~= index then
+        self:MoveCategoryOrderSlot(fromIndex, index)
+    else
+        self:RefreshCategoryOrderControls()
+    end
+end
+
+function Settings:HoverCategoryOrderCell(index)
+    local fromIndex = self.categoryOrderDragIndex
+    if not fromIndex or fromIndex == index then
+        return
+    end
+    if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+        self.categoryOrderDragIndex = nil
+        self:RefreshCategoryOrderControls()
+        return
+    end
+    self:MoveCategoryOrderSlot(fromIndex, index)
+    self.categoryOrderDragIndex = index
+    self:RefreshCategoryOrderControls()
+end
+
+function Settings:ResetCategoryOrder()
+    if IsSettingEditLocked() then
+        self:RefreshCategoryOrderControls()
+        print("|cFFFF4040OmniInventory|r: Category order can only be changed out of combat.")
+        return
+    end
+    if Omni.Categorizer and Omni.Categorizer.ResetCategoryOrder then
+        Omni.Categorizer:ResetCategoryOrder()
+        self:RefreshCategoryOrderControls()
+        RefreshAllInventory()
+    end
+end
+
+function Settings:RefreshCategoryOrderControls()
+    if not self.categoryOrderRows then
+        return
+    end
+
+    local order = GetCategoryOrderForSettings()
+    local locked = IsSettingEditLocked()
+
+    for i, cell in ipairs(self.categoryOrderRows) do
+        local name = order[i]
+        if name then
+            cell.orderIndex = i
+            cell.indexText:SetText(tostring(i) .. ".")
+            cell.nameText:SetText(name)
+            if Omni.Categorizer then
+                local r, g, b = Omni.Categorizer:GetCategoryColor(name)
+                cell.nameText:SetTextColor(r, g, b, 1)
+                cell:SetBackdropColor(r * 0.12, g * 0.12, b * 0.12, 0.95)
+                cell:SetBackdropBorderColor(r, g, b, self.categoryOrderDragIndex == i and 1 or 0.55)
+            else
+                cell.nameText:SetTextColor(1, 1, 1, 1)
+                cell:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
+                cell:SetBackdropBorderColor(0.55, 0.55, 0.55, self.categoryOrderDragIndex == i and 1 or 0.55)
+            end
+            cell:EnableMouse(not locked)
+            cell:SetAlpha(locked and 0.45 or 1)
+            cell:Show()
+        else
+            cell:Hide()
+        end
+    end
+
+    if self.resetCategoryOrderBtn then
+        self.resetCategoryOrderBtn:EnableMouse(not locked)
+        self.resetCategoryOrderBtn:SetAlpha(locked and 0.45 or 1)
+    end
+end
+
 function Settings:RefreshTooltipPlacementControls()
     if not Omni.ItemButton or not Omni.ItemButton.GetResolvedTooltipPlacement then
         return
@@ -902,6 +1138,8 @@ function Settings:UpdateValues()
     if not optionsFrame then return end
 
     self._syncingScaleControls = true
+
+    self:RefreshCategoryOrderControls()
 
     if self.highlightNewItemsCb and Omni.Data then
         self.highlightNewItemsCb:SetChecked(Omni.Data:Get("highlightNewItems") == true)
