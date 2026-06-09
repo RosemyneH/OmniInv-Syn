@@ -11,12 +11,12 @@ Omni.Settings = {}
 local Settings = Omni.Settings
 local optionsFrame = nil
 
-local function RefreshAllInventory()
+local function RefreshAllInventory(reason)
     if Omni.Frame then
         if Omni.Frame.InvalidateRenderCaches then
             Omni.Frame:InvalidateRenderCaches()
         end
-        Omni.Frame:UpdateLayout()
+        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "settings_refresh" })
     end
     if Omni.BankFrame and Omni.BankFrame.UpdateLayout then
         Omni.BankFrame:UpdateLayout()
@@ -211,11 +211,23 @@ local CATEGORY_ORDER_CELL_HEIGHT = 22
 local CATEGORY_ORDER_CELL_GAP = 8
 local CATEGORY_ORDER_ROW_GAP = 4
 
+local function PositionCategoryOrderCell(cell, parent, index, yOffset)
+    local col = (index - 1) % CATEGORY_ORDER_COLUMNS
+    local row = math.floor((index - 1) / CATEGORY_ORDER_COLUMNS)
+    cell:ClearAllPoints()
+    cell:SetPoint("TOPLEFT", parent, "TOPLEFT",
+        5 + col * (CATEGORY_ORDER_CELL_WIDTH + CATEGORY_ORDER_CELL_GAP),
+        yOffset - row * (CATEGORY_ORDER_CELL_HEIGHT + CATEGORY_ORDER_ROW_GAP))
+end
+
 local function GetCategoryOrderForSettings()
     local order = {}
     local seen = {}
+    local hiddenCategories = OmniInventoryDB and OmniInventoryDB.global
+        and OmniInventoryDB.global.hiddenCategories
     local function add(name)
-        if type(name) == "string" and name ~= "" and not seen[name] then
+        if type(name) == "string" and name ~= "" and not seen[name]
+                and (type(hiddenCategories) ~= "table" or hiddenCategories[name] ~= true) then
             order[#order + 1] = name
             seen[name] = true
         end
@@ -375,16 +387,42 @@ local function CreateCategoryOrderCell(parent, index)
 
     cell.nameText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cell.nameText:SetPoint("LEFT", cell.indexText, "RIGHT", 5, 0)
-    cell.nameText:SetPoint("RIGHT", cell, "RIGHT", -5, 0)
+    cell.nameText:SetPoint("RIGHT", cell, "RIGHT", -20, 0)
     cell.nameText:SetJustifyH("LEFT")
+
+    cell.hideBtn = CreateFrame("Button", nil, cell)
+    cell.hideBtn:SetSize(16, 16)
+    cell.hideBtn:SetPoint("RIGHT", -2, 0)
+    cell.hideBtn:RegisterForClicks("LeftButtonUp")
+    cell.hideBtn.text = cell.hideBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cell.hideBtn.text:SetPoint("CENTER", 0, 1)
+    cell.hideBtn.text:SetText("x")
+    cell.hideBtn.text:SetTextColor(1, 0.35, 0.35, 1)
+    cell.hideBtn:SetScript("OnClick", function(self)
+        Settings:HideCategoryOrderSlot(self:GetParent().categoryName)
+    end)
+    cell.hideBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Hide category", 1, 0.82, 0)
+        GameTooltip:AddLine("Items will fall through to the next matching category.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Reset Order restores hidden categories.", 0.75, 0.75, 0.75, true)
+        GameTooltip:Show()
+    end)
+    cell.hideBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
 
     cell:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             Settings:BeginCategoryOrderDrag(self.orderIndex)
+        elseif button == "RightButton" and self.categoryName and Omni.CategoryEditor then
+            Omni.CategoryEditor:Open(self.categoryName)
         end
     end)
-    cell:SetScript("OnMouseUp", function(self)
-        Settings:DropCategoryOrderOn(self.orderIndex)
+    cell:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            Settings:DropCategoryOrderOn(self.orderIndex)
+        end
     end)
     cell:SetScript("OnEnter", function(self)
         Settings:HoverCategoryOrderCell(self.orderIndex)
@@ -394,6 +432,8 @@ local function CreateCategoryOrderCell(parent, index)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Category layout", 1, 0.82, 0)
         GameTooltip:AddLine("Drag this tile onto another slot to reorder the flow layout.", 1, 1, 1, true)
+        GameTooltip:AddLine("Right-click to edit category contents.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Click x to hide this category.", 0.8, 0.8, 0.8, true)
         GameTooltip:AddLine("Tiles map as 1,2 / 3,4 / 5,6 in the dual-lane view.", 0.75, 0.75, 0.75, true)
         GameTooltip:Show()
     end)
@@ -548,29 +588,42 @@ function Settings:CreateControls(parent)
     categoryHint:SetPoint("TOP", parent, "TOP", 0, yOffset)
     categoryHint:SetWidth(260)
     categoryHint:SetJustifyH("CENTER")
-    categoryHint:SetText("Drag tiles: row 1 = left/right, row 2 = left/right.")
+    categoryHint:SetText("Drag to reorder. x hides. Reset restores.")
     self.categoryOrderHint = categoryHint
 
     yOffset = yOffset - 20
 
     self.categoryOrderRows = {}
+    self.categoryOrderParent = parent
+    self.categoryOrderStartY = yOffset
     local categoryOrder = GetCategoryOrderForSettings()
     for i = 1, #categoryOrder do
         local cell = CreateCategoryOrderCell(parent, i)
-        local col = (i - 1) % CATEGORY_ORDER_COLUMNS
-        local row = math.floor((i - 1) / CATEGORY_ORDER_COLUMNS)
-        cell:SetPoint("TOPLEFT", parent, "TOPLEFT",
-            5 + col * (CATEGORY_ORDER_CELL_WIDTH + CATEGORY_ORDER_CELL_GAP),
-            yOffset - row * (CATEGORY_ORDER_CELL_HEIGHT + CATEGORY_ORDER_ROW_GAP))
+        PositionCategoryOrderCell(cell, parent, i, yOffset)
         self.categoryOrderRows[i] = cell
     end
 
     local categoryRows = math.ceil(#categoryOrder / CATEGORY_ORDER_COLUMNS)
     yOffset = yOffset - (categoryRows * (CATEGORY_ORDER_CELL_HEIGHT + CATEGORY_ORDER_ROW_GAP)) - 6
 
+    local newCategoryOrderBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    newCategoryOrderBtn:SetSize(126, 22)
+    newCategoryOrderBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, yOffset)
+    newCategoryOrderBtn:SetText("New Category")
+    newCategoryOrderBtn:SetScript("OnClick", function()
+        if IsSettingEditLocked() then
+            print("|cFFFF4040OmniInventory|r: Categories can only be changed out of combat.")
+            return
+        end
+        if Omni.CategoryEditor and Omni.CategoryEditor.PromptNewCategory then
+            Omni.CategoryEditor:PromptNewCategory()
+        end
+    end)
+    self.newCategoryOrderBtn = newCategoryOrderBtn
+
     local resetCategoryOrderBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    resetCategoryOrderBtn:SetSize(140, 22)
-    resetCategoryOrderBtn:SetPoint("TOP", parent, "TOP", 0, yOffset)
+    resetCategoryOrderBtn:SetSize(126, 22)
+    resetCategoryOrderBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -5, yOffset)
     resetCategoryOrderBtn:SetText("Reset Order")
     resetCategoryOrderBtn:SetScript("OnClick", function()
         Settings:ResetCategoryOrder()
@@ -579,7 +632,7 @@ function Settings:CreateControls(parent)
 
     yOffset = yOffset - 24
 
-    -- ʕ ● ᴥ ●ʔ Category Editor intentionally hidden — custom-rule engine is disabled pending rewrite
+    -- ʕ ● ᴥ ●ʔ Rule editor stays hidden; category membership now opens from right-clicked headers.
 
     yOffset = yOffset - SECTION_GAP
     CreateSectionHeader(parent, "Misc Options", yOffset, SECTION_COLORS.misc)
@@ -1009,7 +1062,7 @@ function Settings:CommitCategoryOrder(order)
     if Omni.Categorizer and Omni.Categorizer.SetCategoryOrder then
         Omni.Categorizer:SetCategoryOrder(order)
         self:RefreshCategoryOrderControls()
-        RefreshAllInventory()
+        RefreshAllInventory("category_order")
     end
 end
 
@@ -1071,7 +1124,25 @@ function Settings:ResetCategoryOrder()
     if Omni.Categorizer and Omni.Categorizer.ResetCategoryOrder then
         Omni.Categorizer:ResetCategoryOrder()
         self:RefreshCategoryOrderControls()
-        RefreshAllInventory()
+        RefreshAllInventory("category_reset")
+    end
+end
+
+function Settings:HideCategoryOrderSlot(name)
+    if not name or name == "" then return end
+    if IsSettingEditLocked() then
+        self:RefreshCategoryOrderControls()
+        print("|cFFFF4040OmniInventory|r: Categories can only be hidden out of combat.")
+        return
+    end
+    if name == "Miscellaneous" then
+        print("|cFFFF4040OmniInventory|r: Miscellaneous cannot be hidden because it is the fallback category.")
+        return
+    end
+    if Omni.Categorizer and Omni.Categorizer.HideCategory and Omni.Categorizer:HideCategory(name) then
+        self.categoryOrderDragIndex = nil
+        self:RefreshCategoryOrderControls()
+        RefreshAllInventory("category_hide")
     end
 end
 
@@ -1083,10 +1154,19 @@ function Settings:RefreshCategoryOrderControls()
     local order = GetCategoryOrderForSettings()
     local locked = IsSettingEditLocked()
 
+    if self.categoryOrderParent and self.categoryOrderStartY then
+        for i = #self.categoryOrderRows + 1, #order do
+            local cell = CreateCategoryOrderCell(self.categoryOrderParent, i)
+            PositionCategoryOrderCell(cell, self.categoryOrderParent, i, self.categoryOrderStartY)
+            self.categoryOrderRows[i] = cell
+        end
+    end
+
     for i, cell in ipairs(self.categoryOrderRows) do
         local name = order[i]
         if name then
             cell.orderIndex = i
+            cell.categoryName = name
             cell.indexText:SetText(tostring(i) .. ".")
             cell.nameText:SetText(name)
             if Omni.Categorizer then
@@ -1101,8 +1181,18 @@ function Settings:RefreshCategoryOrderControls()
             end
             cell:EnableMouse(not locked)
             cell:SetAlpha(locked and 0.45 or 1)
+            if cell.hideBtn then
+                local canHide = not locked and name ~= "Miscellaneous"
+                cell.hideBtn:EnableMouse(canHide)
+                cell.hideBtn:SetAlpha(canHide and 1 or 0.25)
+                cell.hideBtn:Show()
+            end
             cell:Show()
         else
+            cell.categoryName = nil
+            if cell.hideBtn then
+                cell.hideBtn:Hide()
+            end
             cell:Hide()
         end
     end
@@ -1110,6 +1200,10 @@ function Settings:RefreshCategoryOrderControls()
     if self.resetCategoryOrderBtn then
         self.resetCategoryOrderBtn:EnableMouse(not locked)
         self.resetCategoryOrderBtn:SetAlpha(locked and 0.45 or 1)
+    end
+    if self.newCategoryOrderBtn then
+        self.newCategoryOrderBtn:EnableMouse(not locked)
+        self.newCategoryOrderBtn:SetAlpha(locked and 0.45 or 1)
     end
 end
 

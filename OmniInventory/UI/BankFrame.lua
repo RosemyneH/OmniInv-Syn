@@ -656,7 +656,7 @@ local function CollectBankItems()
     if Omni.Categorizer then
         local perfCategorize = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("bank.CollectBankItems.categorize")
         for _, item in ipairs(items) do
-            item.category = item.category or Omni.Categorizer:GetCategory(item)
+            item.category = Omni.Categorizer:GetCategory(item)
         end
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("bank.CollectBankItems.categorize", perfCategorize)

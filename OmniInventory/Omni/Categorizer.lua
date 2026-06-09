@@ -17,14 +17,21 @@ local Categorizer = Omni.Categorizer
 local categories = {}  -- { name = { priority, icon, color, filter } }
 local categoryOrder = {}
 local categoryOrderIndex = nil
+local USER_CATEGORY_COLOR = { r = 0.25, g = 1.0, b = 0.35 }
 
 local DEFAULT_CATEGORY_ORDER = {
     "Tools",
     "Perishable",
     "Quest Items",
+    "Mythic+",
+    "Tier Token",
+    "Mystic Enchants",
     "Upgradable Items",
     "Attunable",
     "Account Attunable",
+    "Transmog",
+    "Ascension",
+    "Vanity",
     "New Items",
     "BoE",
     "Equipment Sets",
@@ -40,6 +47,50 @@ local DEFAULT_CATEGORY_ORDER = {
     "Miscellaneous",
 }
 
+local function TrimCategoryName(name)
+    name = tostring(name or "")
+    return (string.gsub(name, "^%s*(.-)%s*$", "%1"))
+end
+
+local function CopyColor(color)
+    if type(color) ~= "table" then
+        return { r = USER_CATEGORY_COLOR.r, g = USER_CATEGORY_COLOR.g, b = USER_CATEGORY_COLOR.b }
+    end
+    return {
+        r = tonumber(color.r or color[1]) or USER_CATEGORY_COLOR.r,
+        g = tonumber(color.g or color[2]) or USER_CATEGORY_COLOR.g,
+        b = tonumber(color.b or color[3]) or USER_CATEGORY_COLOR.b,
+    }
+end
+
+local function GetUserCategories()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if type(OmniInventoryDB.global.userCategories) ~= "table" then
+        OmniInventoryDB.global.userCategories = {}
+    end
+    return OmniInventoryDB.global.userCategories
+end
+
+local function GetHiddenCategories()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if type(OmniInventoryDB.global.hiddenCategories) ~= "table" then
+        OmniInventoryDB.global.hiddenCategories = {}
+    end
+    return OmniInventoryDB.global.hiddenCategories
+end
+
+local function IsCategoryHiddenName(name)
+    name = TrimCategoryName(name)
+    if name == "" or name == "Miscellaneous" then return false end
+    return GetHiddenCategories()[name] == true
+end
+
+local function IsCategoryVisible(name)
+    return not IsCategoryHiddenName(name)
+end
+
 local function CopyDefaultCategoryOrder()
     local copy = {}
     for i, name in ipairs(DEFAULT_CATEGORY_ORDER) do
@@ -48,11 +99,55 @@ local function CopyDefaultCategoryOrder()
     return copy
 end
 
+local function EnsureCategoryInSavedOrder(name)
+    name = TrimCategoryName(name)
+    if name == "" then return end
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if type(OmniInventoryDB.global.categoryOrder) ~= "table" then
+        OmniInventoryDB.global.categoryOrder = CopyDefaultCategoryOrder()
+    end
+
+    for _, categoryName in ipairs(OmniInventoryDB.global.categoryOrder) do
+        if categoryName == name then
+            return
+        end
+    end
+
+    table.insert(OmniInventoryDB.global.categoryOrder, name)
+    categoryOrderIndex = nil
+end
+
+local function RemoveCategoryFromSavedOrder(name)
+    if not OmniInventoryDB or not OmniInventoryDB.global
+            or type(OmniInventoryDB.global.categoryOrder) ~= "table" then
+        return
+    end
+
+    for i = #OmniInventoryDB.global.categoryOrder, 1, -1 do
+        if OmniInventoryDB.global.categoryOrder[i] == name then
+            table.remove(OmniInventoryDB.global.categoryOrder, i)
+        end
+    end
+    categoryOrderIndex = nil
+end
+
 local function GetSavedCategoryOrder()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.global = OmniInventoryDB.global or {}
     if type(OmniInventoryDB.global.categoryOrder) ~= "table" then
         OmniInventoryDB.global.categoryOrder = CopyDefaultCategoryOrder()
+    end
+    local seen = {}
+    for _, name in ipairs(OmniInventoryDB.global.categoryOrder) do
+        seen[name] = true
+    end
+    for name in pairs(GetUserCategories()) do
+        if type(name) == "string" and name ~= "" and not seen[name] then
+            table.insert(OmniInventoryDB.global.categoryOrder, name)
+            seen[name] = true
+        end
     end
     return OmniInventoryDB.global.categoryOrder
 end
@@ -65,6 +160,11 @@ local function GetCategoryOrderIndex(name)
                 categoryOrderIndex[categoryName] = i
             end
         end
+        for i, categoryName in ipairs(DEFAULT_CATEGORY_ORDER) do
+            if not categoryOrderIndex[categoryName] then
+                categoryOrderIndex[categoryName] = i
+            end
+        end
     end
     return categoryOrderIndex[name] or 10000
 end
@@ -73,9 +173,15 @@ end
 local CATEGORY_COLORS = {
     ["Perishable"]      = { r = 1.0, g = 0.3, b = 0.3 },
     ["Quest Items"]     = { r = 1.0, g = 0.82, b = 0.0 },
+    ["Mythic+"]         = { r = 0.95, g = 0.35, b = 1.0 },
+    ["Tier Token"]      = { r = 1.0, g = 0.64, b = 0.20 },
+    ["Mystic Enchants"] = { r = 0.35, g = 0.85, b = 1.0 },
     ["Upgradable Items"] = { r = 1.0, g = 0.7, b = 0.2 },
     ["Attunable"]       = { r = 0.0, g = 0.9, b = 0.5 },
     ["Account Attunable"] = { r = 0.85, g = 0.45, b = 1.0 },
+    ["Transmog"]        = { r = 0.95, g = 0.55, b = 1.0 },
+    ["Ascension"]       = { r = 1.0, g = 0.78, b = 0.25 },
+    ["Vanity"]          = { r = 0.82, g = 0.62, b = 1.0 },
     ["BoE"]             = { r = 0.4, g = 0.9, b = 1.0 },
     ["Equipment"]       = { r = 0.0, g = 0.8, b = 0.0 },
     ["Equipment Sets"]  = { r = 0.4, g = 0.8, b = 1.0 },
@@ -497,6 +603,7 @@ local TOOLS_ITEMS = {
     [40772] = true,
     [23821] = true,
     [9149] = true,
+    [6954] = true,
     [13503] = true,
     [35751] = true,
     [35748] = true,
@@ -754,10 +861,19 @@ local function IsBoEItem(itemInfo)
     if not itemInfo then
         return false
     end
-    if itemInfo.bindType ~= "BoE" then
+    if itemInfo.bindType == "BoE" then
+        return IsEquipmentItem(itemInfo)
+    end
+    if itemInfo.isBound == true or itemInfo.bindType == "BoP" then
         return false
     end
-    return IsEquipmentItem(itemInfo)
+
+    local API = Omni.API
+    if API and API.hasCustomSoulbound == false then
+        return IsEquipmentItem(itemInfo)
+    end
+
+    return false
 end
 
 local function IsUpgradableItem(itemInfo)
@@ -774,6 +890,88 @@ local function IsToolsItem(itemInfo)
         return false
     end
     return TOOLS_ITEMS[itemID] == true
+end
+
+local ascensionInstantCache = {}
+local ascensionInstantDetected = nil
+
+local function GetAscensionInstantInfo(itemID)
+    if not itemID or ascensionInstantDetected == false or type(_G.GetItemInfoInstant) ~= "function" then
+        return nil
+    end
+    if ascensionInstantCache[itemID] then
+        return ascensionInstantCache[itemID]
+    end
+
+    local info = GetItemInfoInstant(itemID)
+    if type(info) == "table" and (info.description ~= nil or info.inventoryType ~= nil) then
+        ascensionInstantDetected = true
+        ascensionInstantCache[itemID] = info
+        return info
+    end
+    if ascensionInstantDetected == nil then
+        ascensionInstantDetected = false
+    end
+    return nil
+end
+
+local function HasMythicDescription(description)
+    return type(description) == "string"
+        and (string.find(description, "@Mythic %d") or string.find(description, "@Mythic Level", 1, true))
+end
+
+local function IsUncollectedAppearance(itemID, itemSubType)
+    if itemID == 5956 or itemSubType == "Thrown" then
+        return false
+    end
+    if not (_G.C_Appearance and C_Appearance.GetItemAppearanceID
+            and _G.C_AppearanceCollection and C_AppearanceCollection.IsAppearanceCollected) then
+        return false
+    end
+
+    local appearanceID = C_Appearance.GetItemAppearanceID(itemID)
+    return appearanceID and not C_AppearanceCollection.IsAppearanceCollected(appearanceID)
+end
+
+local function GetAscensionCategory(itemInfo)
+    local itemID = GetItemID(itemInfo)
+    if not itemID then
+        return nil
+    end
+
+    local itemType, itemSubType = GetItemTypeInfo(itemInfo)
+    local isEquipment = itemType == "Weapon" or itemType == "Armor"
+    local ascensionInfo = GetAscensionInstantInfo(itemID)
+    local description = ascensionInfo and ascensionInfo.description
+
+    if HasMythicDescription(description) then
+        return "Mythic+"
+    end
+
+    if isEquipment then
+        if IsUncollectedAppearance(itemID, itemSubType) then
+            return "Transmog"
+        end
+    elseif type(description) == "string" then
+        if ascensionInfo.inventoryType == 0
+                and (string.find(description, "This Token", 1, true)
+                    or string.find(description, "This token", 1, true)) then
+            return "Tier Token"
+        end
+        if string.find(description, "@re", 1, true) then
+            return "Mystic Enchants"
+        end
+    end
+
+    if itemInfo.quality == 6 and (ascensionInfo or type(_G.VANITY_ITEMS) == "table") then
+        local vanityEntry = _G.VANITY_ITEMS and _G.VANITY_ITEMS[itemID]
+        if type(vanityEntry) == "table" and tonumber(vanityEntry.itemid or 0) > 0 then
+            return "Ascension"
+        end
+        return "Vanity"
+    end
+
+    return nil
 end
 
 -- ʕ ◕ᴥ◕ ʔ✿ Account Attunable: BoE equipment that THIS character cannot
@@ -916,7 +1114,7 @@ function Categorizer:GetCategory(itemInfo)
     -- Priority 1: Manual Override
     if itemInfo.itemID and OmniInventoryDB and OmniInventoryDB.categoryOverrides then
         local override = OmniInventoryDB.categoryOverrides[itemInfo.itemID]
-        if override then
+        if override and IsCategoryVisible(override) then
             if Omni._perfEnabled and Omni.Perf then
                 Omni.Perf:End("categorizer.GetCategory", perfToken)
             end
@@ -927,7 +1125,7 @@ function Categorizer:GetCategory(itemInfo)
     -- ʕ ● ᴥ ●ʔ Custom Rules Engine disabled — module is no longer loaded (see OmniInventory.toc)
 
     -- Priority 1.75: Perishable / time-limited turn-in items
-    if self:IsPerishableItem(GetItemID(itemInfo)) then
+    if IsCategoryVisible("Perishable") and self:IsPerishableItem(GetItemID(itemInfo)) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -937,15 +1135,23 @@ function Categorizer:GetCategory(itemInfo)
 
 
     -- Priority 2: Quest Items
-    if IsQuestItem(itemInfo) then
+    if IsCategoryVisible("Quest Items") and IsQuestItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
         return "Quest Items"
     end
 
+    local ascensionCategory = GetAscensionCategory(itemInfo)
+    if ascensionCategory and IsCategoryVisible(ascensionCategory) then
+        if Omni._perfEnabled and Omni.Perf then
+            Omni.Perf:End("categorizer.GetCategory", perfToken)
+        end
+        return ascensionCategory
+    end
+
     -- Priority 3: Attunable
-    if IsAttunableItem(itemInfo) then
+    if IsCategoryVisible("Attunable") and IsAttunableItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -953,7 +1159,7 @@ function Categorizer:GetCategory(itemInfo)
     end
 
     -- Priority 4: Equipment Sets
-    if IsEquipmentSetItem(itemInfo) then
+    if IsCategoryVisible("Equipment Sets") and IsEquipmentSetItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -961,7 +1167,7 @@ function Categorizer:GetCategory(itemInfo)
     end
 
     -- Priority 4.5: Account Attunable (BoE that an alt can attune)
-    if IsAccountAttunableItem(itemInfo) then
+    if IsCategoryVisible("Account Attunable") and IsAccountAttunableItem(itemInfo) then
             if Omni._perfEnabled and Omni.Perf then
                 Omni.Perf:End("categorizer.GetCategory", perfToken)
             end
@@ -969,7 +1175,7 @@ function Categorizer:GetCategory(itemInfo)
         end
 
     -- Prio 5 : Tools
-    if IsToolsItem(itemInfo) then
+    if IsCategoryVisible("Tools") and IsToolsItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -977,7 +1183,7 @@ function Categorizer:GetCategory(itemInfo)
     end
 
     -- Priority 6: BoE equipment
-    if IsBoEItem(itemInfo) then
+    if IsCategoryVisible("BoE") and IsBoEItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -985,7 +1191,7 @@ function Categorizer:GetCategory(itemInfo)
     end
 
     -- Priority 7: Explicit upgradable-item allowlist  6 7 6 7 6 7 6  7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7
-    if IsUpgradableItem(itemInfo) then
+    if IsCategoryVisible("Upgradable Items") and IsUpgradableItem(itemInfo) then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -993,7 +1199,7 @@ function Categorizer:GetCategory(itemInfo)
     end
 
     -- Priority 88: Check quality for junk
-    if itemInfo.quality == 0 then
+    if IsCategoryVisible("Junk") and itemInfo.quality == 0 then
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("categorizer.GetCategory", perfToken)
         end
@@ -1004,6 +1210,9 @@ function Categorizer:GetCategory(itemInfo)
 
     -- Priority 10+: Heuristic classification
     local out = ClassifyByItemType(itemInfo)
+    if not IsCategoryVisible(out) then
+        out = "Miscellaneous"
+    end
     if Omni._perfEnabled and Omni.Perf then
         Omni.Perf:End("categorizer.GetCategory", perfToken, { result = out })
     end
@@ -1018,6 +1227,15 @@ function Categorizer:SetManualOverride(itemID, categoryName)
     if not itemID or not categoryName then return end
 
     OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
+    categoryName = TrimCategoryName(categoryName)
+    if categoryName == "" then return end
+
+    if not categories[categoryName] then
+        self:CreateUserCategory(categoryName)
+    else
+        EnsureCategoryInSavedOrder(categoryName)
+    end
+
     OmniInventoryDB.categoryOverrides[itemID] = categoryName
 end
 
@@ -1054,7 +1272,9 @@ end
 local function RebuildCategoryOrder()
     categoryOrder = {}
     for _, catDef in pairs(categories) do
-        table.insert(categoryOrder, catDef)
+        if catDef and IsCategoryVisible(catDef.name) then
+            table.insert(categoryOrder, catDef)
+        end
     end
     table.sort(categoryOrder, function(a, b)
         return CompareCategoryNames(a.name, b.name)
@@ -1074,6 +1294,15 @@ function Categorizer:RegisterCategory(name, priority, icon, color, filterFunc)
 end
 
 function Categorizer:GetCategoryInfo(name)
+    local userCategory = GetUserCategories()[name]
+    if userCategory then
+        return {
+            name = name,
+            priority = userCategory.priority or 80,
+            color = CopyColor(userCategory.color),
+        }
+    end
+
     return categories[name] or {
         name = name,
         priority = 99,
@@ -1094,7 +1323,28 @@ function Categorizer:SortCategoryNames(names)
 end
 
 function Categorizer:GetCategoryOrder()
-    return GetSavedCategoryOrder()
+    local visible = {}
+    for _, name in ipairs(GetSavedCategoryOrder()) do
+        if IsCategoryVisible(name) then
+            visible[#visible + 1] = name
+        end
+    end
+    return visible
+end
+
+function Categorizer:IsCategoryHidden(name)
+    return IsCategoryHiddenName(name)
+end
+
+function Categorizer:HideCategory(name)
+    name = TrimCategoryName(name)
+    if name == "" or name == "Miscellaneous" then return false end
+    if not categories[name] and not GetUserCategories()[name] then return false end
+
+    GetHiddenCategories()[name] = true
+    categoryOrderIndex = nil
+    RebuildCategoryOrder()
+    return true
 end
 
 function Categorizer:SetCategoryOrder(order)
@@ -1126,8 +1376,114 @@ function Categorizer:ResetCategoryOrder()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.global = OmniInventoryDB.global or {}
     OmniInventoryDB.global.categoryOrder = CopyDefaultCategoryOrder()
+    OmniInventoryDB.global.hiddenCategories = {}
+    for name in pairs(GetUserCategories()) do
+        table.insert(OmniInventoryDB.global.categoryOrder, name)
+    end
     categoryOrderIndex = nil
     RebuildCategoryOrder()
+end
+
+function Categorizer:CreateUserCategory(name)
+    name = TrimCategoryName(name)
+    if name == "" then return nil end
+
+    local userCategories = GetUserCategories()
+    if not categories[name] and not userCategories[name] then
+        userCategories[name] = {
+            priority = 80,
+            color = CopyColor(USER_CATEGORY_COLOR),
+        }
+    end
+
+    if userCategories[name] then
+        local def = userCategories[name]
+        self:RegisterCategory(name, def.priority or 80, nil, CopyColor(def.color))
+    end
+
+    GetHiddenCategories()[name] = nil
+    EnsureCategoryInSavedOrder(name)
+    RebuildCategoryOrder()
+    return name
+end
+
+function Categorizer:IsUserCategory(name)
+    return GetUserCategories()[name] ~= nil
+end
+
+function Categorizer:GetUserCategoryNames()
+    local names = {}
+    for name in pairs(GetUserCategories()) do
+        if IsCategoryVisible(name) then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names, CompareCategoryNames)
+    return names
+end
+
+function Categorizer:RenameUserCategory(oldName, newName)
+    oldName = TrimCategoryName(oldName)
+    newName = TrimCategoryName(newName)
+    if oldName == "" or newName == "" then return false end
+    if oldName == newName then return true end
+
+    local userCategories = GetUserCategories()
+    local def = userCategories[oldName]
+    if not def or categories[newName] or userCategories[newName] then
+        return false
+    end
+
+    userCategories[oldName] = nil
+    userCategories[newName] = def
+    categories[oldName] = nil
+    local hiddenCategories = GetHiddenCategories()
+    if hiddenCategories[oldName] then
+        hiddenCategories[oldName] = nil
+        hiddenCategories[newName] = true
+    end
+
+    if OmniInventoryDB and OmniInventoryDB.categoryOverrides then
+        for itemID, categoryName in pairs(OmniInventoryDB.categoryOverrides) do
+            if categoryName == oldName then
+                OmniInventoryDB.categoryOverrides[itemID] = newName
+            end
+        end
+    end
+
+    if OmniInventoryDB and OmniInventoryDB.global and type(OmniInventoryDB.global.categoryOrder) == "table" then
+        for i, categoryName in ipairs(OmniInventoryDB.global.categoryOrder) do
+            if categoryName == oldName then
+                OmniInventoryDB.global.categoryOrder[i] = newName
+            end
+        end
+    end
+
+    self:RegisterCategory(newName, def.priority or 80, nil, CopyColor(def.color))
+    categoryOrderIndex = nil
+    RebuildCategoryOrder()
+    return true
+end
+
+function Categorizer:DeleteUserCategory(name)
+    name = TrimCategoryName(name)
+    if name == "" or not GetUserCategories()[name] then return false end
+
+    GetUserCategories()[name] = nil
+    categories[name] = nil
+    GetHiddenCategories()[name] = nil
+    RemoveCategoryFromSavedOrder(name)
+
+    if OmniInventoryDB and OmniInventoryDB.categoryOverrides then
+        for itemID, categoryName in pairs(OmniInventoryDB.categoryOverrides) do
+            if categoryName == name then
+                OmniInventoryDB.categoryOverrides[itemID] = nil
+            end
+        end
+    end
+
+    RebuildCategoryOrder()
+    return true
 end
 
 function Categorizer:GetCategoryColor(name)
@@ -1167,12 +1523,18 @@ end
 function Categorizer:Init()
     -- Register default categories
     self:RegisterCategory("Perishable", 1, nil, CATEGORY_COLORS["Perishable"])
+    self:RegisterCategory("Mythic+", 1.3, nil, CATEGORY_COLORS["Mythic+"])
+    self:RegisterCategory("Tier Token", 1.4, nil, CATEGORY_COLORS["Tier Token"])
+    self:RegisterCategory("Mystic Enchants", 1.5, nil, CATEGORY_COLORS["Mystic Enchants"])
     self:RegisterCategory("Upgradable Items", 1.8, nil, CATEGORY_COLORS["Upgradable Items"])
     self:RegisterCategory("Quest Items", 2, nil, CATEGORY_COLORS["Quest Items"])
     self:RegisterCategory("Attunable", 3, nil, CATEGORY_COLORS["Attunable"])
     self:RegisterCategory("Equipment Sets", 4, nil, CATEGORY_COLORS["Equipment Sets"])
     self:RegisterCategory("Account Attunable", 4.5, nil, CATEGORY_COLORS["Account Attunable"])
     self:RegisterCategory("BoE", 5, nil, CATEGORY_COLORS["BoE"])
+    self:RegisterCategory("Transmog", 5.2, nil, CATEGORY_COLORS["Transmog"])
+    self:RegisterCategory("Ascension", 5.4, nil, CATEGORY_COLORS["Ascension"])
+    self:RegisterCategory("Vanity", 5.6, nil, CATEGORY_COLORS["Vanity"])
     self:RegisterCategory("New Items", 6, nil, CATEGORY_COLORS["New Items"])
     self:RegisterCategory("Equipment", 10, nil, CATEGORY_COLORS["Equipment"])
     self:RegisterCategory("Consumables", 11, nil, CATEGORY_COLORS["Consumables"])
@@ -1190,6 +1552,11 @@ function Categorizer:Init()
     OmniInventoryDB = OmniInventoryDB or {}
     OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
     OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
+    GetUserCategories()
+    for name, def in pairs(OmniInventoryDB.global.userCategories) do
+        self:RegisterCategory(name, def.priority or 80, nil, CopyColor(def.color))
+        EnsureCategoryInSavedOrder(name)
+    end
 end
 
 print("|cFF00FF00OmniInventory|r: Categorizer loaded")

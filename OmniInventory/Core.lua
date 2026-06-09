@@ -273,6 +273,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if Omni.BankFrame then Omni.BankFrame:Init() end
         if Omni.GuildBankFrame then Omni.GuildBankFrame:Init() end
         if Omni.Settings then Omni.Settings:Init() end
+        if Omni.CategoryEditor then Omni.CategoryEditor:Init() end
 
         OverrideBags()
 

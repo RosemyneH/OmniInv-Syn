@@ -150,7 +150,7 @@ local mainFrame = nil
 -- PLAYER_REGEN_ENABLED is still pending. ✿ ʕ •ᴥ•ʔ
 local slotButtons = {}
 local itemButtons = {}  -- Flat list of populated slot buttons (search / cooldown)
-local categoryHeaders = {}  -- Active category header FontStrings
+local categoryHeaders = {}  -- Active category header buttons
 local listRows = {}  -- Track list row frames
 local currentView = DIM.DEFAULT_VIEW_MODE
 local currentMode = "bags"
@@ -407,11 +407,10 @@ local function BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
     return table.concat(parts, "")
 end
 
-local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep, filterName)
+local function BuildFlowCompositionSignature(categories, categoryOrder, usableWidth, itemStep)
     local parts = {
         tostring(math.floor((usableWidth or 0) + 0.5)),
         tostring(math.floor(((itemStep or 0) * 100) + 0.5)),
-        tostring(filterName or "none"),
     }
     for _, catName in ipairs(categoryOrder or {}) do
         local count = categories and categories[catName] and #categories[catName] or 0
@@ -420,11 +419,10 @@ local function BuildFlowCompositionSignature(categories, categoryOrder, usableWi
     return table.concat(parts, "|")
 end
 
-function Frame:BuildFlowLaneSignature(categoryOrder, usableWidth, itemStep, filterName)
+function Frame:BuildFlowLaneSignature(categoryOrder, usableWidth, itemStep)
     local parts = {
         tostring(math.floor((usableWidth or 0) + 0.5)),
         tostring(math.floor(((itemStep or 0) * 100) + 0.5)),
-        tostring(filterName or "none"),
     }
     for _, catName in ipairs(categoryOrder or {}) do
         parts[#parts + 1] = tostring(catName)
@@ -1902,11 +1900,12 @@ local activeFilterMissingState = {
 local SPECIAL_FILTERS = {
     { name = "All", filter = nil, color = DIM.FILTER_NEUTRAL_COLOR },
 }
+local CATEGORY_ADD_COLOR = { 0.25, 1.00, 0.35 }
 
 local function ApplyFilterButtonVisual(btn, hovered)
     local c = btn.colorTuple or DIM.FILTER_NEUTRAL_COLOR
     local r, g, b = c[1], c[2], c[3]
-    local isActive = (activeFilter == btn.filterName)
+    local isActive = (not btn.isAddCategory) and (activeFilter == btn.filterName)
     local bgIntensity
     if isActive then
         bgIntensity = 0.45
@@ -1926,6 +1925,7 @@ end
 local function CreateFilterButton(parent)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetHeight(DIM.FILTER_BUTTON_HEIGHT)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -1933,7 +1933,15 @@ local function CreateFilterButton(parent)
     })
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.text:SetPoint("CENTER")
-    btn:SetScript("OnClick", function(self)
+    btn:SetScript("OnClick", function(self, mouseButton)
+        if self.isAddCategory then
+            Frame:PromptNewCategory()
+            return
+        end
+        if mouseButton == "RightButton" and self.filterName and Omni.CategoryEditor then
+            Omni.CategoryEditor:Open(self.filterName)
+            return
+        end
         Frame:SetQuickFilter(self.filterName)
     end)
     btn:SetScript("OnEnter", function(self) ApplyFilterButtonVisual(self, true) end)
@@ -1949,6 +1957,12 @@ local function ResolveCategoryColor(name)
         end
     end
     return DIM.FILTER_NEUTRAL_COLOR
+end
+
+function Frame:PromptNewCategory()
+    if Omni.CategoryEditor and Omni.CategoryEditor.PromptNewCategory then
+        Omni.CategoryEditor:PromptNewCategory()
+    end
 end
 
 function Frame:CreateFilterBar()
@@ -2009,6 +2023,12 @@ function Frame:RebuildFilterTabs(presentCategories)
             color = ResolveCategoryColor(name),
         })
     end
+    table.insert(defs, {
+        name = "+",
+        filter = nil,
+        color = CATEGORY_ADD_COLOR,
+        isAddCategory = true,
+    })
 
     -- ʕ •ᴥ•ʔ✿ Single-row shrink-to-fit. We first try every tab at the
     -- default font and max padding. If the labels overflow the bar,
@@ -2089,6 +2109,7 @@ function Frame:RebuildFilterTabs(presentCategories)
         btn:SetSize(finalWidth, DIM.FILTER_BUTTON_HEIGHT)
 
         btn.filterName = def.filter
+        btn.isAddCategory = def.isAddCategory == true
         btn.colorTuple = def.color
         btn:Show()
         ApplyFilterButtonVisual(btn, false)
@@ -2258,14 +2279,72 @@ local function EnsureTradeGoodsDepositButton()
     return btn
 end
 
+local function BuildDropBagScope()
+    local scope = {}
+    if IsValidBagID(selectedBagID) then
+        scope[1] = selectedBagID
+        return scope
+    end
+
+    local specialty = {}
+    for _, bagID in ipairs(DIM.BAG_IDS) do
+        local _, bagType = GetContainerNumFreeSlots(bagID)
+        if (bagType or 0) == 0 then
+            scope[#scope + 1] = bagID
+        else
+            specialty[#specialty + 1] = bagID
+        end
+    end
+    for _, bagID in ipairs(specialty) do
+        scope[#scope + 1] = bagID
+    end
+    return scope
+end
+
+local function PlaceCursorItemInEmptyBagSlot()
+    if currentView ~= "flow" then return false end
+    if not (CursorHasItem and CursorHasItem()) then return false end
+    if InCombat() then
+        print("|cFFFF4040OmniInventory|r: Items can only be placed into empty slots out of combat.")
+        return false
+    end
+
+    local foundEmpty = false
+    for _, bagID in ipairs(BuildDropBagScope()) do
+        local numSlots = GetContainerNumSlots(bagID) or 0
+        for slotID = 1, numSlots do
+            local texture = GetContainerItemInfo(bagID, slotID)
+            if not texture then
+                foundEmpty = true
+                PickupContainerItem(bagID, slotID)
+                if not (CursorHasItem and CursorHasItem()) then
+                    local changed = {}
+                    changed[bagID] = true
+                    Frame:UpdateLayout(changed, { forceFull = true, reason = "flow_empty_drop" })
+                    return true
+                end
+            end
+        end
+    end
+
+    if not foundEmpty then
+        print("|cFFFF4040OmniInventory|r: No empty bag slot available.")
+    end
+    return false
+end
+
 function Frame:CreateContentArea()
     local content = CreateFrame("ScrollFrame", "OmniContentScroll", mainFrame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", mainFrame.filterBar, "BOTTOMLEFT", 0, -4)
     content:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -DIM.PADDING, DIM.PADDING + DIM.FOOTER_HEIGHT + 4)
+    content:EnableMouse(true)
+    content:SetScript("OnReceiveDrag", PlaceCursorItemInEmptyBagSlot)
 
     -- Scroll child
     local scrollChild = CreateFrame("Frame", "OmniContentChild", content)
     scrollChild:SetSize(content:GetWidth(), 1)  -- Height set dynamically
+    scrollChild:EnableMouse(true)
+    scrollChild:SetScript("OnReceiveDrag", PlaceCursorItemInEmptyBagSlot)
     content:SetScrollChild(scrollChild)
 
     local scrollBar = _G["OmniContentScrollScrollBar"]
@@ -4034,7 +4113,12 @@ function Frame:UpdateLayout(changedBags, opts)
     if Omni.Categorizer then
         local perfCategorize = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("frame.UpdateLayout.categorize")
         for _, item in ipairs(items) do
-            item.category = item.category or Omni.Categorizer:GetCategory(item)
+            local categoryHidden = Omni.Categorizer.IsCategoryHidden
+                and item.category
+                and Omni.Categorizer:IsCategoryHidden(item.category)
+            if forceFull or categoryHidden or not item.category then
+                item.category = Omni.Categorizer:GetCategory(item)
+            end
         end
         if Omni._perfEnabled and Omni.Perf then
             Omni.Perf:End("frame.UpdateLayout.categorize", perfCategorize, { reason = updateReason })
@@ -4063,23 +4147,7 @@ function Frame:UpdateLayout(changedBags, opts)
     end
     self:RebuildFilterTabs(presentCategories)
 
-    -- ʕ •ᴥ•ʔ✿ Quick filter handling.
-    --
-    -- Out of combat, a category tab doesn't dim non-matches anymore --
-    -- it re-orders the layout so the selected category pins to the
-    -- top-left and everything else flows below it (handled in
-    -- RenderFlowView via the `pinnedLaneTop` hint). Clicking the tab
-    -- again toggles the filter off and the bag sorts back to normal.
-    --
-    -- In combat we can't restructure the layout safely, so we fall
-    -- Exact equality matches stop "Attunable" from catching
-    -- "Account Attunable" via substring. ✿ ʕ •ᴥ•ʔ
-    -- ʕ •ᴥ•ʔ✿ When a filter tab is active, always dim the non-matching
-    -- items so the selection pops. In flow mode OOC we ALSO re-order
-    -- (the selected category gets pinned top-left by RenderFlowView's
-    -- ordered lane assignment), so the user sees the filter both promoted and the
-    -- rest grayed out in place. If the category later empties out,
-    -- RebuildFilterTabs clears activeFilter and the dim goes with it. ✿ ʕ •ᴥ•ʔ
+    -- ʕ •ᴥ•ʔ✿ Quick filters dim non-matches in place; category order stays unchanged. ✿ ʕ •ᴥ•ʔ
     local quickFilter = self:GetActiveFilter()
     if quickFilter then
         local hasMatch = false
@@ -4319,6 +4387,17 @@ function Frame:RenderFlowView(items, layoutOpts)
             table.insert(categoryOrder, "BoE")
         end
 
+        if Omni.Categorizer and Omni.Categorizer.GetUserCategoryNames then
+            for _, catName in ipairs(Omni.Categorizer:GetUserCategoryNames() or {}) do
+                categories[catName] = categories[catName] or {}
+                if not seenCategoryThisPass[catName] then
+                    seenCategoryThisPass[catName] = true
+                    usedCategoryKeys[#usedCategoryKeys + 1] = catName
+                    table.insert(categoryOrder, catName)
+                end
+            end
+        end
+
         if Omni.Categorizer then
             Omni.Categorizer:SortCategoryNames(categoryOrder)
         else
@@ -4389,14 +4468,12 @@ function Frame:RenderFlowView(items, layoutOpts)
             categories,
             categoryOrder,
             usableWidth,
-            itemStep,
-            activeFilter
+            itemStep
         )
         laneSignature = self:BuildFlowLaneSignature(
             categoryOrder,
             usableWidth,
-            itemStep,
-            activeFilter
+            itemStep
         )
         freezeHeadersForVendor = merchantOpen
             and flowLayoutCache ~= nil
@@ -4446,11 +4523,6 @@ function Frame:RenderFlowView(items, layoutOpts)
             laneAssignment = flowLayoutCache.laneAssignment
         end
 
-        local pinnedCategory = nil
-        if activeFilter and categories[activeFilter] then
-            pinnedCategory = activeFilter
-        end
-
         local leftLane, rightLane = {}, {}
         if not laneAssignment then
             laneAssignment = {}
@@ -4466,19 +4538,7 @@ function Frame:RenderFlowView(items, layoutOpts)
             end
         end
 
-        if not canReuseLaneAssignment and pinnedCategory then
-            assignLane(pinnedCategory, false)
-
-            local rest = {}
-            for _, name in ipairs(categoryOrder) do
-                if name ~= pinnedCategory then table.insert(rest, name) end
-            end
-            local nextRight = true
-            for _, name in ipairs(rest) do
-                assignLane(name, nextRight)
-                nextRight = not nextRight
-            end
-        elseif not canReuseLaneAssignment then
+        if not canReuseLaneAssignment then
             local useRight = false
             for _, name in ipairs(categoryOrder) do
                 assignLane(name, useRight)
@@ -4497,19 +4557,6 @@ function Frame:RenderFlowView(items, layoutOpts)
                     table.insert(rightOrdered, name)
                 else
                     table.insert(leftOrdered, name)
-                end
-            end
-            -- ʕ •ᴥ•ʔ✿ Cache reuse keeps lane placement stable, but quick-filter
-            -- UX requires the active tab category to stay top-left across
-            -- bag-update redraws. If the pinned category is in the left lane,
-            -- bubble it to the front before we flatten left→right render order. ✿ ʕ •ᴥ•ʔ
-            if activeFilter and laneAssignment[activeFilter] == "left" then
-                for i = 1, #leftOrdered do
-                    if leftOrdered[i] == activeFilter then
-                        table.remove(leftOrdered, i)
-                        table.insert(leftOrdered, 1, activeFilter)
-                        break
-                    end
                 end
             end
             local final = {}
@@ -4543,7 +4590,11 @@ function Frame:RenderFlowView(items, layoutOpts)
     for _, catName in ipairs(categoryOrder) do
         local catItems = categories[catName]
         local isBoeAnchor = (flowMode and catName == "BoE")
-        if catItems and (#catItems > 0 or isBoeAnchor) then
+        local isUserCategory = flowMode
+            and Omni.Categorizer
+            and Omni.Categorizer.IsUserCategory
+            and Omni.Categorizer:IsUserCategory(catName)
+        if catItems and (#catItems > 0 or isBoeAnchor or isUserCategory) then
             local laneX, laneY, columns, laneW
             local useRight = false
             if dualCategoryLanes then
@@ -4591,16 +4642,42 @@ function Frame:RenderFlowView(items, layoutOpts)
                     headerIndex = headerIndex + 1
                     header = categoryHeaders[headerIndex]
                     if not header then
-                        header = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        header = CreateFrame("Button", nil, scrollChild)
+                        header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                        header.text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        header.text:SetPoint("LEFT")
+                        header.text:SetJustifyH("LEFT")
+                        header:SetScript("OnClick", function(self, mouseButton)
+                            if not self.canEditCategory then return end
+                            if mouseButton == "RightButton" then
+                                if Omni.CategoryEditor then
+                                    Omni.CategoryEditor:Open(self.categoryName)
+                                end
+                            elseif mouseButton == "LeftButton" then
+                                Frame:SetQuickFilter(self.categoryName)
+                            end
+                        end)
+                        header:SetScript("OnEnter", function(self)
+                            if not self.canEditCategory then return end
+                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                            GameTooltip:SetText(self.categoryName or "Category", 1, 0.82, 0)
+                            GameTooltip:AddLine("Left-click to filter. Right-click to edit contents.", 0.8, 0.8, 0.8)
+                            GameTooltip:Show()
+                        end)
+                        header:SetScript("OnLeave", function() GameTooltip:Hide() end)
                         categoryHeaders[headerIndex] = header
                     end
                     headerSlotIndex = headerIndex
                 end
 
                 headerByCategory[catName] = headerSlotIndex
+                header.categoryName = catName
+                header.canEditCategory = currentView ~= "bag" and type(catName) == "string"
+                header:EnableMouse(header.canEditCategory)
                 if not reusedHeader then
                     header:ClearAllPoints()
                     header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
+                    header:SetSize(math.max((laneW or usableWidth) - itemGap, 80), sectionHeaderHeight)
 
                     local r, g, b = 1, 1, 1
                     if currentView == "bag" then
@@ -4608,21 +4685,21 @@ function Frame:RenderFlowView(items, layoutOpts)
                     elseif Omni.Categorizer then
                         r, g, b = Omni.Categorizer:GetCategoryColor(catName)
                     end
-                    header:SetTextColor(r, g, b)
+                    header.text:SetTextColor(r, g, b)
                     if currentView == "bag" then
                         local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
                         local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                        header.text:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
                     else
-                        header:SetText(catName .. " (" .. #catItems .. ")")
+                        header.text:SetText(catName .. " (" .. #catItems .. ")")
                     end
                 elseif flowContentOnly and header then
                     if currentView == "bag" then
                         local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
                         local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                        header:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                        header.text:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
                     else
-                        header:SetText(catName .. " (" .. #catItems .. ")")
+                        header.text:SetText(catName .. " (" .. #catItems .. ")")
                     end
                 end
                 header:Show()

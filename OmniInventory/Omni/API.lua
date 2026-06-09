@@ -106,9 +106,69 @@ local scanningTooltip = CreateFrame("GameTooltip", "OmniScanningTooltip", nil, "
 scanningTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
 
 local bindScanCache = {}
+local containerInfoCache = {}
 
-function API:ClearContainerBindScanCache()
-    wipe(bindScanCache)
+local function ClearBagCache(cache, bagID)
+    if type(cache) ~= "table" then return end
+    cache[bagID] = nil
+end
+
+local function ClearScopedCache(cache, changedBags)
+    if type(changedBags) ~= "table" or changedBags._trigger then
+        wipe(cache)
+        return
+    end
+
+    local clearedAny = false
+    for bagID, changed in pairs(changedBags) do
+        if type(bagID) == "number" and changed then
+            ClearBagCache(cache, bagID)
+            clearedAny = true
+        end
+    end
+
+    if not clearedAny then
+        wipe(cache)
+    end
+end
+
+local function CopyContainerInfo(info)
+    if not info then return nil end
+    return {
+        iconFileID = info.iconFileID,
+        itemID = info.itemID,
+        hyperlink = info.hyperlink,
+        stackCount = info.stackCount,
+        isLocked = info.isLocked,
+        isReadable = info.isReadable,
+        hasLoot = info.hasLoot,
+        isBound = info.isBound,
+        bindType = info.bindType,
+        isAttunable = info.isAttunable,
+        quality = info.quality,
+        bagID = info.bagID,
+        slotID = info.slotID,
+    }
+end
+
+local function BuildContainerInfoStateKey(texture, itemCount, locked, quality, readable, lootable, itemLink)
+    return table.concat({
+        tostring(texture or ""),
+        tostring(itemCount or ""),
+        locked and "1" or "0",
+        tostring(quality or ""),
+        readable and "1" or "0",
+        lootable and "1" or "0",
+        tostring(itemLink or ""),
+    }, "\031")
+end
+
+function API:ClearContainerBindScanCache(changedBags)
+    ClearScopedCache(bindScanCache, changedBags)
+end
+
+function API:ClearContainerInfoCache(changedBags)
+    ClearScopedCache(containerInfoCache, changedBags)
 end
 
 local SOULBOUND_TEXT = ITEM_SOULBOUND or "Soulbound"
@@ -119,9 +179,10 @@ local BOA_TEXT = ITEM_BIND_TO_ACCOUNT or "Binds to account"
 -- ʕ •ᴥ•ʔ✿ Two-state model: soulbound -> BoP, otherwise -> BoE ✿ ʕ •ᴥ•ʔ
 local function ScanTooltipForBinding(bag, slot, resolvedLink)
     local link = resolvedLink or GetContainerItemLink(bag, slot)
-    local cacheKey = link and (tostring(bag) .. "\031" .. tostring(slot) .. "\031" .. link)
-    if cacheKey then
-        local cached = bindScanCache[cacheKey]
+    local byBag = link and bindScanCache[bag]
+    local bySlot = byBag and byBag[slot]
+    if bySlot then
+        local cached = bySlot[link]
         if cached then
             return cached[1], cached[2]
         end
@@ -147,8 +208,18 @@ local function ScanTooltipForBinding(bag, slot, resolvedLink)
         end
     end
 
-    if cacheKey then
-        bindScanCache[cacheKey] = { boundResult, typeResult }
+    if link then
+        byBag = bindScanCache[bag]
+        if not byBag then
+            byBag = {}
+            bindScanCache[bag] = byBag
+        end
+        bySlot = byBag[slot]
+        if not bySlot then
+            bySlot = {}
+            byBag[slot] = bySlot
+        end
+        bySlot[link] = { boundResult, typeResult }
     end
     return boundResult, typeResult
 end
@@ -308,6 +379,10 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
     local texture, itemCount, locked, quality, readable, lootable, itemLink = GetContainerItemInfo(bagID, slotID)
 
     if not texture then
+        local byBag = containerInfoCache[bagID]
+        if byBag then
+            byBag[slotID] = nil
+        end
         return nil
     end
 
@@ -316,6 +391,13 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
     -- like attune progress can resolve correctly on every client. ✿ ʕ •ᴥ•ʔ
     if not itemLink then
         itemLink = API:GetItemLinkBySlot(bagID, slotID)
+    end
+
+    local stateKey = BuildContainerInfoStateKey(texture, itemCount, locked, quality, readable, lootable, itemLink)
+    local byBag = containerInfoCache[bagID]
+    local cached = byBag and byBag[slotID]
+    if cached and cached.stateKey == stateKey then
+        return CopyContainerInfo(cached.info)
     end
 
     local itemID
@@ -346,7 +428,7 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
     end
 
     -- Return modern table structure (Matches Retail C_Container.GetContainerItemInfo)
-    return {
+    local info = {
         -- Core Identification
         iconFileID = texture,
         itemID = itemID,
@@ -370,6 +452,18 @@ function OmniC_Container.GetContainerItemInfo(bagID, slotID)
         bagID = bagID,
         slotID = slotID,
     }
+
+    byBag = containerInfoCache[bagID]
+    if not byBag then
+        byBag = {}
+        containerInfoCache[bagID] = byBag
+    end
+    byBag[slotID] = {
+        stateKey = stateKey,
+        info = info,
+    }
+
+    return CopyContainerInfo(info)
 end
 
 --- Get total number of slots in a container.

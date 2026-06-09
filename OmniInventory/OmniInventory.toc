@@ -34,7 +34,7 @@ UI\Frame.lua
 UI\BankFrame.lua
 UI\GuildBankFrame.lua
 UI\Options.lua
-# UI\CategoryEditor.lua     -- disabled alongside Omni\Rules.lua; do not re-enable without a rewrite
+UI\CategoryEditor.lua
 
 # =============================================================================
 # Main Entry Point

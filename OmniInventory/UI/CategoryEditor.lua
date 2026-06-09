@@ -1,500 +1,317 @@
--- =============================================================================
--- OmniInventory Category Editor
--- =============================================================================
--- Purpose: Visual editor for managing item categorization rules.
--- Features: Category list, rule list inside categories, rule add/edit UI.
--- =============================================================================
-
 local addonName, Omni = ...
 
 Omni.CategoryEditor = {}
 local Editor = Omni.CategoryEditor
+
 local editorFrame = nil
+local rows = {}
 
--- =============================================================================
--- Constants & Helpers
--- =============================================================================
-
-local FIELD_OPTIONS = {
-    { text = "Item Name", value = "name" },
-    { text = "Item Type", value = "itemType" },
-    { text = "Sub Type", value = "itemSubType" },
-    { text = "Item ID", value = "itemID" },
-    { text = "Item Level", value = "iLvl" },
-    { text = "Quality", value = "quality" },
-    { text = "Equipment Slot", value = "equipSlot" },
-    { text = "Tooltip Text", value = "tooltip" },
-}
-
-local OPERATOR_OPTIONS = {
-    { text = "Equals", value = "equals" },
-    { text = "Not Equals", value = "not_equals" },
-    { text = "Contains", value = "contains" },
-    { text = "Starts With", value = "starts_with" },
-    { text = "Greater Than", value = "greater_than" },
-    { text = "Less Than", value = "less_than" },
-    { text = "In List", value = "in_list" },
-}
-
-local function CreateDropdown(parent, width, options)
-    local dropdown = CreateFrame("Frame", nil, parent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(dropdown, width)
-    UIDropDownMenu_Initialize(dropdown, function(self, level)
-        local info = UIDropDownMenu_CreateInfo()
-        for _, opt in ipairs(options) do
-            info.text = opt.text
-            info.func = function()
-                UIDropDownMenu_SetSelectedValue(dropdown, opt.value)
-                UIDropDownMenu_SetText(dropdown, opt.text)
-                if dropdown.OnValueChanged then dropdown.OnValueChanged(opt.value) end
-            end
-            info.checked = (dropdown.selectedValue == opt.value)
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-    return dropdown
+local function TrimCategoryName(name)
+    name = tostring(name or "")
+    return (string.gsub(name, "^%s*(.-)%s*$", "%1"))
 end
 
--- =============================================================================
--- Creation
--- =============================================================================
+local function RefreshInventory(reason)
+    if Omni.Frame and Omni.Frame.InvalidateRenderCaches then
+        Omni.Frame:InvalidateRenderCaches()
+    end
+    if Omni.Frame and Omni.Frame.IsShown and Omni.Frame:IsShown() and Omni.Frame.UpdateLayout then
+        Omni.Frame:UpdateLayout(nil, { forceFull = true, reason = reason or "category_edit" })
+    end
+    if Omni.Settings and Omni.Settings.RefreshCategoryOrderControls then
+        Omni.Settings:RefreshCategoryOrderControls()
+    end
+end
+
+local function GetOverrideCategory(itemID)
+    if not itemID or not OmniInventoryDB or not OmniInventoryDB.categoryOverrides then
+        return nil
+    end
+    return OmniInventoryDB.categoryOverrides[itemID]
+end
+
+local function GetItemName(itemInfo)
+    if not itemInfo then return "Unknown Item" end
+    if itemInfo.hyperlink then
+        local name = GetItemInfo(itemInfo.hyperlink)
+        if name then return name end
+    end
+    return "Item " .. tostring(itemInfo.itemID or "?")
+end
+
+local function BuildUniqueBagItems(categoryName)
+    local source = OmniC_Container and OmniC_Container.GetAllBagItems and OmniC_Container.GetAllBagItems() or {}
+    local items = {}
+    local seen = {}
+
+    for _, itemInfo in ipairs(source) do
+        local itemID = itemInfo.itemID
+        if itemID and not seen[itemID] then
+            seen[itemID] = true
+            if Omni.Categorizer then
+                itemInfo.category = Omni.Categorizer:GetCategory(itemInfo)
+            end
+            itemInfo.__displayName = GetItemName(itemInfo)
+            items[#items + 1] = itemInfo
+        end
+    end
+
+    table.sort(items, function(a, b)
+        local aInCategory = a.category == categoryName
+        local bInCategory = b.category == categoryName
+        if aInCategory ~= bInCategory then
+            return aInCategory
+        end
+        return tostring(a.__displayName or "") < tostring(b.__displayName or "")
+    end)
+    return items
+end
+
+local function EnsureStaticPopups()
+    StaticPopupDialogs["OMNI_NEW_USER_CATEGORY"] = StaticPopupDialogs["OMNI_NEW_USER_CATEGORY"] or {
+        text = "New category name:",
+        button1 = "Create",
+        button2 = "Cancel",
+        hasEditBox = true,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+        OnAccept = function(self)
+            local name = TrimCategoryName(self.editBox:GetText())
+            if name ~= "" and Omni.Categorizer and Omni.Categorizer.CreateUserCategory then
+                local created = Omni.Categorizer:CreateUserCategory(name)
+                if created then
+                    RefreshInventory("category_create")
+                    Editor:Open(created)
+                end
+            end
+        end,
+    }
+end
+
+function Editor:PromptNewCategory()
+    EnsureStaticPopups()
+    StaticPopup_Show("OMNI_NEW_USER_CATEGORY")
+end
 
 function Editor:CreateFrame()
     if editorFrame then return editorFrame end
 
     editorFrame = CreateFrame("Frame", "OmniCategoryEditor", UIParent)
-    editorFrame:SetSize(700, 500)
+    editorFrame:SetSize(560, 460)
     editorFrame:SetPoint("CENTER")
     editorFrame:SetFrameStrata("DIALOG")
     editorFrame:EnableMouse(true)
     editorFrame:SetMovable(true)
     editorFrame:SetClampedToScreen(true)
-
-    -- Backdrop
-    editorFrame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 }
-    })
-
-    -- Draggable header
     editorFrame:RegisterForDrag("LeftButton")
     editorFrame:SetScript("OnDragStart", editorFrame.StartMoving)
     editorFrame:SetScript("OnDragStop", editorFrame.StopMovingOrSizing)
+    editorFrame:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
 
-    -- Title
     local title = editorFrame:CreateTexture(nil, "ARTWORK")
     title:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
-    title:SetSize(300, 64)
+    title:SetSize(320, 64)
     title:SetPoint("TOP", 0, 12)
 
-    local titleText = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    titleText:SetPoint("TOP", title, "TOP", 0, -14)
-    titleText:SetText("Category Editor")
+    editorFrame.titleText = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    editorFrame.titleText:SetPoint("TOP", title, "TOP", 0, -14)
+    editorFrame.titleText:SetText("Category Editor")
 
-    -- Close Button
     local closeBtn = CreateFrame("Button", nil, editorFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
-    -- 1. Left Sidebar (Categories)
-    local sidebar = CreateFrame("Frame", nil, editorFrame)
-    sidebar:SetPoint("TOPLEFT", 16, -40)
-    sidebar:SetPoint("BOTTOMLEFT", 16, 16)
-    sidebar:SetWidth(150)
-    sidebar.bg = sidebar:CreateTexture(nil, "BACKGROUND")
-    sidebar.bg:SetAllPoints()
-    sidebar.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    sidebar.bg:SetVertexColor(0, 0, 0, 0.3)
+    local nameLabel = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    nameLabel:SetPoint("TOPLEFT", 24, -42)
+    nameLabel:SetText("Category:")
 
-    self:CreateCategoryList(sidebar)
-    self.sidebar = sidebar
+    editorFrame.nameEdit = CreateFrame("EditBox", nil, editorFrame, "InputBoxTemplate")
+    editorFrame.nameEdit:SetSize(170, 22)
+    editorFrame.nameEdit:SetPoint("LEFT", nameLabel, "RIGHT", 10, 0)
+    editorFrame.nameEdit:SetAutoFocus(false)
+    editorFrame.nameEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    editorFrame.nameEdit:SetScript("OnEditFocusLost", function(self)
+        if not Editor.selectedCategory or not Omni.Categorizer or not Omni.Categorizer.RenameUserCategory then
+            return
+        end
+        local newName = TrimCategoryName(self:GetText())
+        if newName == "" or newName == Editor.selectedCategory then
+            self:SetText(Editor.selectedCategory)
+            return
+        end
+        if Omni.Categorizer:RenameUserCategory(Editor.selectedCategory, newName) then
+            Editor.selectedCategory = newName
+            RefreshInventory("category_rename")
+            Editor:Refresh()
+        else
+            self:SetText(Editor.selectedCategory)
+            print("|cFFFF4040OmniInventory|r: Category name is already used.")
+        end
+    end)
 
-    -- 2. Middle Panel (Rule List for Category)
-    local midPanel = CreateFrame("Frame", nil, editorFrame)
-    midPanel:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 10, 0)
-    midPanel:SetPoint("BOTTOM", 0, 16)
-    midPanel:SetWidth(200)
-    midPanel.bg = midPanel:CreateTexture(nil, "BACKGROUND")
-    midPanel.bg:SetAllPoints()
-    midPanel.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    midPanel.bg:SetVertexColor(0, 0, 0, 0.1)
+    editorFrame.newBtn = CreateFrame("Button", nil, editorFrame, "UIPanelButtonTemplate")
+    editorFrame.newBtn:SetSize(92, 22)
+    editorFrame.newBtn:SetPoint("LEFT", editorFrame.nameEdit, "RIGHT", 12, 0)
+    editorFrame.newBtn:SetText("New")
+    editorFrame.newBtn:SetScript("OnClick", function() Editor:PromptNewCategory() end)
 
-    self:CreateRuleList(midPanel)
-    self.midPanel = midPanel
+    editorFrame.deleteBtn = CreateFrame("Button", nil, editorFrame, "UIPanelButtonTemplate")
+    editorFrame.deleteBtn:SetSize(92, 22)
+    editorFrame.deleteBtn:SetPoint("LEFT", editorFrame.newBtn, "RIGHT", 6, 0)
+    editorFrame.deleteBtn:SetText("Delete")
+    editorFrame.deleteBtn:SetScript("OnClick", function()
+        if Editor.selectedCategory and Omni.Categorizer and Omni.Categorizer.DeleteUserCategory
+                and Omni.Categorizer:DeleteUserCategory(Editor.selectedCategory) then
+            Editor.selectedCategory = nil
+            RefreshInventory("category_delete")
+            editorFrame:Hide()
+        end
+    end)
 
-    -- 3. Right Panel (Rule Editor)
-    local rightPanel = CreateFrame("Frame", nil, editorFrame)
-    rightPanel:SetPoint("TOPLEFT", midPanel, "TOPRIGHT", 10, 0)
-    rightPanel:SetPoint("BOTTOMRIGHT", -16, 16)
-    rightPanel.bg = rightPanel:CreateTexture(nil, "BACKGROUND")
-    rightPanel.bg:SetAllPoints()
-    rightPanel.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    rightPanel.bg:SetVertexColor(0, 0, 0, 0.2)
+    editorFrame.hint = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editorFrame.hint:SetPoint("TOPLEFT", 24, -72)
+    editorFrame.hint:SetPoint("RIGHT", -24, 0)
+    editorFrame.hint:SetJustifyH("LEFT")
+    editorFrame.hint:SetText("Add or remove current bag items. Membership is saved by item ID.")
 
-    self:CreateRuleDetails(rightPanel)
-    self.rightPanel = rightPanel
+    local scroll = CreateFrame("ScrollFrame", "OmniCategoryEditorItemScroll", editorFrame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 24, -100)
+    scroll:SetPoint("BOTTOMRIGHT", -46, 24)
+
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetSize(480, 1)
+    scroll:SetScrollChild(child)
+    editorFrame.itemChild = child
 
     editorFrame:Hide()
     return editorFrame
 end
 
-function Editor:CreateCategoryList(parent)
-    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    title:SetPoint("TOPLEFT", 5, -5)
-    title:SetText("Categories")
-
-    local addBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    addBtn:SetSize(20, 20)
-    addBtn:SetPoint("TOPRIGHT", -5, -5)
-    addBtn:SetText("+")
-    addBtn:SetScript("OnClick", function()
-        StaticPopupDialogs["OMNI_NEW_CATEGORY"] = {
-            text = "Enter new category name:",
-            button1 = "Create",
-            button2 = "Cancel",
-            hasEditBox = true,
-            OnAccept = function(self)
-                local name = self.editBox:GetText()
-                if name and name ~= "" then
-                    self:GetParent():Hide()
-                    -- Create a placeholder rule to establish the category
-                    Omni.Rules:AddRule({
-                        name = "New Rule",
-                        category = name,
-                        enabled = true,
-                        priority = 50,
-                        conditions = {}
-                    })
-                    Editor:RefreshCategoryList()
-                    Editor:SelectCategory(name)
-                end
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-        }
-        StaticPopup_Show("OMNI_NEW_CATEGORY")
-    end)
-
-    local list = CreateFrame("ScrollFrame", "OmniCategoryListScroll", parent, "UIPanelScrollFrameTemplate")
-    list:SetPoint("TOPLEFT", 0, -30)
-    list:SetPoint("BOTTOMRIGHT", -25, 5)
-
-    local child = CreateFrame("Frame")
-    child:SetSize(125, 1000)
-    list:SetScrollChild(child)
-    self.categoryListChild = child
-end
-
-function Editor:CreateRuleList(parent)
-    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    title:SetPoint("TOPLEFT", 5, -5)
-    title:SetText("Rules")
-    self.ruleListTitle = title
-
-    local addBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    addBtn:SetSize(20, 20)
-    addBtn:SetPoint("TOPRIGHT", -5, -5)
-    addBtn:SetText("+")
-    addBtn:SetScript("OnClick", function()
-        if not self.selectedCategory then return end
-        Omni.Rules:AddRule({
-            name = "New Rule",
-            category = self.selectedCategory,
-            enabled = true,
-            priority = 50,
-            conditions = {}
-        })
-        Editor:RefreshRuleList()
-    end)
-
-    local list = CreateFrame("ScrollFrame", "OmniRuleListScroll", parent, "UIPanelScrollFrameTemplate")
-    list:SetPoint("TOPLEFT", 0, -30)
-    list:SetPoint("BOTTOMRIGHT", -25, 5)
-
-    local child = CreateFrame("Frame")
-    child:SetSize(175, 1000)
-    list:SetScrollChild(child)
-    self.ruleListChild = child
-end
-
-function Editor:CreateRuleDetails(parent)
-    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    title:SetPoint("TOPLEFT", 5, -5)
-    title:SetText("Rule Details")
-
-    -- Name Input
-    local nameLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    nameLabel:SetPoint("TOPLEFT", 10, -30)
-    nameLabel:SetText("Name:")
-
-    local nameEdit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    nameEdit:SetSize(200, 24)
-    nameEdit:SetPoint("LEFT", nameLabel, "RIGHT", 10, 0)
-    nameEdit:SetAutoFocus(false)
-    nameEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    nameEdit:SetScript("OnEditFocusLost", function(self)
-        if Editor.selectedRule then
-            Omni.Rules:UpdateRule(Editor.selectedRule.id, { name = self:GetText() })
-            Editor:RefreshRuleList() -- To update name in list
-        end
-    end)
-    self.ruleNameEdit = nameEdit
-
-    -- Priority Input
-    local priLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    priLabel:SetPoint("TOPLEFT", 10, -60)
-    priLabel:SetText("Priority:")
-
-    local priEdit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    priEdit:SetSize(50, 24)
-    priEdit:SetPoint("LEFT", priLabel, "RIGHT", 10, 0)
-    priEdit:SetNumeric(true)
-    priEdit:SetAutoFocus(false)
-    priEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    priEdit:SetScript("OnEditFocusLost", function(self)
-        if Editor.selectedRule then
-            Omni.Rules:UpdateRule(Editor.selectedRule.id, { priority = tonumber(self:GetText()) or 50 })
-        end
-    end)
-    self.rulePriEdit = priEdit
-
-    -- Conditions List
-    local condLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condLabel:SetPoint("TOPLEFT", 10, -90)
-    condLabel:SetText("Conditions:")
-
-    local addConditionBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    addConditionBtn:SetSize(80, 20)
-    addConditionBtn:SetPoint("LEFT", condLabel, "RIGHT", 10, 0)
-    addConditionBtn:SetText("Add")
-    addConditionBtn:SetScript("OnClick", function()
-        if Editor.selectedRule then
-            local rule = Editor.selectedRule
-            rule.conditions = rule.conditions or {}
-            table.insert(rule.conditions, { field = "name", operator = "contains", value = "" })
-            Omni.Rules:UpdateRule(rule.id, { conditions = rule.conditions })
-            Editor:RefreshRuleDetails()
-        end
-    end)
-
-    local condScroll = CreateFrame("ScrollFrame", "OmniConditionScroll", parent, "UIPanelScrollFrameTemplate")
-    condScroll:SetPoint("TOPLEFT", 10, -115)
-    condScroll:SetPoint("BOTTOMRIGHT", -25, 40)
-
-    local condChild = CreateFrame("Frame")
-    condChild:SetSize(250, 500)
-    condScroll:SetScrollChild(condChild)
-    self.conditionChild = condChild
-
-    -- Delete Button
-    local delBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    delBtn:SetSize(100, 24)
-    delBtn:SetPoint("BOTTOMRIGHT", -10, 10)
-    delBtn:SetText("Delete Rule")
-    delBtn:SetScript("OnClick", function()
-        if Editor.selectedRule then
-            Omni.Rules:RemoveRule(Editor.selectedRule.id)
-            Editor.selectedRule = nil
-            Editor:RefreshRuleList()
-            Editor:RefreshRuleDetails()
-        end
-    end)
-end
-
--- =============================================================================
--- Actions & Updates
--- =============================================================================
-
-function Editor:Toggle()
+function Editor:Open(categoryName)
     if not editorFrame then self:CreateFrame() end
-    if editorFrame:IsShown() then editorFrame:Hide() else self:Refresh() editorFrame:Show() end
+    self.selectedCategory = TrimCategoryName(categoryName)
+    self:Refresh()
+    editorFrame:Show()
+end
+
+function Editor:Toggle(categoryName)
+    if not editorFrame then self:CreateFrame() end
+    if editorFrame:IsShown() and (not categoryName or categoryName == self.selectedCategory) then
+        editorFrame:Hide()
+        return
+    end
+    self:Open(categoryName or self.selectedCategory or "Miscellaneous")
 end
 
 function Editor:Refresh()
     if not editorFrame then return end
-    self:RefreshCategoryList()
-    self:RefreshRuleList()
-    self:RefreshRuleDetails()
-end
 
-function Editor:SelectCategory(cat)
-    self.selectedCategory = cat
-    self.selectedRule = nil
-    self:RefreshRuleList()
-    self:RefreshRuleDetails()
-end
+    local category = self.selectedCategory or "Miscellaneous"
+    local isUserCategory = Omni.Categorizer and Omni.Categorizer.IsUserCategory
+        and Omni.Categorizer:IsUserCategory(category)
 
-function Editor:SelectRule(rule)
-    self.selectedRule = rule
-    self:RefreshRuleDetails()
-end
+    editorFrame.titleText:SetText("Edit: " .. category)
+    editorFrame.nameEdit:SetText(category)
+    editorFrame.nameEdit:EnableMouse(isUserCategory == true)
+    editorFrame.nameEdit:SetTextColor(isUserCategory and 1 or 0.65, isUserCategory and 1 or 0.65, isUserCategory and 1 or 0.65)
+    editorFrame.deleteBtn:EnableMouse(isUserCategory == true)
+    editorFrame.deleteBtn:SetAlpha(isUserCategory and 1 or 0.45)
 
-function Editor:RefreshCategoryList()
-    -- Get unique categories
-    local categories = {}
-    for _, rule in ipairs(Omni.Rules:GetAllRules()) do
-        if rule.category then categories[rule.category] = true end
-    end
+    local items = BuildUniqueBagItems(category)
+    local child = editorFrame.itemChild
+    local rowHeight = 26
 
-    local sorted = {}
-    for cat in pairs(categories) do table.insert(sorted, cat) end
-    table.sort(sorted)
+    for _, row in ipairs(rows) do row:Hide() end
 
-    local child = self.categoryListChild
-    if not child.buttons then child.buttons = {} end
+    for i, itemInfo in ipairs(items) do
+        local row = rows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, child)
+            row:SetSize(480, rowHeight)
 
-    for _, btn in pairs(child.buttons) do btn:Hide() end
+            row.bg = row:CreateTexture(nil, "BACKGROUND")
+            row.bg:SetAllPoints()
+            row.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
 
-    for i, cat in ipairs(sorted) do
-        local btn = child.buttons[i]
-        if not btn then
-            btn = CreateFrame("Button", nil, child, "OptionsButtonTemplate")
-            btn:SetSize(130, 20)
-            btn:SetScript("OnClick", function(self) Editor:SelectCategory(self.cat) end)
-            child.buttons[i] = btn
-        end
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(20, 20)
+            row.icon:SetPoint("LEFT", 4, 0)
 
-        btn:SetPoint("TOPLEFT", 0, -((i-1)*20))
-        btn.cat = cat
-        btn:SetText(cat)
-        btn:Show()
+            row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            row.name:SetPoint("LEFT", row.icon, "RIGHT", 7, 0)
+            row.name:SetWidth(220)
+            row.name:SetJustifyH("LEFT")
 
-        if cat == self.selectedCategory then btn:LockHighlight() else btn:UnlockHighlight() end
-    end
-end
+            row.current = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.current:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
+            row.current:SetWidth(115)
+            row.current:SetJustifyH("LEFT")
 
-function Editor:RefreshRuleList()
-    local child = self.ruleListChild
-    if not child.buttons then child.buttons = {} end
-    for _, btn in pairs(child.buttons) do btn:Hide() end
+            row.action = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            row.action:SetSize(88, 20)
+            row.action:SetPoint("RIGHT", -4, 0)
+            row.action:SetScript("OnClick", function(self)
+                local info = self:GetParent().itemInfo
+                if not info or not info.itemID or not Omni.Categorizer then return end
 
-    if not self.selectedCategory then return end
-
-    local rules = {}
-    for _, rule in ipairs(Omni.Rules:GetAllRules()) do
-        if rule.category == self.selectedCategory then table.insert(rules, rule) end
-    end
-    table.sort(rules, function(a,b) return (a.priority or 0) > (b.priority or 0) end)
-
-    for i, rule in ipairs(rules) do
-        local btn = child.buttons[i]
-        if not btn then
-            btn = CreateFrame("Button", nil, child, "OptionsButtonTemplate")
-            btn:SetSize(180, 20)
-            btn:SetScript("OnClick", function(self) Editor:SelectRule(self.rule) end)
-            child.buttons[i] = btn
-        end
-
-        btn:SetPoint("TOPLEFT", 0, -((i-1)*20))
-        btn.rule = rule
-        btn:SetText(rule.name)
-        btn:Show()
-
-        if self.selectedRule and self.selectedRule.id == rule.id then btn:LockHighlight() else btn:UnlockHighlight() end
-    end
-end
-
-function Editor:RefreshRuleDetails()
-    local rule = self.selectedRule
-
-    -- Visibility
-    if not rule then
-        self.rightPanel:SetAlpha(0.5)
-        self.ruleNameEdit:ClearFocus()
-        self.ruleNameEdit:EnableMouse(false)
-        self.rulePriEdit:EnableMouse(false)
-        return
-    else
-        self.rightPanel:SetAlpha(1.0)
-        self.ruleNameEdit:EnableMouse(true)
-        self.rulePriEdit:EnableMouse(true)
-    end
-
-    self.ruleNameEdit:SetText(rule.name or "")
-    self.rulePriEdit:SetText(rule.priority or 50)
-
-    -- Conditions
-    local child = self.conditionChild
-    if not child.rows then child.rows = {} end
-    for _, row in pairs(child.rows) do row:Hide() end
-
-    if rule.conditions then
-        for i, cond in ipairs(rule.conditions) do
-            local row = child.rows[i]
-            if not row then
-                row = CreateFrame("Frame", nil, child)
-                row:SetSize(250, 50)
-
-                -- Field Dropdown
-                row.fieldDD = CreateDropdown(row, 100, FIELD_OPTIONS)
-                row.fieldDD:SetPoint("TOPLEFT", -15, 0)
-                row.fieldDD.OnValueChanged = function(val)
-                    if row.cond then
-                        row.cond.field = val
-                        Omni.Rules:UpdateRule(Editor.selectedRule.id, { conditions = Editor.selectedRule.conditions })
+                if info.category == Editor.selectedCategory then
+                    local override = GetOverrideCategory(info.itemID)
+                    if override == Editor.selectedCategory then
+                        Omni.Categorizer:ClearManualOverride(info.itemID)
+                    elseif Editor.selectedCategory ~= "Miscellaneous" then
+                        Omni.Categorizer:SetManualOverride(info.itemID, "Miscellaneous")
                     end
+                else
+                    Omni.Categorizer:SetManualOverride(info.itemID, Editor.selectedCategory)
                 end
 
-                -- Operator Dropdown
-                row.opDD = CreateDropdown(row, 100, OPERATOR_OPTIONS)
-                row.opDD:SetPoint("LEFT", row.fieldDD, "RIGHT", -25, 0)
-                row.opDD.OnValueChanged = function(val)
-                     if row.cond then
-                        row.cond.operator = val
-                        Omni.Rules:UpdateRule(Editor.selectedRule.id, { conditions = Editor.selectedRule.conditions })
-                    end
-                end
+                RefreshInventory("category_membership")
+                Editor:Refresh()
+            end)
 
-                -- Value Edit
-                row.valEdit = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
-                row.valEdit:SetSize(120, 20)
-                row.valEdit:SetPoint("TOPLEFT", 10, -30)
-                row.valEdit:SetAutoFocus(false)
-                row.valEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-                row.valEdit:SetScript("OnEditFocusLost", function(self)
-                    if row.cond then
-                        row.cond.value = self:GetText()
-                        Omni.Rules:UpdateRule(Editor.selectedRule.id, { conditions = Editor.selectedRule.conditions })
-                    end
-                end)
+            rows[i] = row
+        end
 
-                -- Remove Button
-                row.delBtn = CreateFrame("Button", nil, row, "UIPanelCloseButton")
-                row.delBtn:SetSize(20, 20)
-                row.delBtn:SetPoint("LEFT", row.valEdit, "RIGHT", 5, 0)
-                row.delBtn:SetScript("OnClick", function()
-                    if Editor.selectedRule then
-                        table.remove(Editor.selectedRule.conditions, i)
-                        Omni.Rules:UpdateRule(Editor.selectedRule.id, { conditions = Editor.selectedRule.conditions })
-                        Editor:RefreshRuleDetails()
-                    end
-                end)
+        row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -((i - 1) * rowHeight))
+        row.itemInfo = itemInfo
+        row.bg:SetVertexColor((i % 2 == 0) and 0.10 or 0.06, (i % 2 == 0) and 0.10 or 0.06, (i % 2 == 0) and 0.10 or 0.06, 0.85)
+        row.icon:SetTexture(itemInfo.iconFileID or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.name:SetText(itemInfo.__displayName)
+        row.current:SetText(itemInfo.category or "Miscellaneous")
 
-                child.rows[i] = row
+        local inCategory = itemInfo.category == category
+        local override = GetOverrideCategory(itemInfo.itemID)
+        local canChange = (not inCategory) or override == category or category ~= "Miscellaneous"
+        row.current:SetTextColor(inCategory and 0.25 or 0.75, inCategory and 1 or 0.75, inCategory and 0.35 or 0.75)
+        if inCategory then
+            if override == category then
+                row.action:SetText("Unpin")
+            elseif canChange then
+                row.action:SetText("Remove")
+            else
+                row.action:SetText("Auto")
             end
-
-            row:SetPoint("TOPLEFT", 0, -((i-1)*55))
-            row.cond = cond
-
-            -- Set Values
-            UIDropDownMenu_SetSelectedValue(row.fieldDD, cond.field)
-            UIDropDownMenu_SetText(row.fieldDD, cond.field) -- Ideally map to text
-
-            UIDropDownMenu_SetSelectedValue(row.opDD, cond.operator)
-            UIDropDownMenu_SetText(row.opDD, cond.operator)
-
-            row.valEdit:SetText(cond.value or "")
-
-            row:Show()
+        else
+            row.action:SetText("Add")
         end
+        row.action:EnableMouse(canChange)
+        row.action:SetAlpha(canChange and 1 or 0.45)
+        row:Show()
     end
+
+    child:SetHeight(math.max(#items * rowHeight, 1))
 end
 
 function Editor:Init()
-    -- no-op
+    EnsureStaticPopups()
 end
 
 print("|cFF00FF00OmniInventory|r: Category Editor loaded")
