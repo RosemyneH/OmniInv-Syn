@@ -15,7 +15,59 @@ local Categorizer = Omni.Categorizer
 -- =============================================================================
 
 local categories = {}  -- { name = { priority, icon, color, filter } }
-local categoryOrder = {}  -- Sorted by priority
+local categoryOrder = {}
+local categoryOrderIndex = nil
+
+local DEFAULT_CATEGORY_ORDER = {
+    "Tools",
+    "Perishable",
+    "Quest Items",
+    "Upgradable Items",
+    "Attunable",
+    "Account Attunable",
+    "New Items",
+    "BoE",
+    "Equipment Sets",
+    "Equipment",
+    "Consumables",
+    "Trade Goods",
+    "Reagents",
+    "Keys",
+    "Bags",
+    "Ammo",
+    "Glyphs",
+    "Junk",
+    "Miscellaneous",
+}
+
+local function CopyDefaultCategoryOrder()
+    local copy = {}
+    for i, name in ipairs(DEFAULT_CATEGORY_ORDER) do
+        copy[i] = name
+    end
+    return copy
+end
+
+local function GetSavedCategoryOrder()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    if type(OmniInventoryDB.global.categoryOrder) ~= "table" then
+        OmniInventoryDB.global.categoryOrder = CopyDefaultCategoryOrder()
+    end
+    return OmniInventoryDB.global.categoryOrder
+end
+
+local function GetCategoryOrderIndex(name)
+    if not categoryOrderIndex then
+        categoryOrderIndex = {}
+        for i, categoryName in ipairs(GetSavedCategoryOrder()) do
+            if type(categoryName) == "string" and not categoryOrderIndex[categoryName] then
+                categoryOrderIndex[categoryName] = i
+            end
+        end
+    end
+    return categoryOrderIndex[name] or 10000
+end
 
 -- Default colors for categories
 local CATEGORY_COLORS = {
@@ -980,6 +1032,34 @@ end
 -- =============================================================================
 -- Category Registry
 -- =============================================================================
+
+local function CompareCategoryNames(a, b)
+    local orderA = GetCategoryOrderIndex(a)
+    local orderB = GetCategoryOrderIndex(b)
+    if orderA ~= orderB then
+        return orderA < orderB
+    end
+
+    local infoA = categories[a]
+    local infoB = categories[b]
+    local priorityA = infoA and infoA.priority or 99
+    local priorityB = infoB and infoB.priority or 99
+    if priorityA ~= priorityB then
+        return priorityA < priorityB
+    end
+
+    return tostring(a) < tostring(b)
+end
+
+local function RebuildCategoryOrder()
+    categoryOrder = {}
+    for _, catDef in pairs(categories) do
+        table.insert(categoryOrder, catDef)
+    end
+    table.sort(categoryOrder, function(a, b)
+        return CompareCategoryNames(a.name, b.name)
+    end)
+end
 
 function Categorizer:RegisterCategory(name, priority, icon, color, filterFunc)
     categories[name] = {
