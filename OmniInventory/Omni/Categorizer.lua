@@ -1070,14 +1070,7 @@ function Categorizer:RegisterCategory(name, priority, icon, color, filterFunc)
         filter = filterFunc,
     }
 
-    -- Rebuild sorted order
-    categoryOrder = {}
-    for catName, catDef in pairs(categories) do
-        table.insert(categoryOrder, catDef)
-    end
-    table.sort(categoryOrder, function(a, b)
-        return a.priority < b.priority
-    end)
+    RebuildCategoryOrder()
 end
 
 function Categorizer:GetCategoryInfo(name)
@@ -1090,6 +1083,51 @@ end
 
 function Categorizer:GetAllCategories()
     return categoryOrder
+end
+
+function Categorizer:GetCategorySortIndex(name)
+    return GetCategoryOrderIndex(name)
+end
+
+function Categorizer:SortCategoryNames(names)
+    table.sort(names, CompareCategoryNames)
+end
+
+function Categorizer:GetCategoryOrder()
+    return GetSavedCategoryOrder()
+end
+
+function Categorizer:SetCategoryOrder(order)
+    if type(order) ~= "table" then return end
+
+    local cleaned = {}
+    local seen = {}
+    for _, name in ipairs(order) do
+        if type(name) == "string" and name ~= "" and not seen[name] then
+            cleaned[#cleaned + 1] = name
+            seen[name] = true
+        end
+    end
+    for _, name in ipairs(DEFAULT_CATEGORY_ORDER) do
+        if not seen[name] then
+            cleaned[#cleaned + 1] = name
+            seen[name] = true
+        end
+    end
+
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    OmniInventoryDB.global.categoryOrder = cleaned
+    categoryOrderIndex = nil
+    RebuildCategoryOrder()
+end
+
+function Categorizer:ResetCategoryOrder()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.global = OmniInventoryDB.global or {}
+    OmniInventoryDB.global.categoryOrder = CopyDefaultCategoryOrder()
+    categoryOrderIndex = nil
+    RebuildCategoryOrder()
 end
 
 function Categorizer:GetCategoryColor(name)
