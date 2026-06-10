@@ -22,6 +22,8 @@ The main frame is the primary window for OmniInventory, providing the container 
 7. The header includes a left-of-bag helper button that opens the `.finddungeon` popup wrapper
 8. When enabled, pressing AttuneHelper's mini sort button switches OmniInventory into bag preview for the configured target bag (`0` backpack or `1` first bag) before AttuneHelper moves items
 9. AttuneHelper mini-frame embedding is frame-level only: OmniInventory may parent, show, hide, and style the mini frame, but AttuneHelper owns child button visibility and layout
+10. Dragging a normal item onto a header bag icon places it into that bag, while dragging an actual bag item still equips or swaps the bag slot
+11. Flow view scroll range is based on visible content only; hidden parked slot buttons must not create blank scroll space
 
 ---
 
@@ -79,6 +81,10 @@ Switch view mode: "grid", "flow", "list"
 ### Frame:SetAttuneHelperSortBagView()
 
 Switch to bag view and select the configured AttuneHelper mini-sort target bag when the integration setting is enabled.
+
+### Frame:PlaceCursorItemInBag(bagID)
+
+Place the normal item currently on the cursor into the first compatible empty slot in the target bag.
 
 ---
 
@@ -191,6 +197,27 @@ Switch to bag view and select the configured AttuneHelper mini-sort target bag w
 3. Drop the item and verify flow mode refreshes once the move completes
 
 **Expected:** Internal drag targets stay stable during the drag, then the category layout reconciles immediately after drop
+
+### Positive Flow: Drag Into Selected Flow Bag
+
+**Precondition:** Main frame is in `flow` view, a header bag icon is selected, and that bag has a compatible empty slot
+
+1. Pick up a normal inventory item
+2. Drop it onto the selected header bag icon
+3. Verify the item moves into that bag and flow mode refreshes to the selected bag scope
+4. Repeat with the Backpack icon selected
+
+**Expected:** Header bag icons act as flow-mode drop targets for normal items, including Backpack, without breaking bag-item equip/swap behavior on swappable bag slots.
+
+### Edge Case: Flow Scroll Ends At Content
+
+**Precondition:** Main frame is in `flow` view with empty bag slots available
+
+1. Open OmniInventory
+2. Scroll to the bottom of the main item area
+3. Verify scrolling stops at the last visible category/item row
+
+**Expected:** Hidden empty-slot parking used for combat-safe refreshes does not add blank scrollable space below the content.
 
 ### Positive Flow: Drop Into Empty Slot In Grid/Bag View
 
