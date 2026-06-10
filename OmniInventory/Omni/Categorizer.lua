@@ -200,80 +200,154 @@ local CATEGORY_COLORS = {
 
 local DEFAULT_CATEGORY_RULES = {
     ["Perishable"] = {
-        "Item ID is listed as perishable or added to the perishable SavedVariables list.",
+        enabled = true,
+        priority = 17.5,
+        script = "return perishable()",
+        description = "Item ID is listed as perishable or added to the perishable SavedVariables list.",
     },
     ["Quest Items"] = {
-        "Container slot is marked as a quest item by GetContainerItemQuestInfo().",
-        "Fallback item type is Quest.",
+        enabled = true,
+        priority = 20,
+        script = "return questItem() or itemType(\"Quest\")",
+        description = "Container slot is marked as a quest item or fallback item type is Quest.",
     },
     ["Mythic+"] = {
-        "Ascension instant item description contains a Mythic marker.",
+        enabled = true,
+        priority = 30,
+        script = "return ascensionCategory(\"Mythic+\")",
+        description = "Ascension instant item description contains a Mythic marker.",
     },
     ["Tier Token"] = {
-        "Ascension instant item description identifies the item as a tier token.",
+        enabled = true,
+        priority = 31,
+        script = "return ascensionCategory(\"Tier Token\")",
+        description = "Ascension instant item description identifies the item as a tier token.",
     },
     ["Mystic Enchants"] = {
-        "Ascension instant item description contains the @re enchant marker.",
+        enabled = true,
+        priority = 32,
+        script = "return ascensionCategory(\"Mystic Enchants\")",
+        description = "Ascension instant item description contains the @re enchant marker.",
     },
     ["Upgradable Items"] = {
-        "Item ID is included in the curated upgradable-item allowlist.",
+        enabled = true,
+        priority = 80,
+        script = "return upgradable()",
+        description = "Item ID is included in the curated upgradable-item allowlist.",
     },
     ["Attunable"] = {
-        "Current character can attune the item and link-based progress is below 100%.",
+        enabled = true,
+        priority = 40,
+        script = "return attunable()",
+        description = "Current character can attune the item and link-based progress is below 100%.",
     },
     ["Account Attunable"] = {
-        "BoE equipment cannot be attuned by this character but can be attuned by another character on the account.",
+        enabled = true,
+        priority = 55,
+        script = "return accountAttunable()",
+        description = "BoE equipment cannot be attuned by this character but can be attuned by another character on the account.",
     },
     ["Equipment Sets"] = {
-        "Item is present in an equipment set by slot-aware API or saved equipment-set item IDs.",
+        enabled = true,
+        priority = 50,
+        script = "return equipmentSet()",
+        description = "Item is present in an equipment set by slot-aware API or saved equipment-set item IDs.",
     },
     ["BoE"] = {
-        "Item is unbound equipment or bind state cannot be scanned by the client.",
+        enabled = true,
+        priority = 70,
+        script = "return boe()",
+        description = "Item is unbound equipment or bind state cannot be scanned by the client.",
     },
     ["Transmog"] = {
-        "Ascension equipment appearance has not been collected.",
+        enabled = true,
+        priority = 33,
+        script = "return ascensionCategory(\"Transmog\")",
+        description = "Ascension equipment appearance has not been collected.",
     },
     ["Ascension"] = {
-        "Ascension vanity item is registered in the global vanity table.",
+        enabled = true,
+        priority = 34,
+        script = "return ascensionCategory(\"Ascension\")",
+        description = "Ascension vanity item is registered in the global vanity table.",
     },
     ["Vanity"] = {
-        "Ascension quality-6 vanity-style item is detected.",
+        enabled = true,
+        priority = 35,
+        script = "return ascensionCategory(\"Vanity\")",
+        description = "Ascension quality-6 vanity-style item is detected.",
     },
     ["New Items"] = {
-        "Session tracking marks newly acquired item IDs for highlighting; primary category stays unchanged.",
+        enabled = false,
+        priority = 90,
+        script = "return newItem()",
+        description = "Session tracking marks newly acquired item IDs for highlighting; primary category stays unchanged.",
     },
     ["Equipment"] = {
-        "Item has an equipment slot or falls back to Armor/Weapon item type.",
+        enabled = true,
+        priority = 100,
+        script = "return fallbackCategory(\"Equipment\")",
+        description = "Item has an equipment slot or falls back to Armor/Weapon item type.",
     },
     ["Consumables"] = {
-        "Item type or subtype maps to consumable behavior.",
+        enabled = true,
+        priority = 110,
+        script = "return fallbackCategory(\"Consumables\")",
+        description = "Item type or subtype maps to consumable behavior.",
     },
     ["Trade Goods"] = {
-        "Item type or subtype maps to trade goods, recipes, gems, or profession materials.",
+        enabled = true,
+        priority = 120,
+        script = "return fallbackCategory(\"Trade Goods\")",
+        description = "Item type or subtype maps to trade goods, recipes, gems, or profession materials.",
     },
     ["Reagents"] = {
-        "Item type is Reagent.",
+        enabled = true,
+        priority = 130,
+        script = "return fallbackCategory(\"Reagents\")",
+        description = "Item type is Reagent.",
     },
     ["Tools"] = {
-        "Item ID is included in the curated tools allowlist.",
+        enabled = true,
+        priority = 60,
+        script = "return toolItem()",
+        description = "Item ID is included in the curated tools allowlist.",
     },
     ["Keys"] = {
-        "Item type is Key.",
+        enabled = true,
+        priority = 150,
+        script = "return fallbackCategory(\"Keys\")",
+        description = "Item type is Key.",
     },
     ["Bags"] = {
-        "Item type is Container, Quiver, or bag-style container.",
+        enabled = true,
+        priority = 160,
+        script = "return fallbackCategory(\"Bags\")",
+        description = "Item type is Container, Quiver, or bag-style container.",
     },
     ["Ammo"] = {
-        "Item type is Projectile.",
+        enabled = true,
+        priority = 170,
+        script = "return fallbackCategory(\"Ammo\")",
+        description = "Item type is Projectile.",
     },
     ["Glyphs"] = {
-        "Item type is Glyph.",
+        enabled = true,
+        priority = 180,
+        script = "return fallbackCategory(\"Glyphs\")",
+        description = "Item type is Glyph.",
     },
     ["Junk"] = {
-        "Item quality is poor/grey.",
+        enabled = true,
+        priority = 880,
+        script = "return junk()",
+        description = "Item quality is poor/grey.",
     },
     ["Miscellaneous"] = {
-        "Fallback when no visible category rule matches.",
+        enabled = true,
+        priority = 9999,
+        script = "return true",
+        description = "Fallback when no visible category rule matches.",
     },
 }
 
@@ -1177,6 +1251,151 @@ local function ClassifyByItemType(itemInfo)
     return TYPE_TO_CATEGORY[itemType] or "Miscellaneous"
 end
 
+local function MatchesAny(value, ...)
+    local count = select("#", ...)
+    if count == 0 then return value ~= nil end
+    for i = 1, count do
+        local candidate = select(i, ...)
+        if type(candidate) == "table" then
+            for _, nested in ipairs(candidate) do
+                if value == nested then return true end
+            end
+        elseif value == candidate then
+            return true
+        end
+    end
+    return false
+end
+
+local function GetItemRuleInfo(itemInfo)
+    if not itemInfo then
+        return nil, nil, nil, nil, nil, nil, nil
+    end
+    local itemType, itemSubType, equipSlot = GetItemTypeInfo(itemInfo)
+    local name, _, _, itemLevel, requiredLevel
+    if itemInfo.hyperlink then
+        name, _, _, itemLevel, requiredLevel = GetItemInfo(itemInfo.hyperlink)
+    elseif itemInfo.itemID then
+        name, _, _, itemLevel, requiredLevel = GetItemInfo(itemInfo.itemID)
+    end
+    return name, itemType, itemSubType, equipSlot, itemLevel, requiredLevel, GetItemID(itemInfo)
+end
+
+local function BuildRuleHelpers(itemInfo)
+    local itemName, itemTypeValue, itemSubTypeValue, equipSlotValue, itemLevelValue, requiredLevelValue, id = GetItemRuleInfo(itemInfo)
+    local ascensionCategory
+    local function getAscensionCategory()
+        if ascensionCategory == nil then
+            ascensionCategory = GetAscensionCategory(itemInfo) or false
+        end
+        return ascensionCategory ~= false and ascensionCategory or nil
+    end
+
+    return {
+        itemID = function(...)
+            return MatchesAny(id, ...)
+        end,
+        nameContains = function(text)
+            return type(itemName) == "string" and type(text) == "string"
+                and string.find(string.lower(itemName), string.lower(text), 1, true) ~= nil
+        end,
+        quality = function(...)
+            return MatchesAny(itemInfo and itemInfo.quality, ...)
+        end,
+        minLevel = function(value)
+            return (tonumber(requiredLevelValue) or 0) >= (tonumber(value) or 0)
+        end,
+        itemLevel = function(value)
+            return (tonumber(itemLevelValue) or 0) >= (tonumber(value) or 0)
+        end,
+        itemType = function(...)
+            return MatchesAny(itemTypeValue, ...)
+        end,
+        subtype = function(...)
+            return MatchesAny(itemSubTypeValue, ...)
+        end,
+        equipSlot = function(...)
+            return MatchesAny(equipSlotValue, ...)
+        end,
+        isEquipment = function()
+            return IsEquipmentItem(itemInfo)
+        end,
+        isConsumable = function()
+            return ClassifyByItemType(itemInfo) == "Consumables"
+        end,
+        questItem = function()
+            return IsQuestItem(itemInfo)
+        end,
+        perishable = function()
+            return Categorizer:IsPerishableItem(id)
+        end,
+        attunable = function()
+            return IsAttunableItem(itemInfo)
+        end,
+        accountAttunable = function()
+            return IsAccountAttunableItem(itemInfo)
+        end,
+        equipmentSet = function()
+            return IsEquipmentSetItem(itemInfo)
+        end,
+        boe = function()
+            return IsBoEItem(itemInfo)
+        end,
+        upgradable = function()
+            return IsUpgradableItem(itemInfo)
+        end,
+        toolItem = function()
+            return IsToolsItem(itemInfo)
+        end,
+        junk = function()
+            return itemInfo and itemInfo.quality == 0
+        end,
+        newItem = function()
+            return Categorizer:IsNewItem(id)
+        end,
+        ascensionCategory = function(name)
+            return getAscensionCategory() == name
+        end,
+        descriptionContains = function(text)
+            local info = GetAscensionInstantInfo(id)
+            local description = info and info.description
+            return type(description) == "string" and type(text) == "string"
+                and string.find(string.lower(description), string.lower(text), 1, true) ~= nil
+        end,
+        uncollectedAppearance = function()
+            return IsUncollectedAppearance(id, itemSubTypeValue)
+        end,
+        fallbackCategory = function(name)
+            return ClassifyByItemType(itemInfo) == name
+        end,
+        any = function(...)
+            for i = 1, select("#", ...) do
+                if select(i, ...) then return true end
+            end
+            return false
+        end,
+        all = function(...)
+            for i = 1, select("#", ...) do
+                if not select(i, ...) then return false end
+            end
+            return true
+        end,
+        none = function(...)
+            for i = 1, select("#", ...) do
+                if select(i, ...) then return false end
+            end
+            return true
+        end,
+        inList = function(value, list)
+            if type(list) ~= "table" then return false end
+            for _, candidate in ipairs(list) do
+                if value == candidate then return true end
+            end
+            return false
+        end,
+    }
+end
+
 -- =============================================================================
 -- Priority Pipeline
 -- =============================================================================
@@ -1193,79 +1412,16 @@ local function ResolveAutomaticCategory(self, itemInfo, perfToken)
         return "Miscellaneous"
     end
 
-    -- ʕ ● ᴥ ●ʔ Custom Rules Engine disabled — module is no longer loaded (see OmniInventory.toc)
-
-    -- Priority 1.75: Perishable / time-limited turn-in items
-    if IsCategoryVisible("Perishable") and self:IsPerishableItem(GetItemID(itemInfo)) then
-        EndGetCategoryPerf(perfToken)
-        return "Perishable"
+    if Omni.Rules and Omni.Rules.FindMatchingCategory then
+        local out = Omni.Rules:FindMatchingCategory(itemInfo, BuildRuleHelpers(itemInfo), IsCategoryVisible)
+        if out and IsCategoryVisible(out) then
+            EndGetCategoryPerf(perfToken, out)
+            return out
+        end
     end
 
-
-
-    -- Priority 2: Quest Items
-    if IsCategoryVisible("Quest Items") and IsQuestItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Quest Items"
-    end
-
-    local ascensionCategory = GetAscensionCategory(itemInfo)
-    if ascensionCategory and IsCategoryVisible(ascensionCategory) then
-        EndGetCategoryPerf(perfToken)
-        return ascensionCategory
-    end
-
-    -- Priority 3: Attunable
-    if IsCategoryVisible("Attunable") and IsAttunableItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Attunable"
-    end
-
-    -- Priority 4: Equipment Sets
-    if IsCategoryVisible("Equipment Sets") and IsEquipmentSetItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Equipment Sets"
-    end
-
-    -- Priority 4.5: Account Attunable (BoE that an alt can attune)
-    if IsCategoryVisible("Account Attunable") and IsAccountAttunableItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Account Attunable"
-    end
-
-    -- Prio 5 : Tools
-    if IsCategoryVisible("Tools") and IsToolsItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Tools"
-    end
-
-    -- Priority 6: BoE equipment
-    if IsCategoryVisible("BoE") and IsBoEItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "BoE"
-    end
-
-    -- Priority 7: Explicit upgradable-item allowlist  6 7 6 7 6 7 6  7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7
-    if IsCategoryVisible("Upgradable Items") and IsUpgradableItem(itemInfo) then
-        EndGetCategoryPerf(perfToken)
-        return "Upgradable Items"
-    end
-
-    -- Priority 88: Check quality for junk
-    if IsCategoryVisible("Junk") and itemInfo.quality == 0 then
-        EndGetCategoryPerf(perfToken)
-        return "Junk"
-    end
-
-    
-
-    -- Priority 10+: Heuristic classification
-    local out = ClassifyByItemType(itemInfo)
-    if not IsCategoryVisible(out) then
-        out = "Miscellaneous"
-    end
-    EndGetCategoryPerf(perfToken, out)
-    return out
+    EndGetCategoryPerf(perfToken, "Miscellaneous")
+    return "Miscellaneous"
 end
 
 function Categorizer:GetAutomaticCategory(itemInfo)
@@ -1386,10 +1542,59 @@ end
 function Categorizer:GetCategoryRuleDescriptions(name)
     local source = DEFAULT_CATEGORY_RULES[name]
     local rules = {}
-    for i, description in ipairs(source or {}) do
-        rules[i] = description
+    if source and source.description then
+        rules[1] = source.description
     end
     return rules
+end
+
+function Categorizer:GetCategoryRule(name)
+    if Omni.Rules and Omni.Rules.GetCategoryRule then
+        return Omni.Rules:GetCategoryRule(name)
+    end
+    return nil
+end
+
+function Categorizer:GetDefaultCategoryRule(name)
+    if Omni.Rules and Omni.Rules.GetDefaultCategoryRule then
+        return Omni.Rules:GetDefaultCategoryRule(name)
+    end
+    return DEFAULT_CATEGORY_RULES[name]
+end
+
+function Categorizer:ValidateCategoryRuleScript(script)
+    if Omni.Rules and Omni.Rules.ValidateScript then
+        return Omni.Rules:ValidateScript(script)
+    end
+    return false, "Rule engine is not loaded."
+end
+
+function Categorizer:SetCategoryRuleScript(name, script)
+    if Omni.Rules and Omni.Rules.SetCategoryRuleScript then
+        return Omni.Rules:SetCategoryRuleScript(name, script)
+    end
+    return false, "Rule engine is not loaded."
+end
+
+function Categorizer:SetCategoryRuleEnabled(name, enabled)
+    if Omni.Rules and Omni.Rules.SetCategoryRuleEnabled then
+        return Omni.Rules:SetCategoryRuleEnabled(name, enabled)
+    end
+    return false
+end
+
+function Categorizer:SetCategoryRulePriority(name, priority)
+    if Omni.Rules and Omni.Rules.SetCategoryRulePriority then
+        return Omni.Rules:SetCategoryRulePriority(name, priority)
+    end
+    return false, "Rule engine is not loaded."
+end
+
+function Categorizer:ResetCategoryRule(name)
+    if Omni.Rules and Omni.Rules.ResetCategoryRule then
+        return Omni.Rules:ResetCategoryRule(name)
+    end
+    return false
 end
 
 function Categorizer:GetAllCategories()
@@ -1485,6 +1690,9 @@ function Categorizer:CreateUserCategory(name)
 
     GetHiddenCategories()[name] = nil
     EnsureCategoryInSavedOrder(name)
+    if Omni.Rules and Omni.Rules.EnsureCategoryRule then
+        Omni.Rules:EnsureCategoryRule(name, userCategories[name] and userCategories[name].priority or 80)
+    end
     RebuildCategoryOrder()
     return name
 end
@@ -1541,6 +1749,10 @@ function Categorizer:RenameUserCategory(oldName, newName)
         end
     end
 
+    if Omni.Rules and Omni.Rules.RenameCategoryRule then
+        Omni.Rules:RenameCategoryRule(oldName, newName)
+    end
+
     self:RegisterCategory(newName, def.priority or 80, nil, CopyColor(def.color))
     categoryOrderIndex = nil
     RebuildCategoryOrder()
@@ -1555,6 +1767,9 @@ function Categorizer:DeleteUserCategory(name)
     categories[name] = nil
     GetHiddenCategories()[name] = nil
     RemoveCategoryFromSavedOrder(name)
+    if Omni.Rules and Omni.Rules.DeleteCategoryRule then
+        Omni.Rules:DeleteCategoryRule(name)
+    end
 
     if OmniInventoryDB and OmniInventoryDB.categoryOverrides then
         for itemID, categoryName in pairs(OmniInventoryDB.categoryOverrides) do
@@ -1603,6 +1818,13 @@ end
 -- =============================================================================
 
 function Categorizer:Init()
+    OmniInventoryDB = OmniInventoryDB or {}
+    OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
+    OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
+    if Omni.Rules and Omni.Rules.RegisterDefaultCategoryRules then
+        Omni.Rules:RegisterDefaultCategoryRules(DEFAULT_CATEGORY_RULES)
+    end
+
     -- Register default categories
     self:RegisterCategory("Perishable", 1, nil, CATEGORY_COLORS["Perishable"])
     self:RegisterCategory("Mythic+", 1.3, nil, CATEGORY_COLORS["Mythic+"])
@@ -1631,12 +1853,12 @@ function Categorizer:Init()
     self:RegisterCategory("Miscellaneous", 99, nil, CATEGORY_COLORS["Miscellaneous"])
 
     -- Initialize manual overrides
-    OmniInventoryDB = OmniInventoryDB or {}
-    OmniInventoryDB.categoryOverrides = OmniInventoryDB.categoryOverrides or {}
-    OmniInventoryDB.perishableItems = OmniInventoryDB.perishableItems or {}
     GetUserCategories()
     for name, def in pairs(OmniInventoryDB.global.userCategories) do
         self:RegisterCategory(name, def.priority or 80, nil, CopyColor(def.color))
+        if Omni.Rules and Omni.Rules.EnsureCategoryRule then
+            Omni.Rules:EnsureCategoryRule(name, def.priority or 80)
+        end
         EnsureCategoryInSavedOrder(name)
     end
 end

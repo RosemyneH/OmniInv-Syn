@@ -263,9 +263,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         if Omni.Pool then Omni.Pool:Init() end
         if Omni.Events then Omni.Events:Init() end
+        if Omni.Rules then Omni.Rules:Init() end
         if Omni.Categorizer then Omni.Categorizer:Init() end
         if Omni.Sorter then Omni.Sorter:Init() end
-        if Omni.Rules then Omni.Rules:Init() end
         if Omni.Utils and Omni.Utils.EnsureBlizzardContainerItemButtons then
             Omni.Utils:EnsureBlizzardContainerItemButtons()
         end
