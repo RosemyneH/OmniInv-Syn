@@ -19,9 +19,9 @@ Omni\Events.lua
 Omni\Pool.lua
 Omni\Utils.lua
 Omni\Data.lua
+Omni\Rules.lua
 Omni\Categorizer.lua
 Omni\Sorter.lua
-# Omni\Rules.lua            -- disabled: custom-rule engine is unsupported (kept for future rewrite)
 
 # =============================================================================
 # UI Components

@@ -50,6 +50,7 @@ local defaults = {
             "Miscellaneous",
         },
         userCategories = {},
+        categoryRules = {},
         hiddenCategories = {},
         -- ʕ •ᴥ•ʔ✿ right | left | fixed_br | fixed_bl | fixed_tl | fixed_tr (ItemButton) ✿ ʕ •ᴥ•ʔ
         itemTooltipPlacement = "right",
