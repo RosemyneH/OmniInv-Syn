@@ -75,6 +75,10 @@ local DIM = {
     FILTER_BUTTON_MIN_WIDTH = 22,
     FILTER_FONT_PATH = "Fonts\\FRIZQT__.TTF",
     FILTER_FONT_SIZES = { 10, 9, 8, 7 },
+    CATEGORY_HEADER_FONT_PATH = "Fonts\\FRIZQT__.TTF",
+    CATEGORY_HEADER_FONT_MIN = 11,
+    CATEGORY_HEADER_FONT_MAX = 14,
+    CATEGORY_HEADER_HEIGHT_MIN = 22,
     FILTER_ROW_SPACING = 2,
     FILTER_ROW_TOP_PAD = 2,
     FILTER_ROW_BOTTOM_PAD = 2,
@@ -1894,18 +1898,16 @@ local activeFilterMissingState = {
 }
 
 -- ʕ ◕ᴥ◕ ʔ✿ Static specials always rendered first. "All" clears the
--- filter, "New" matches the session-acquired flag, and everything
--- after them is generated dynamically from the categories currently
--- present in the inventory (see RebuildFilterTabs). ✿ ʕ ◕ᴥ◕ ʔ
+-- filter, then everything after it is generated dynamically from the
+-- categories currently in the inventory. ✿ ʕ ◕ᴥ◕ ʔ
 local SPECIAL_FILTERS = {
     { name = "All", filter = nil, color = DIM.FILTER_NEUTRAL_COLOR },
 }
-local CATEGORY_ADD_COLOR = { 0.25, 1.00, 0.35 }
 
 local function ApplyFilterButtonVisual(btn, hovered)
     local c = btn.colorTuple or DIM.FILTER_NEUTRAL_COLOR
     local r, g, b = c[1], c[2], c[3]
-    local isActive = (not btn.isAddCategory) and (activeFilter == btn.filterName)
+    local isActive = (activeFilter == btn.filterName)
     local bgIntensity
     if isActive then
         bgIntensity = 0.45
@@ -1934,10 +1936,6 @@ local function CreateFilterButton(parent)
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.text:SetPoint("CENTER")
     btn:SetScript("OnClick", function(self, mouseButton)
-        if self.isAddCategory then
-            Frame:PromptNewCategory()
-            return
-        end
         if mouseButton == "RightButton" and self.filterName and Omni.CategoryEditor then
             Omni.CategoryEditor:Open(self.filterName)
             return
@@ -1959,10 +1957,24 @@ local function ResolveCategoryColor(name)
     return DIM.FILTER_NEUTRAL_COLOR
 end
 
-function Frame:PromptNewCategory()
-    if Omni.CategoryEditor and Omni.CategoryEditor.PromptNewCategory then
-        Omni.CategoryEditor:PromptNewCategory()
+local function FormatInventoryCategoryLabel(name)
+    if type(name) ~= "string" then
+        return tostring(name or "")
     end
+    return (string.gsub(name, "%+", ""))
+end
+
+local function ResolveCategoryHeaderFontSize(width)
+    width = tonumber(width) or 0
+    local size = DIM.CATEGORY_HEADER_FONT_MIN
+    if width >= 360 then
+        size = 14
+    elseif width >= 240 then
+        size = 13
+    elseif width >= 170 then
+        size = 12
+    end
+    return math.max(DIM.CATEGORY_HEADER_FONT_MIN, math.min(size, DIM.CATEGORY_HEADER_FONT_MAX))
 end
 
 function Frame:CreateFilterBar()
@@ -2018,17 +2030,11 @@ function Frame:RebuildFilterTabs(presentCategories)
 
     for _, name in ipairs(categoryNames) do
         table.insert(defs, {
-            name = name,
+            name = FormatInventoryCategoryLabel(name),
             filter = name,
             color = ResolveCategoryColor(name),
         })
     end
-    table.insert(defs, {
-        name = "+",
-        filter = nil,
-        color = CATEGORY_ADD_COLOR,
-        isAddCategory = true,
-    })
 
     -- ʕ •ᴥ•ʔ✿ Single-row shrink-to-fit. We first try every tab at the
     -- default font and max padding. If the labels overflow the bar,
@@ -2109,7 +2115,6 @@ function Frame:RebuildFilterTabs(presentCategories)
         btn:SetSize(finalWidth, DIM.FILTER_BUTTON_HEIGHT)
 
         btn.filterName = def.filter
-        btn.isAddCategory = def.isAddCategory == true
         btn.colorTuple = def.color
         btn:Show()
         ApplyFilterButtonVisual(btn, false)
