@@ -198,6 +198,85 @@ local CATEGORY_COLORS = {
     ["Glyphs"]          = { r = 0.5, g = 0.8, b = 1.0 },
 }
 
+local DEFAULT_CATEGORY_RULES = {
+    ["Perishable"] = {
+        "Item ID is listed as perishable or added to the perishable SavedVariables list.",
+    },
+    ["Quest Items"] = {
+        "Container slot is marked as a quest item by GetContainerItemQuestInfo().",
+        "Fallback item type is Quest.",
+    },
+    ["Mythic+"] = {
+        "Ascension instant item description contains a Mythic marker.",
+    },
+    ["Tier Token"] = {
+        "Ascension instant item description identifies the item as a tier token.",
+    },
+    ["Mystic Enchants"] = {
+        "Ascension instant item description contains the @re enchant marker.",
+    },
+    ["Upgradable Items"] = {
+        "Item ID is included in the curated upgradable-item allowlist.",
+    },
+    ["Attunable"] = {
+        "Current character can attune the item and link-based progress is below 100%.",
+    },
+    ["Account Attunable"] = {
+        "BoE equipment cannot be attuned by this character but can be attuned by another character on the account.",
+    },
+    ["Equipment Sets"] = {
+        "Item is present in an equipment set by slot-aware API or saved equipment-set item IDs.",
+    },
+    ["BoE"] = {
+        "Item is unbound equipment or bind state cannot be scanned by the client.",
+    },
+    ["Transmog"] = {
+        "Ascension equipment appearance has not been collected.",
+    },
+    ["Ascension"] = {
+        "Ascension vanity item is registered in the global vanity table.",
+    },
+    ["Vanity"] = {
+        "Ascension quality-6 vanity-style item is detected.",
+    },
+    ["New Items"] = {
+        "Session tracking marks newly acquired item IDs for highlighting; primary category stays unchanged.",
+    },
+    ["Equipment"] = {
+        "Item has an equipment slot or falls back to Armor/Weapon item type.",
+    },
+    ["Consumables"] = {
+        "Item type or subtype maps to consumable behavior.",
+    },
+    ["Trade Goods"] = {
+        "Item type or subtype maps to trade goods, recipes, gems, or profession materials.",
+    },
+    ["Reagents"] = {
+        "Item type is Reagent.",
+    },
+    ["Tools"] = {
+        "Item ID is included in the curated tools allowlist.",
+    },
+    ["Keys"] = {
+        "Item type is Key.",
+    },
+    ["Bags"] = {
+        "Item type is Container, Quiver, or bag-style container.",
+    },
+    ["Ammo"] = {
+        "Item type is Projectile.",
+    },
+    ["Glyphs"] = {
+        "Item type is Glyph.",
+    },
+    ["Junk"] = {
+        "Item quality is poor/grey.",
+    },
+    ["Miscellaneous"] = {
+        "Fallback when no visible category rule matches.",
+    },
+}
+
 -- Curated allowlist of item IDs that participate in upgrade paths and should
 -- stay grouped together instead of being absorbed by broader heuristics.
 local UPGRADABLE_ITEMS = {
@@ -1102,33 +1181,23 @@ end
 -- Priority Pipeline
 -- =============================================================================
 
-function Categorizer:GetCategory(itemInfo)
-    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("categorizer.GetCategory")
-    if not itemInfo then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
-        return "Miscellaneous"
+local function EndGetCategoryPerf(perfToken, result)
+    if Omni._perfEnabled and Omni.Perf then
+        Omni.Perf:End("categorizer.GetCategory", perfToken, result and { result = result } or nil)
     end
+end
 
-    -- Priority 1: Manual Override
-    if itemInfo.itemID and OmniInventoryDB and OmniInventoryDB.categoryOverrides then
-        local override = OmniInventoryDB.categoryOverrides[itemInfo.itemID]
-        if override and IsCategoryVisible(override) then
-            if Omni._perfEnabled and Omni.Perf then
-                Omni.Perf:End("categorizer.GetCategory", perfToken)
-            end
-            return override
-        end
+local function ResolveAutomaticCategory(self, itemInfo, perfToken)
+    if not itemInfo then
+        EndGetCategoryPerf(perfToken)
+        return "Miscellaneous"
     end
 
     -- ʕ ● ᴥ ●ʔ Custom Rules Engine disabled — module is no longer loaded (see OmniInventory.toc)
 
     -- Priority 1.75: Perishable / time-limited turn-in items
     if IsCategoryVisible("Perishable") and self:IsPerishableItem(GetItemID(itemInfo)) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Perishable"
     end
 
@@ -1136,73 +1205,55 @@ function Categorizer:GetCategory(itemInfo)
 
     -- Priority 2: Quest Items
     if IsCategoryVisible("Quest Items") and IsQuestItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Quest Items"
     end
 
     local ascensionCategory = GetAscensionCategory(itemInfo)
     if ascensionCategory and IsCategoryVisible(ascensionCategory) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return ascensionCategory
     end
 
     -- Priority 3: Attunable
     if IsCategoryVisible("Attunable") and IsAttunableItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Attunable"
     end
 
     -- Priority 4: Equipment Sets
     if IsCategoryVisible("Equipment Sets") and IsEquipmentSetItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Equipment Sets"
     end
 
     -- Priority 4.5: Account Attunable (BoE that an alt can attune)
     if IsCategoryVisible("Account Attunable") and IsAccountAttunableItem(itemInfo) then
-            if Omni._perfEnabled and Omni.Perf then
-                Omni.Perf:End("categorizer.GetCategory", perfToken)
-            end
-            return "Account Attunable"
-        end
+        EndGetCategoryPerf(perfToken)
+        return "Account Attunable"
+    end
 
     -- Prio 5 : Tools
     if IsCategoryVisible("Tools") and IsToolsItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Tools"
     end
 
     -- Priority 6: BoE equipment
     if IsCategoryVisible("BoE") and IsBoEItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "BoE"
     end
 
     -- Priority 7: Explicit upgradable-item allowlist  6 7 6 7 6 7 6  7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7 6 7
     if IsCategoryVisible("Upgradable Items") and IsUpgradableItem(itemInfo) then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Upgradable Items"
     end
 
     -- Priority 88: Check quality for junk
     if IsCategoryVisible("Junk") and itemInfo.quality == 0 then
-        if Omni._perfEnabled and Omni.Perf then
-            Omni.Perf:End("categorizer.GetCategory", perfToken)
-        end
+        EndGetCategoryPerf(perfToken)
         return "Junk"
     end
 
@@ -1213,10 +1264,32 @@ function Categorizer:GetCategory(itemInfo)
     if not IsCategoryVisible(out) then
         out = "Miscellaneous"
     end
-    if Omni._perfEnabled and Omni.Perf then
-        Omni.Perf:End("categorizer.GetCategory", perfToken, { result = out })
-    end
+    EndGetCategoryPerf(perfToken, out)
     return out
+end
+
+function Categorizer:GetAutomaticCategory(itemInfo)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("categorizer.GetCategory")
+    return ResolveAutomaticCategory(self, itemInfo, perfToken)
+end
+
+function Categorizer:GetCategory(itemInfo)
+    local perfToken = Omni._perfEnabled and Omni.Perf and Omni.Perf:Begin("categorizer.GetCategory")
+    if not itemInfo then
+        EndGetCategoryPerf(perfToken)
+        return "Miscellaneous"
+    end
+
+    -- Priority 1: Manual Override
+    if itemInfo.itemID and OmniInventoryDB and OmniInventoryDB.categoryOverrides then
+        local override = OmniInventoryDB.categoryOverrides[itemInfo.itemID]
+        if override and IsCategoryVisible(override) then
+            EndGetCategoryPerf(perfToken)
+            return override
+        end
+    end
+
+    return ResolveAutomaticCategory(self, itemInfo, perfToken)
 end
 
 -- =============================================================================
@@ -1308,6 +1381,15 @@ function Categorizer:GetCategoryInfo(name)
         priority = 99,
         color = CATEGORY_COLORS[name] or { r = 0.5, g = 0.5, b = 0.5 },
     }
+end
+
+function Categorizer:GetCategoryRuleDescriptions(name)
+    local source = DEFAULT_CATEGORY_RULES[name]
+    local rules = {}
+    for i, description in ipairs(source or {}) do
+        rules[i] = description
+    end
+    return rules
 end
 
 function Categorizer:GetAllCategories()

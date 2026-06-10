@@ -5,6 +5,7 @@ local Editor = Omni.CategoryEditor
 
 local editorFrame = nil
 local rows = {}
+local ruleRows = {}
 
 local function TrimCategoryName(name)
     name = tostring(name or "")
@@ -39,6 +40,16 @@ local function GetItemName(itemInfo)
     return "Item " .. tostring(itemInfo.itemID or "?")
 end
 
+local function GetItemNameByID(itemID, itemLookup)
+    local itemInfo = itemLookup and itemLookup[itemID]
+    if itemInfo and itemInfo.__displayName then
+        return itemInfo.__displayName
+    end
+    local lookupID = tonumber(itemID) or itemID
+    local name = GetItemInfo(lookupID)
+    return name or ("Item " .. tostring(itemID or "?"))
+end
+
 local function BuildUniqueBagItems(categoryName)
     local source = OmniC_Container and OmniC_Container.GetAllBagItems and OmniC_Container.GetAllBagItems() or {}
     local items = {}
@@ -49,6 +60,9 @@ local function BuildUniqueBagItems(categoryName)
         if itemID and not seen[itemID] then
             seen[itemID] = true
             if Omni.Categorizer then
+                if Omni.Categorizer.GetAutomaticCategory then
+                    itemInfo.__automaticCategory = Omni.Categorizer:GetAutomaticCategory(itemInfo)
+                end
                 itemInfo.category = Omni.Categorizer:GetCategory(itemInfo)
             end
             itemInfo.__displayName = GetItemName(itemInfo)
@@ -65,6 +79,71 @@ local function BuildUniqueBagItems(categoryName)
         return tostring(a.__displayName or "") < tostring(b.__displayName or "")
     end)
     return items
+end
+
+local function BuildCategoryRules(categoryName, items, isUserCategory)
+    local rules = {}
+    local itemLookup = {}
+    local seenManual = {}
+
+    for _, itemInfo in ipairs(items or {}) do
+        if itemInfo.itemID then
+            itemLookup[itemInfo.itemID] = itemInfo
+        end
+    end
+
+    if Omni.Categorizer and Omni.Categorizer.GetCategoryRuleDescriptions then
+        for _, description in ipairs(Omni.Categorizer:GetCategoryRuleDescriptions(categoryName) or {}) do
+            rules[#rules + 1] = {
+                type = "Built-in",
+                detail = description,
+            }
+        end
+    end
+
+    for _, itemInfo in ipairs(items or {}) do
+        local itemID = itemInfo.itemID
+        local override = GetOverrideCategory(itemID)
+        if itemID and override then
+            if override == categoryName then
+                rules[#rules + 1] = {
+                    type = "Include",
+                    detail = GetItemNameByID(itemID, itemLookup),
+                    itemID = itemID,
+                }
+                seenManual[itemID] = true
+            elseif itemInfo.__automaticCategory == categoryName then
+                rules[#rules + 1] = {
+                    type = "Exclude",
+                    detail = GetItemNameByID(itemID, itemLookup) .. " -> " .. override,
+                    itemID = itemID,
+                }
+                seenManual[itemID] = true
+            end
+        end
+    end
+
+    if OmniInventoryDB and OmniInventoryDB.categoryOverrides then
+        for itemID, override in pairs(OmniInventoryDB.categoryOverrides) do
+            if override == categoryName and not seenManual[itemID] then
+                rules[#rules + 1] = {
+                    type = "Include",
+                    detail = GetItemNameByID(itemID, itemLookup),
+                    itemID = itemID,
+                }
+            end
+        end
+    end
+
+    if #rules == 0 then
+        rules[1] = {
+            type = "Info",
+            detail = isUserCategory and "Add items below to create exact item rules."
+                or "No visible rules for this category.",
+        }
+    end
+
+    return rules
 end
 
 local function EnsureStaticPopups()
@@ -99,7 +178,7 @@ function Editor:CreateFrame()
     if editorFrame then return editorFrame end
 
     editorFrame = CreateFrame("Frame", "OmniCategoryEditor", UIParent)
-    editorFrame:SetSize(560, 460)
+    editorFrame:SetSize(620, 560)
     editorFrame:SetPoint("CENTER")
     editorFrame:SetFrameStrata("DIALOG")
     editorFrame:EnableMouse(true)
@@ -180,14 +259,31 @@ function Editor:CreateFrame()
     editorFrame.hint:SetPoint("TOPLEFT", 24, -72)
     editorFrame.hint:SetPoint("RIGHT", -24, 0)
     editorFrame.hint:SetJustifyH("LEFT")
-    editorFrame.hint:SetText("Add or remove current bag items. Membership is saved by item ID.")
+    editorFrame.hint:SetText("Rules are saved as exact item overrides. Add or remove current bag items below.")
+
+    editorFrame.rulesLabel = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    editorFrame.rulesLabel:SetPoint("TOPLEFT", 24, -102)
+    editorFrame.rulesLabel:SetText("Category Rules")
+
+    local ruleScroll = CreateFrame("ScrollFrame", "OmniCategoryEditorRuleScroll", editorFrame, "UIPanelScrollFrameTemplate")
+    ruleScroll:SetPoint("TOPLEFT", 24, -122)
+    ruleScroll:SetSize(544, 104)
+
+    local ruleChild = CreateFrame("Frame", nil, ruleScroll)
+    ruleChild:SetSize(520, 1)
+    ruleScroll:SetScrollChild(ruleChild)
+    editorFrame.ruleChild = ruleChild
+
+    editorFrame.itemsLabel = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    editorFrame.itemsLabel:SetPoint("TOPLEFT", 24, -242)
+    editorFrame.itemsLabel:SetText("Current Bag Items")
 
     local scroll = CreateFrame("ScrollFrame", "OmniCategoryEditorItemScroll", editorFrame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 24, -100)
+    scroll:SetPoint("TOPLEFT", 24, -262)
     scroll:SetPoint("BOTTOMRIGHT", -46, 24)
 
     local child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(480, 1)
+    child:SetSize(520, 1)
     scroll:SetScrollChild(child)
     editorFrame.itemChild = child
 
@@ -224,18 +320,74 @@ function Editor:Refresh()
     editorFrame.nameEdit:SetTextColor(isUserCategory and 1 or 0.65, isUserCategory and 1 or 0.65, isUserCategory and 1 or 0.65)
     editorFrame.deleteBtn:EnableMouse(isUserCategory == true)
     editorFrame.deleteBtn:SetAlpha(isUserCategory and 1 or 0.45)
+    editorFrame.hint:SetText(isUserCategory
+        and "User categories are exact item rules. Add or clear item rules below."
+        or "Built-in rules are listed first. Add or remove items below to customize this category.")
 
     local items = BuildUniqueBagItems(category)
+    local rules = BuildCategoryRules(category, items, isUserCategory == true)
+    local ruleChild = editorFrame.ruleChild
+    local ruleHeight = 32
     local child = editorFrame.itemChild
     local rowHeight = 26
 
+    for _, row in ipairs(ruleRows) do row:Hide() end
     for _, row in ipairs(rows) do row:Hide() end
+
+    for i, ruleInfo in ipairs(rules) do
+        local row = ruleRows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, ruleChild)
+            row:SetSize(520, ruleHeight)
+
+            row.bg = row:CreateTexture(nil, "BACKGROUND")
+            row.bg:SetAllPoints()
+            row.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+            row.ruleType = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            row.ruleType:SetPoint("LEFT", 6, 0)
+            row.ruleType:SetWidth(70)
+            row.ruleType:SetJustifyH("LEFT")
+
+            row.detail = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.detail:SetPoint("LEFT", row.ruleType, "RIGHT", 8, 0)
+            row.detail:SetWidth(330)
+            row.detail:SetJustifyH("LEFT")
+
+            row.action = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            row.action:SetSize(78, 20)
+            row.action:SetPoint("RIGHT", -4, 0)
+            row.action:SetText("Clear")
+            row.action:SetScript("OnClick", function(self)
+                local info = self:GetParent().ruleInfo
+                if not info or not info.itemID or not Omni.Categorizer then return end
+                Omni.Categorizer:ClearManualOverride(info.itemID)
+                RefreshInventory("category_rule_clear")
+                Editor:Refresh()
+            end)
+
+            ruleRows[i] = row
+        end
+
+        row:SetPoint("TOPLEFT", ruleChild, "TOPLEFT", 0, -((i - 1) * ruleHeight))
+        row.ruleInfo = ruleInfo
+        row.bg:SetVertexColor((i % 2 == 0) and 0.10 or 0.06, (i % 2 == 0) and 0.10 or 0.06, (i % 2 == 0) and 0.10 or 0.06, 0.85)
+        row.ruleType:SetText(ruleInfo.type)
+        row.detail:SetText(ruleInfo.detail)
+        local canClear = ruleInfo.itemID ~= nil
+        row.action:EnableMouse(canClear)
+        row.action:SetAlpha(canClear and 1 or 0.35)
+        row.action:SetText(canClear and "Clear" or "-")
+        row:Show()
+    end
+
+    ruleChild:SetHeight(math.max(#rules * ruleHeight, 1))
 
     for i, itemInfo in ipairs(items) do
         local row = rows[i]
         if not row then
             row = CreateFrame("Frame", nil, child)
-            row:SetSize(480, rowHeight)
+            row:SetSize(520, rowHeight)
 
             row.bg = row:CreateTexture(nil, "BACKGROUND")
             row.bg:SetAllPoints()
@@ -247,12 +399,12 @@ function Editor:Refresh()
 
             row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             row.name:SetPoint("LEFT", row.icon, "RIGHT", 7, 0)
-            row.name:SetWidth(220)
+            row.name:SetWidth(260)
             row.name:SetJustifyH("LEFT")
 
             row.current = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             row.current:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
-            row.current:SetWidth(115)
+            row.current:SetWidth(135)
             row.current:SetJustifyH("LEFT")
 
             row.action = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")

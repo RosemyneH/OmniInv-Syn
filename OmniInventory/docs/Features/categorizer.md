@@ -19,6 +19,7 @@ The Categorizer automatically assigns items to logical categories (Quest, Equipm
 4. Categories are extensible (users can add custom categories)
 5. Default categories provide "Smart Defaults" out of the box
 6. Explicit item-ID registries can force items into a dedicated category before generic type-based heuristics run
+7. Editing a default category shows its built-in rules plus any exact-item include/exclude overrides created by the user
 
 ---
 
@@ -83,6 +84,16 @@ flowchart TD
 
 Manual overrides sit above the registered categories and always win. `Tools` are checked before the final heuristic fallback even though they sort at registered priority `14`.
 
+### Category Rule Editing
+
+Right-clicking a category header or category-order tile opens the Category Editor. Default categories now show their built-in matching rules in a `Category Rules` list. User changes are saved as exact item-ID overrides:
+
+- `Include` rules pin an item into the edited category.
+- `Exclude` rules move an item out of its automatic category, usually to `Miscellaneous`.
+- `Clear` removes the exact-item override so the item returns to automatic categorization.
+
+User-created categories have no built-in automatic matcher, so their rule list is made from exact item include rules.
+
 ### Upgradable Items
 
 The categorizer supports a dedicated `Upgradable Items` category backed by an explicit item-ID allowlist. This category is evaluated before quest, attune, and generic equipment heuristics so curated upgrade-path items stay grouped together instead of being scattered across broader buckets.
@@ -102,6 +113,12 @@ Returns the category name for an item.
 
 **Returns:**
 - `categoryName` — String like "Quest Items", "Equipment", etc.
+
+### Categorizer:GetAutomaticCategory(itemInfo) → string
+Returns the category name without applying manual item-ID overrides. The Category Editor uses this to explain default category rules and list item exclusions.
+
+### Categorizer:GetCategoryRuleDescriptions(categoryName) → table
+Returns human-readable built-in rule descriptions for default categories. User categories return an empty list and rely on exact item rules.
 
 ### Categorizer:SetManualOverride(itemID, categoryName)
 Assign an item to a specific category (persisted).
@@ -161,6 +178,19 @@ OmniInventoryDB.categoryOverrides = {
 3. Verify returns the user-assigned category
 
 **Expected:** Manual override takes priority
+
+### Positive Flow: Default Category Rule Editing
+
+**Precondition:** Character has at least one automatically categorized default-category item in bags
+
+1. Right-click that category header in flow mode or the category tile in settings
+2. Verify the `Category Rules` list shows one or more `Built-in` rows
+3. Click `Remove` on an item currently in that category
+4. Verify an `Exclude` rule appears with a `Clear` button
+5. Click `Clear`
+6. Verify the item returns to its automatic category and the exclude rule disappears
+
+**Expected:** Default category rules are visible, item-level edits are listed, and clearing an edit restores automatic categorization
 
 ### Positive Flow: Upgradable Item Allowlist
 
