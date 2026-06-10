@@ -5155,8 +5155,19 @@ function Frame:RenderListView(items)
     -- Layout constants
     local ROW_HEIGHT = 22
     local ICON_SIZE = 18
-    local contentWidth = mainFrame.content:GetWidth() - 8
+    local contentWidth = math.max((mainFrame.content:GetWidth() or 0) - 8, 1)
     local yOffset = -4
+    scrollChild:SetWidth(contentWidth)
+
+    local function ApplyListRowBackground(row, rowIndex, hovered)
+        if hovered then
+            row.bg:SetVertexColor(0.3, 0.3, 0.3, 1)
+        elseif rowIndex % 2 == 0 then
+            row.bg:SetVertexColor(0.15, 0.15, 0.15, 1)
+        else
+            row.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
+        end
+    end
 
     for i, itemInfo in ipairs(items) do
         -- Get or create row frame
@@ -5204,7 +5215,7 @@ function Frame:RenderListView(items)
 
             -- Hover highlight
             row:SetScript("OnEnter", function(self)
-                self.bg:SetVertexColor(0.3, 0.3, 0.3, 1)
+                ApplyListRowBackground(self, self._listIndex or 1, true)
                 if self.itemInfo and self.itemInfo.bagID and self.itemInfo.slotID then
                     self.__omniUsesCustomTooltip = true
                     if Omni.ItemButton and Omni.ItemButton.SetOmniItemTooltipOwner then
@@ -5228,8 +5239,7 @@ function Frame:RenderListView(items)
                 end
             end)
             row:SetScript("OnLeave", function(self)
-                local alpha = (i % 2 == 0) and 0.15 or 0.1
-                self.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
+                ApplyListRowBackground(self, self._listIndex or 1, false)
                 self.__omniUsesCustomTooltip = false
                 if Omni.ItemButton and Omni.ItemButton.HideTooltipIfOwnedBy then
                     Omni.ItemButton.HideTooltipIfOwnedBy(self)
@@ -5277,16 +5287,12 @@ function Frame:RenderListView(items)
         end
 
         -- Position row
+        row._listIndex = i
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, yOffset)
         row:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", 0, yOffset)
-
-        -- Set background color (alternating rows)
-        if i % 2 == 0 then
-            row.bg:SetVertexColor(0.15, 0.15, 0.15, 1)
-        else
-            row.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
-        end
+        row:SetWidth(contentWidth)
+        ApplyListRowBackground(row, i, false)
 
         -- Error boundary
         local success, err = pcall(function()
@@ -5341,7 +5347,7 @@ function Frame:RenderListView(items)
         yOffset = yOffset - ROW_HEIGHT
     end
 
-    scrollChild:SetHeight(math.abs(yOffset) + 8)
+    SetMainScrollChildHeight(math.abs(yOffset) + 8)
 end
 
 -- =============================================================================
