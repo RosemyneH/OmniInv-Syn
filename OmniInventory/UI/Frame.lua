@@ -372,31 +372,6 @@ local function BuildFlowItemContentSignature(items)
     return table.concat(parts, "\030")
 end
 
-local function GetScopedBagSlotsTotal(bagPreviewScopeSet)
-    local n = 0
-    for _, bagID in ipairs(DIM.BAG_IDS) do
-        if not bagPreviewScopeSet or bagPreviewScopeSet[bagID] then
-            n = n + (GetContainerNumSlots(bagID) or 0)
-        end
-    end
-    return n
-end
-
-local function CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
-    if not touched then
-        return 0
-    end
-    local n = 0
-    for bagID, slots in pairs(touched) do
-        if type(bagID) == "number" and (not bagPreviewScopeSet or bagPreviewScopeSet[bagID]) then
-            for _ in pairs(slots) do
-                n = n + 1
-            end
-        end
-    end
-    return n
-end
-
 local function BuildScopedSlotOccupancySignature(bagPreviewScopeSet)
     local parts = {}
     for _, bagID in ipairs(DIM.BAG_IDS) do
@@ -2508,6 +2483,34 @@ local function GetItemContainer(bagID)
     return nil
 end
 Frame._GetItemContainer = GetItemContainer
+
+local function SetMainScrollChildHeight(height)
+    if not mainFrame or not mainFrame.scrollChild then return end
+
+    height = math.max(1, height or 1)
+    mainFrame.scrollChild:SetHeight(height)
+
+    local content = mainFrame.content
+    if not content then return end
+
+    local viewportHeight = content:GetHeight() or 0
+    local maxScroll = math.max(0, height - viewportHeight)
+    local scrollBar = _G["OmniContentScrollScrollBar"]
+    if scrollBar and scrollBar.SetMinMaxValues then
+        scrollBar:SetMinMaxValues(0, maxScroll)
+        if scrollBar.SetValue then
+            local value = scrollBar.GetValue and scrollBar:GetValue() or 0
+            scrollBar:SetValue(math.min(value or 0, maxScroll))
+        end
+    end
+
+    if content.GetVerticalScroll and content.SetVerticalScroll then
+        local currentScroll = content:GetVerticalScroll() or 0
+        if currentScroll > maxScroll then
+            content:SetVerticalScroll(maxScroll)
+        end
+    end
+end
 
 -- =============================================================================
 -- Persistent Slot-Button Map
@@ -5024,11 +5027,7 @@ function Frame:RenderFlowView(items, layoutOpts)
     end
 
     local overflowIndex = 0
-    if skipOverflowRepark then
-        local scopedTotal = GetScopedBagSlotsTotal(bagPreviewScopeSet)
-        local nTouched = CountTouchedSlotsInScope(touched, bagPreviewScopeSet)
-        overflowIndex = math.max(0, scopedTotal - nTouched)
-    else
+    if not skipOverflowRepark then
         IterateSlotButtons(function(bagID, slotID, btn)
             if bagPreviewScopeSet and not bagPreviewScopeSet[bagID] then
                 pcall(btn.SetAlpha, btn, 0)
@@ -5079,23 +5078,7 @@ function Frame:RenderFlowView(items, layoutOpts)
         end)
     end
 
-    local overflowRows = math.ceil(overflowIndex / math.max(overflowColumns, 1))
-    local overflowExtent = overflowRows > 0
-        and (OVERFLOW_ROW_GAP + overflowRows * itemStep)
-        or 0
-
-    -- Scroll height has to accommodate the deepest point on the page,
-    -- which is either the deepest lane (mainBottomY) or the bottom of
-    -- the overflow strip anchored at the bottom of BoE's lane.
-    local overflowAnchorY
-    if boeAnchor then
-        overflowAnchorY = (boeAnchor.lane == "right") and yRight or yLeft
-    else
-        overflowAnchorY = mainBottomY
-    end
-    local overflowBottom = overflowAnchorY - overflowExtent
-    local deepestY = math.min(mainBottomY, overflowBottom)
-    scrollChild:SetHeight(math.abs(deepestY) + itemGap)
+    SetMainScrollChildHeight(math.abs(mainBottomY) + itemGap)
 
     if perfFlowPath and Omni._perfEnabled and Omni.Perf then
         Omni.Perf:End(
