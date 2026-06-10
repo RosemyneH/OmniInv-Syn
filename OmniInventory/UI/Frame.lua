@@ -1004,6 +1004,35 @@ local function GetBagIconTexture(bagID)
     return texture or "Interface\\Icons\\INV_Misc_Bag_10_Blue"
 end
 
+local function GetCursorItemLink()
+    if type(GetCursorInfo) ~= "function" then return nil end
+
+    local cursorType, itemID, itemLink = GetCursorInfo()
+    if cursorType ~= "item" then return nil end
+    if type(itemLink) == "string" then return itemLink end
+    if type(itemID) == "number" and GetItemInfo then
+        local _, link = GetItemInfo(itemID)
+        return link
+    end
+    return nil
+end
+
+local function IsCursorBagItem()
+    local itemLink = GetCursorItemLink()
+    if not itemLink or not GetItemInfo then return false end
+
+    local _, _, _, _, _, itemType, _, _, equipLoc = GetItemInfo(itemLink)
+    return equipLoc == "INVTYPE_BAG" or itemType == "Container"
+end
+
+local function GetCursorItemFamily()
+    local itemLink = GetCursorItemLink()
+    if itemLink and GetItemFamily then
+        return GetItemFamily(itemLink) or 0
+    end
+    return 0
+end
+
 -- =============================================================================
 -- Frame Creation
 -- =============================================================================
@@ -1366,8 +1395,11 @@ function Frame:CreateHeader()
 
         bagBtn:SetScript("OnClick", function(self, mouseButton)
             if mouseButton == "LeftButton" then
-                -- ᵔᴥᵔ Cursor holds a bag → swap; otherwise preview filter.
+                -- ᵔᴥᵔ Cursor item targets this bag; cursor bag swaps the bag slot.
                 if CursorHasItem and CursorHasItem() then
+                    if not IsCursorBagItem() and Frame:PlaceCursorItemInBag(self.bagID) then
+                        return
+                    end
                     Frame:EquipBagFromCursor(self.bagID)
                     return
                 end
@@ -1378,6 +1410,9 @@ function Frame:CreateHeader()
         end)
 
         bagBtn:SetScript("OnReceiveDrag", function(self)
+            if not IsCursorBagItem() and Frame:PlaceCursorItemInBag(self.bagID) then
+                return
+            end
             Frame:EquipBagFromCursor(self.bagID)
         end)
 
@@ -1386,6 +1421,7 @@ function Frame:CreateHeader()
             GameTooltip:AddLine(GetBagDisplayName(self.bagID), 1, 1, 1)
             GameTooltip:AddLine("Left-click: Preview this bag", 0.8, 0.8, 0.8)
             GameTooltip:AddLine("Right-click: Force-empty bag", 0.8, 0.8, 0.8)
+            GameTooltip:AddLine("Drag item here to place it in this bag", 0.6, 0.9, 0.6)
             if self.bagID ~= 0 then
                 GameTooltip:AddLine("Drag a bag here to equip it", 0.6, 0.9, 0.6)
             end
@@ -2306,6 +2342,66 @@ local function BuildDropBagScope()
     return scope
 end
 
+local function CanBagAcceptCursorItem(bagID)
+    local _, bagType = GetContainerNumFreeSlots(bagID)
+    bagType = bagType or 0
+    if bagType == 0 then return true end
+
+    local itemFamily = GetCursorItemFamily()
+    if not itemFamily or itemFamily == 0 then return false end
+    if bit and bit.band then
+        return bit.band(itemFamily, bagType) > 0
+    end
+    return true
+end
+
+local function TryPlaceCursorItemInBag(bagID)
+    if not IsValidBagID(bagID) then return false, "invalid" end
+    if not CanBagAcceptCursorItem(bagID) then return false, "incompatible" end
+    if not PickupContainerItem then return false, "blocked" end
+
+    local numSlots = GetContainerNumSlots(bagID) or 0
+    local foundEmpty = false
+    for slotID = 1, numSlots do
+        local texture = GetContainerItemInfo(bagID, slotID)
+        if not texture then
+            foundEmpty = true
+            PickupContainerItem(bagID, slotID)
+            if not (CursorHasItem and CursorHasItem()) then
+                local changed = {}
+                changed[bagID] = true
+                Frame:UpdateLayout(changed, { forceFull = true, reason = "bag_target_drop" })
+                return true, nil
+            end
+        end
+    end
+
+    return false, foundEmpty and "blocked" or "full"
+end
+
+function Frame:PlaceCursorItemInBag(bagID, options)
+    options = options or {}
+    if not (CursorHasItem and CursorHasItem()) then return false end
+    if IsCursorBagItem() then return false end
+    if InCombat() then
+        if not options.silent then
+            print("|cFFFF4040OmniInventory|r: Items can only be placed into bag slots out of combat.")
+        end
+        return false
+    end
+
+    local placed, status = TryPlaceCursorItemInBag(bagID)
+    if placed then return true end
+    if options.silent then return false end
+
+    if status == "incompatible" then
+        print("|cFFFF4040OmniInventory|r: That bag cannot hold this item.")
+    elseif status == "full" then
+        print("|cFFFF4040OmniInventory|r: No empty slot in " .. GetBagDisplayName(bagID) .. ".")
+    end
+    return false
+end
+
 local function PlaceCursorItemInEmptyBagSlot()
     if currentView ~= "flow" then return false end
     if not (CursorHasItem and CursorHasItem()) then return false end
@@ -2314,25 +2410,20 @@ local function PlaceCursorItemInEmptyBagSlot()
         return false
     end
 
-    local foundEmpty = false
+    local sawIncompatible = false
+    local sawFull = false
+    local sawBlocked = false
     for _, bagID in ipairs(BuildDropBagScope()) do
-        local numSlots = GetContainerNumSlots(bagID) or 0
-        for slotID = 1, numSlots do
-            local texture = GetContainerItemInfo(bagID, slotID)
-            if not texture then
-                foundEmpty = true
-                PickupContainerItem(bagID, slotID)
-                if not (CursorHasItem and CursorHasItem()) then
-                    local changed = {}
-                    changed[bagID] = true
-                    Frame:UpdateLayout(changed, { forceFull = true, reason = "flow_empty_drop" })
-                    return true
-                end
-            end
-        end
+        local placed, status = TryPlaceCursorItemInBag(bagID)
+        if placed then return true end
+        sawIncompatible = sawIncompatible or status == "incompatible"
+        sawFull = sawFull or status == "full"
+        sawBlocked = sawBlocked or status == "blocked"
     end
 
-    if not foundEmpty then
+    if sawIncompatible and not sawFull and not sawBlocked then
+        print("|cFFFF4040OmniInventory|r: The selected bag cannot hold this item.")
+    elseif sawFull or not sawBlocked then
         print("|cFFFF4040OmniInventory|r: No empty bag slot available.")
     end
     return false
