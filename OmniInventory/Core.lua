@@ -145,7 +145,56 @@ local OmniToggleBag   = function(_) SafeToggle("ToggleBag") end
 local OmniOpenBag     = function(_) SafeShow("OpenBag") end
 local OmniCloseBag    = function(_) SafeHide("CloseBag") end
 
+Omni._bagOverrideFns = {
+    ToggleAllBags = OmniToggleAll,
+    OpenAllBags = OmniOpenAll,
+    CloseAllBags = OmniCloseAll,
+    ToggleBackpack = OmniToggleBack,
+    OpenBackpack = OmniOpenBack,
+    CloseBackpack = OmniCloseBack,
+    ToggleBag = OmniToggleBag,
+    OpenBag = OmniOpenBag,
+    CloseBag = OmniCloseBag,
+}
+
 Omni._overrideMarker = OmniToggleAll
+
+local NUM_CONTAINER_FRAMES = _G.NUM_CONTAINER_FRAMES or 13
+
+-- ʕ •ᴥ•ʔ✿ Single-bag and all-bags keybinds often bypass our globals and
+-- call OpenBag() -> ContainerFrame:Show(). Redirect that path to Omni. ✿ ʕ •ᴥ•ʔ
+local function RedirectBlizzardBagFrame(containerFrame)
+    if not containerFrame then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+
+    pcall(containerFrame.Hide, containerFrame)
+    pcall(containerFrame.UnregisterAllEvents, containerFrame)
+    pcall(containerFrame.SetScript, containerFrame, "OnShow", function(self)
+        if InCombatLockdown and InCombatLockdown() then return end
+        pcall(self.Hide, self)
+        SafeShow("ContainerFrame")
+    end)
+end
+
+Omni._RedirectBlizzardBagFrame = RedirectBlizzardBagFrame
+
+local containerFrameGenerateHookInstalled = false
+
+local function InstallContainerFrameGenerateHook()
+    if containerFrameGenerateHookInstalled then return end
+    if not hooksecurefunc or not _G.ContainerFrame_GenerateFrame then return end
+
+    hooksecurefunc("ContainerFrame_GenerateFrame", function(containerFrame)
+        RedirectBlizzardBagFrame(containerFrame)
+    end)
+    containerFrameGenerateHookInstalled = true
+end
+
+local function ApplyBagFunctionOverrides()
+    for name, fn in pairs(Omni._bagOverrideFns) do
+        _G[name] = fn
+    end
+end
 
 -- ʕ •ᴥ•ʔ✿ Reassigning these globals is insecure and always allowed -- it's
 -- the per-frame Hide / UnregisterAllEvents / SetScript on the protected
@@ -155,21 +204,16 @@ Omni._overrideMarker = OmniToggleAll
 -- /reload) without firing "Interface action failed because of an AddOn."
 -- The Blizzard-frame suppression is performed only out of combat; the
 -- OnShow/OnEvent hooks installed there persist across reloads anyway. ✿ ʕ •ᴥ•ʔ
-local blizzardSuppressionDone = false
+local bankSuppressionDone = false
 
 local function SuppressBlizzardBagFrames()
-    if blizzardSuppressionDone then return end
     if InCombatLockdown and InCombatLockdown() then return end
 
-    for i = 1, 13 do
-        local containerFrame = _G["ContainerFrame" .. i]
-        if containerFrame then
-            pcall(containerFrame.Hide, containerFrame)
-            pcall(containerFrame.UnregisterAllEvents, containerFrame)
-            pcall(containerFrame.SetScript, containerFrame, "OnShow",
-                function(self) if not InCombatLockdown() then pcall(self.Hide, self) end end)
-        end
+    for i = 1, NUM_CONTAINER_FRAMES do
+        RedirectBlizzardBagFrame(_G["ContainerFrame" .. i])
     end
+
+    if bankSuppressionDone then return end
 
     if _G.BankFrame then
         pcall(_G.BankFrame.UnregisterAllEvents, _G.BankFrame)
@@ -179,7 +223,7 @@ local function SuppressBlizzardBagFrames()
         pcall(_G.BankFrame.SetScript, _G.BankFrame, "OnEvent", nil)
     end
 
-    blizzardSuppressionDone = true
+    bankSuppressionDone = true
 end
 
 -- ʕ •ᴥ•ʔ✿ Blizzard_GuildBankUI is a load-on-demand addon, so it may not
@@ -222,17 +266,9 @@ local function SuppressBlizzardGuildBank()
 end
 
 local function OverrideBags()
-    ToggleAllBags  = OmniToggleAll
-    OpenAllBags    = OmniOpenAll
-    CloseAllBags   = OmniCloseAll
-    ToggleBackpack = OmniToggleBack
-    OpenBackpack   = OmniOpenBack
-    CloseBackpack  = OmniCloseBack
-    ToggleBag      = OmniToggleBag
-    OpenBag        = OmniOpenBag
-    CloseBag       = OmniCloseBag
-
+    ApplyBagFunctionOverrides()
     SuppressBlizzardBagFrames()
+    InstallContainerFrameGenerateHook()
     SuppressBlizzardGuildBank()
 end
 
@@ -256,6 +292,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if Omni.Data then
             Omni.Data:Init()
         end
+
+        ApplyBagFunctionOverrides()
 
         print("|cFF00FF00Omni|r |cFFFFFFFFInventory|r v" .. Omni.version .. " loaded. By |cFF00FFFF" .. Omni.author .. "|r")
         print("  Type |cFFFFFF00/omni|r or |cFFFFFF00/oi|r to toggle.")
@@ -352,8 +390,9 @@ local function HandleSlashCommand(msg)
             tostring(Omni.Frame and Omni.Frame:IsShown() or false)))
         print(string.format("  InCombatLockdown(): %s",
             tostring(InCombatLockdown and InCombatLockdown() or false)))
-        print(string.format("  ToggleAllBags is ours: %s",
-            tostring(ToggleAllBags == Omni._overrideMarker)))
+        for name, fn in pairs(Omni._bagOverrideFns or {}) do
+            print(string.format("  %s is ours: %s", name, tostring(_G[name] == fn)))
+        end
         local mf = _G.OmniInventoryFrame
         if mf then
             print(string.format("  OmniInventoryFrame protected: %s",

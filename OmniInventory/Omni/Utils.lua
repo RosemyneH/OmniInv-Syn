@@ -200,20 +200,16 @@ function Utils:EnsureBlizzardContainerItemButtons()
             if cf then
                 ContainerFrame_GenerateFrame(cf, n, bagID)
                 cf:Hide()
+                if Omni._RedirectBlizzardBagFrame then
+                    Omni._RedirectBlizzardBagFrame(cf)
+                end
             end
         end
     end
     for i = 1, NUM_CONTAINER_FRAMES_GLOBAL do
         local cf = _G["ContainerFrame" .. i]
-        if cf then
-            -- ʕ •ᴥ•ʔ✿ Skip the suppression Hide while combat-locked or
-            -- this OnShow becomes the source of the popup we're trying
-            -- to avoid. Blizzard will run its OnShow path normally; we
-            -- catch up the moment combat ends. ✿ ʕ •ᴥ•ʔ
-            cf:SetScript("OnShow", function(self)
-                if InCombatLockdown and InCombatLockdown() then return end
-                pcall(self.Hide, self)
-            end)
+        if cf and Omni._RedirectBlizzardBagFrame then
+            Omni._RedirectBlizzardBagFrame(cf)
         end
     end
 end
