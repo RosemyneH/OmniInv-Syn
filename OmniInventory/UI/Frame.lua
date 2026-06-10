@@ -4285,10 +4285,11 @@ function Frame:RenderFlowView(items, layoutOpts)
     local hInset = 8
     local usableWidth = mainFrame.content:GetWidth() - hInset
     local itemGap = self:GetItemGap()
-    local sectionHeaderHeight = (currentView == "grid") and 0 or 20 -- No headers in grid mode
-    local sectionSpacing = (currentView == "grid") and itemGap or 8
-    local dualCategoryLanes = (currentView ~= "grid")
     local laneGap = 10
+    local dualCategoryLanes = false
+    local sectionHeaderFontSize = DIM.CATEGORY_HEADER_FONT_MIN
+    local sectionHeaderHeight = (currentView == "grid") and 0 or DIM.CATEGORY_HEADER_HEIGHT_MIN
+    local sectionSpacing = (currentView == "grid") and itemGap or 8
     local itemScale = self:GetItemScale()
     local itemSize = DIM.ITEM_SIZE * itemScale
     local itemStep = itemSize + itemGap
@@ -4441,6 +4442,13 @@ function Frame:RenderFlowView(items, layoutOpts)
             vendorFlowLayoutFreeze = nil
         end
     end
+
+    dualCategoryLanes = currentView ~= "grid" and #categoryOrder > 1
+    local headerMeasureWidth = dualCategoryLanes and ((usableWidth - laneGap) * 0.5) or usableWidth
+    sectionHeaderFontSize = ResolveCategoryHeaderFontSize(headerMeasureWidth)
+    sectionHeaderHeight = (currentView == "grid")
+        and 0
+        or math.max(DIM.CATEGORY_HEADER_HEIGHT_MIN, sectionHeaderFontSize + 8)
 
     local headerIndex = 0
     -- ʕ •ᴥ•ʔ✿ BoE tail anchor: captured when we render the BoE section
@@ -4650,8 +4658,12 @@ function Frame:RenderFlowView(items, layoutOpts)
                         header = CreateFrame("Button", nil, scrollChild)
                         header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                         header.text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                        header.text:SetPoint("LEFT")
+                        header.text:SetPoint("LEFT", header, "LEFT", 1, 0)
+                        header.text:SetPoint("RIGHT", header, "RIGHT", -2, 0)
                         header.text:SetJustifyH("LEFT")
+                        header.text:SetJustifyV("MIDDLE")
+                        if header.text.SetWordWrap then header.text:SetWordWrap(false) end
+                        if header.text.SetNonSpaceWrap then header.text:SetNonSpaceWrap(false) end
                         header:SetScript("OnClick", function(self, mouseButton)
                             if not self.canEditCategory then return end
                             if mouseButton == "RightButton" then
@@ -4679,33 +4691,30 @@ function Frame:RenderFlowView(items, layoutOpts)
                 header.categoryName = catName
                 header.canEditCategory = currentView ~= "bag" and type(catName) == "string"
                 header:EnableMouse(header.canEditCategory)
+                local headerWidth = math.max((laneW or usableWidth) - itemGap, 80)
                 if not reusedHeader then
                     header:ClearAllPoints()
                     header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", laneX, laneY)
-                    header:SetSize(math.max((laneW or usableWidth) - itemGap, 80), sectionHeaderHeight)
+                end
+                header:SetSize(headerWidth, sectionHeaderHeight)
+                header.text:SetHeight(sectionHeaderHeight)
+                header.text:SetFont(DIM.CATEGORY_HEADER_FONT_PATH, sectionHeaderFontSize, "OUTLINE")
+                header.text:SetShadowColor(0, 0, 0, 0.9)
+                header.text:SetShadowOffset(1, -1)
 
-                    local r, g, b = 1, 1, 1
-                    if currentView == "bag" then
-                        r, g, b = 0.9, 0.8, 0.4
-                    elseif Omni.Categorizer then
-                        r, g, b = Omni.Categorizer:GetCategoryColor(catName)
-                    end
-                    header.text:SetTextColor(r, g, b)
-                    if currentView == "bag" then
-                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
-                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                        header.text:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
-                    else
-                        header.text:SetText(catName .. " (" .. #catItems .. ")")
-                    end
-                elseif flowContentOnly and header then
-                    if currentView == "bag" then
-                        local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
-                        local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
-                        header.text:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
-                    else
-                        header.text:SetText(catName .. " (" .. #catItems .. ")")
-                    end
+                local r, g, b = 1, 1, 1
+                if currentView == "bag" then
+                    r, g, b = 0.9, 0.8, 0.4
+                elseif Omni.Categorizer then
+                    r, g, b = Omni.Categorizer:GetCategoryColor(catName)
+                end
+                header.text:SetTextColor(r, g, b)
+                if currentView == "bag" then
+                    local usedSlots = bagItemCounts and bagItemCounts[catName] or #catItems
+                    local totalSlots = bagSlotCounts and bagSlotCounts[catName] or #catItems
+                    header.text:SetText(GetBagDisplayName(catName) .. " (" .. usedSlots .. "/" .. totalSlots .. ")")
+                else
+                    header.text:SetText(FormatInventoryCategoryLabel(catName) .. " (" .. #catItems .. ")")
                 end
                 header:Show()
 
