@@ -6,6 +6,9 @@ local addonName, Omni = ...
 
 Omni.Utils = {}
 local Utils = Omni.Utils
+local COPPER_PER_SILVER = 100
+local COPPER_PER_GOLD = 10000
+local UNSIGNED_32BIT_COPPER = 4294967296
 
 -- =============================================================================
 -- String Utilities
@@ -30,13 +33,25 @@ function Utils:GetQualityColor(quality)
     return r or 1, g or 1, b or 1
 end
 
+--- Normalize money as unsigned copper
+---@param copper number
+---@return number copper
+function Utils:NormalizeMoneyCopper(copper)
+    copper = tonumber(copper) or 0
+    if copper < 0 then
+        copper = copper + UNSIGNED_32BIT_COPPER
+    end
+    return math.floor(copper + 0.5)
+end
+
 --- Format money as gold/silver/copper
 ---@param copper number
 ---@return string formatted
 function Utils:FormatMoney(copper)
-    local gold = math.floor(copper / 10000)
-    local silver = math.floor((copper % 10000) / 100)
-    local cop = copper % 100
+    copper = self:NormalizeMoneyCopper(copper)
+    local gold = math.floor(copper / COPPER_PER_GOLD)
+    local silver = math.floor((copper - (gold * COPPER_PER_GOLD)) / COPPER_PER_SILVER)
+    local cop = copper - (gold * COPPER_PER_GOLD) - (silver * COPPER_PER_SILVER)
     local formattedGold = tostring(gold):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 
     if gold > 0 then
