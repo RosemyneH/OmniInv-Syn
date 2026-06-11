@@ -222,7 +222,11 @@ function Data:SetChar(key, value)
 end
 
 function Data:GetPlayerMoney()
-    return GetMoney() or 0
+    local money = GetMoney() or 0
+    if Omni.Utils and Omni.Utils.NormalizeMoneyCopper then
+        return Omni.Utils:NormalizeMoneyCopper(money)
+    end
+    return money
 end
 
 -- =============================================================================
@@ -243,7 +247,7 @@ function Data:SaveCharacterInventory()
     local char = realm and realm[self.playerName]
     if not char then return end
 
-    char.gold = GetMoney()
+    char.gold = self:GetPlayerMoney()
     char.lastSeen = time()
 
     char.bags = {}
