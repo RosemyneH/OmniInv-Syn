@@ -1284,8 +1284,8 @@ local function CreateFooter(parent)
         "Smart Deposit BoEs",
         "Moves BoE + account-attunable gear using tab mapping.",
         function()
-        GuildBankFrame:RunSmartDeposit()
-    end)
+            GuildBankFrame:RunSmartDeposit()
+        end)
     footer.smartDepositBtn:SetPoint("RIGHT", footer, "RIGHT", -6, 0)
 
     footer.buyTabBtn = CreateFooterIconButton(
@@ -1294,8 +1294,10 @@ local function CreateFooter(parent)
         "Buy Next Guild Tab",
         "Guild leaders can purchase the next tab.",
         function()
-        StaticPopup_Show("OMNI_GUILDBANK_BUY_TAB")
-    end)
+            local tabIndex, cost = GetNextGuildBankTabPurchaseInfo()
+            local costText = FormatGuildBankTabCost(cost) or "unknown cost"
+            StaticPopup_Show("OMNI_GUILDBANK_BUY_TAB", tabIndex or "next", costText)
+        end)
     footer.buyTabBtn:SetPoint("RIGHT", footer.smartDepositBtn, "LEFT", -FOOTER_ICON_BTN_GAP, 0)
     footer.buyTabBtn:Hide()
 
@@ -1768,14 +1770,14 @@ function GuildBankFrame:UpdateMoney()
     if not frame or not frame.footer then return end
     local money = GetGuildBankMoney and GetGuildBankMoney() or 0
     local withdraw = GetGuildBankWithdrawMoney and GetGuildBankWithdrawMoney() or 0
-    local moneyText = GetCoinTextureString(money)
+    local moneyText = FormatGuildBankMoney(money)
     frame.footer.money:SetText(moneyText)
     frame.footer.moneyBtn._moneyText = moneyText
     if withdraw == -1 then
         frame.footer.withdrawLimit:SetText("Withdraw: |cFFFFD700Unlimited|r")
         frame.footer.moneyBtn._withdrawText = "Withdraw: Unlimited"
     else
-        local withdrawText = GetCoinTextureString(withdraw)
+        local withdrawText = FormatGuildBankMoney(withdraw)
         frame.footer.withdrawLimit:SetText("Withdraw: " .. withdrawText)
         frame.footer.moneyBtn._withdrawText = "Withdraw: " .. withdrawText
     end
@@ -1795,10 +1797,12 @@ function GuildBankFrame:UpdateBuyButton()
     if not frame or not frame.footer then return end
     local btn = frame.footer.buyTabBtn
     if not btn then return end
-    local numTabs = GetNumGuildBankTabs() or 0
     local isLeader = IsGuildLeader and IsGuildLeader() or false
-    if isLeader and numTabs < MAX_TABS then
-        btn._tooltipTitle = string.format("Buy Tab %d", numTabs + 1)
+    local nextTab, cost = GetNextGuildBankTabPurchaseInfo()
+    if isLeader and nextTab then
+        local costText = FormatGuildBankTabCost(cost)
+        btn._tooltipTitle = string.format("Buy Tab %d", nextTab)
+        btn._tooltipSub = costText and ("Price: " .. costText) or "Price unavailable"
         btn:Show()
     else
         btn:Hide()
@@ -2254,12 +2258,12 @@ local function ResolveGuildBankMoneyInput(raw, intent)
             return ClampGuildBankMoneyCopper(carry)
         end
         if intent == "withdraw" then
-            local vault = GetGuildBankMoney and GetGuildBankMoney() or 0
+            local vault = NormalizeGuildBankMoneyCopper(GetGuildBankMoney and GetGuildBankMoney() or 0)
             local cap = GetGuildBankWithdrawMoney and GetGuildBankWithdrawMoney() or 0
             if cap == -1 then
                 return ClampGuildBankMoneyCopper(vault)
             end
-            return ClampGuildBankMoneyCopper(math.min(vault, cap))
+            return ClampGuildBankMoneyCopper(math.min(vault, NormalizeGuildBankMoneyCopper(cap)))
         end
         return nil
     end
@@ -2317,7 +2321,7 @@ StaticPopupDialogs["OMNI_GUILDBANK_WITHDRAW_MONEY"] = {
 }
 
 StaticPopupDialogs["OMNI_GUILDBANK_BUY_TAB"] = {
-    text = "Purchase the next guild bank tab?",
+    text = "Purchase guild bank tab %s for %s?",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     timeout = 0,
