@@ -7,8 +7,14 @@ local editorFrame = nil
 local helpFrame = nil
 local rows = {}
 local ruleRows = {}
+local EDITOR_STRATA = "FULLSCREEN_DIALOG"
 local EDITOR_FRAME_LEVEL = 700
 local HELP_FRAME_LEVEL = 720
+local CONTROL_LEVEL_OFFSET = 10
+local SCROLL_LEVEL_OFFSET = 8
+local SCROLL_CHILD_LEVEL_OFFSET = 9
+local ROW_LEVEL_OFFSET = 11
+local ROW_ACTION_LEVEL_OFFSET = 12
 
 local RULE_HELP_TEXT = [[Rule scripts decide whether the current item belongs in this category.
 
@@ -104,14 +110,56 @@ local function RefreshInventory(reason)
     end
 end
 
+local function SetFrameLayer(frame, level)
+    if not frame then return end
+    if frame.SetFrameStrata then frame:SetFrameStrata(EDITOR_STRATA) end
+    if frame.SetFrameLevel then frame:SetFrameLevel(level) end
+end
+
+local function SetScrollLayer(scroll, level)
+    SetFrameLayer(scroll, level)
+    local name = scroll and scroll.GetName and scroll:GetName()
+    if not name then return end
+    SetFrameLayer(_G[name .. "ScrollBar"], level + 1)
+    SetFrameLayer(_G[name .. "ScrollBarScrollUpButton"], level + 2)
+    SetFrameLayer(_G[name .. "ScrollBarScrollDownButton"], level + 2)
+end
+
+local function SetRowLayer(row, baseLevel)
+    SetFrameLayer(row, baseLevel + ROW_LEVEL_OFFSET)
+    SetFrameLayer(row and row.action, baseLevel + ROW_ACTION_LEVEL_OFFSET)
+end
+
 local function RaiseEditorFrames()
     if editorFrame then
-        editorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-        editorFrame:SetFrameLevel(EDITOR_FRAME_LEVEL)
+        SetFrameLayer(editorFrame, EDITOR_FRAME_LEVEL)
+        SetFrameLayer(editorFrame.closeBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.nameEdit, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.newBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.deleteBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.helpBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.priorityEdit, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.ruleEdit, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.saveRuleBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.validateRuleBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.resetRuleBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.toggleRuleBtn, EDITOR_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetScrollLayer(editorFrame.ruleScroll, EDITOR_FRAME_LEVEL + SCROLL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.ruleChild, EDITOR_FRAME_LEVEL + SCROLL_CHILD_LEVEL_OFFSET)
+        SetScrollLayer(editorFrame.itemScroll, EDITOR_FRAME_LEVEL + SCROLL_LEVEL_OFFSET)
+        SetFrameLayer(editorFrame.itemChild, EDITOR_FRAME_LEVEL + SCROLL_CHILD_LEVEL_OFFSET)
+        for _, row in ipairs(ruleRows) do
+            SetRowLayer(row, EDITOR_FRAME_LEVEL)
+        end
+        for _, row in ipairs(rows) do
+            SetRowLayer(row, EDITOR_FRAME_LEVEL)
+        end
     end
     if helpFrame then
-        helpFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-        helpFrame:SetFrameLevel(HELP_FRAME_LEVEL)
+        SetFrameLayer(helpFrame, HELP_FRAME_LEVEL)
+        SetFrameLayer(helpFrame.closeBtn, HELP_FRAME_LEVEL + CONTROL_LEVEL_OFFSET)
+        SetScrollLayer(helpFrame.scroll, HELP_FRAME_LEVEL + SCROLL_LEVEL_OFFSET)
+        SetFrameLayer(helpFrame.child, HELP_FRAME_LEVEL + SCROLL_CHILD_LEVEL_OFFSET)
     end
 end
 
