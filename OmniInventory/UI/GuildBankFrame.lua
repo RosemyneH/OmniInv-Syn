@@ -39,6 +39,9 @@ local FOOTER_ICON_BTN_SIZE = 24
 local FOOTER_ICON_BTN_GAP = 4
 local FOOTER_SMART_ICON = "Interface\\Icons\\INV_Misc_Coin_01"
 local FOOTER_BUYTAB_ICON = "Interface\\Icons\\INV_Misc_Coin_02"
+local COPPER_PER_SILVER = 100
+local COPPER_PER_GOLD = 10000
+local UNSIGNED_32BIT_COPPER = 4294967296
 
 local FRAME_WIDTH = TAB_COLUMN_WIDTH + 6 + (SLOTS_PER_ROW * (SLOT_SIZE + SLOT_SPACING))
                     + PADDING * 2 + 8
@@ -232,6 +235,51 @@ local function GuildBankTabTextureToShortName(tex)
     u = string.gsub(u, "INTERFACE/ICONS/", "")
     u = string.gsub(u, "INTERFACE\\ICONS\\", "")
     return u
+end
+
+local function NormalizeGuildBankMoneyCopper(copper)
+    if Omni.Utils and Omni.Utils.NormalizeMoneyCopper then
+        return Omni.Utils:NormalizeMoneyCopper(copper)
+    end
+    copper = tonumber(copper) or 0
+    if copper < 0 then
+        copper = copper + UNSIGNED_32BIT_COPPER
+    end
+    return math.floor(copper + 0.5)
+end
+
+local function FormatGuildBankMoney(copper)
+    if Omni.Utils and Omni.Utils.FormatMoney then
+        return Omni.Utils:FormatMoney(copper)
+    end
+    copper = NormalizeGuildBankMoneyCopper(copper)
+    local gold = math.floor(copper / COPPER_PER_GOLD)
+    local silver = math.floor((copper - (gold * COPPER_PER_GOLD)) / COPPER_PER_SILVER)
+    local cop = copper - (gold * COPPER_PER_GOLD) - (silver * COPPER_PER_SILVER)
+    local formattedGold = tostring(gold):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+
+    if gold > 0 then
+        return string.format("%sg %ds %dc", formattedGold, silver, cop)
+    elseif silver > 0 then
+        return string.format("%ds %dc", silver, cop)
+    end
+    return string.format("%dc", cop)
+end
+
+local function GetNextGuildBankTabPurchaseInfo()
+    local numTabs = GetNumGuildBankTabs and GetNumGuildBankTabs() or 0
+    if numTabs >= MAX_TABS then
+        return nil, nil
+    end
+    local cost = GetGuildBankTabCost and GetGuildBankTabCost() or nil
+    return numTabs + 1, cost
+end
+
+local function FormatGuildBankTabCost(cost)
+    if cost and cost >= 0 then
+        return FormatGuildBankMoney(cost)
+    end
+    return nil
 end
 
 local function GetGuildBankTabIconIndex(tabIndex)
