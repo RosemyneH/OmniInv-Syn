@@ -333,7 +333,7 @@ function Editor:CreateRuleHelpFrame()
     helpFrame = CreateFrame("Frame", "OmniCategoryRuleHelp", UIParent)
     helpFrame:SetSize(520, 500)
     helpFrame:SetPoint("CENTER", 220, 0)
-    helpFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    helpFrame:SetFrameStrata(EDITOR_STRATA)
     helpFrame:SetFrameLevel(HELP_FRAME_LEVEL)
     helpFrame:EnableMouse(true)
     helpFrame:SetMovable(true)
@@ -357,14 +357,17 @@ function Editor:CreateRuleHelpFrame()
 
     local closeBtn = CreateFrame("Button", nil, helpFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    helpFrame.closeBtn = closeBtn
 
     local scroll = CreateFrame("ScrollFrame", "OmniCategoryRuleHelpScroll", helpFrame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 28, -46)
     scroll:SetPoint("BOTTOMRIGHT", -46, 26)
+    helpFrame.scroll = scroll
 
     local child = CreateFrame("Frame", nil, scroll)
     child:SetSize(430, 1)
     scroll:SetScrollChild(child)
+    helpFrame.child = child
 
     local text = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     text:SetPoint("TOPLEFT", 0, 0)
@@ -374,6 +377,7 @@ function Editor:CreateRuleHelpFrame()
     text:SetText(RULE_HELP_TEXT)
     child:SetHeight(text:GetStringHeight() + 12)
 
+    RaiseEditorFrames()
     helpFrame:Hide()
     return helpFrame
 end
@@ -394,7 +398,7 @@ function Editor:CreateFrame()
     editorFrame = CreateFrame("Frame", "OmniCategoryEditor", UIParent)
     editorFrame:SetSize(660, 660)
     editorFrame:SetPoint("CENTER")
-    editorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    editorFrame:SetFrameStrata(EDITOR_STRATA)
     editorFrame:SetFrameLevel(EDITOR_FRAME_LEVEL)
     editorFrame:EnableMouse(true)
     editorFrame:SetMovable(true)
@@ -423,6 +427,7 @@ function Editor:CreateFrame()
 
     local closeBtn = CreateFrame("Button", nil, editorFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    editorFrame.closeBtn = closeBtn
 
     local nameLabel = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     nameLabel:SetPoint("TOPLEFT", 24, -42)
@@ -601,6 +606,7 @@ function Editor:CreateFrame()
     local ruleScroll = CreateFrame("ScrollFrame", "OmniCategoryEditorRuleScroll", editorFrame, "UIPanelScrollFrameTemplate")
     ruleScroll:SetPoint("TOPLEFT", 24, -278)
     ruleScroll:SetSize(584, 88)
+    editorFrame.ruleScroll = ruleScroll
 
     local ruleChild = CreateFrame("Frame", nil, ruleScroll)
     ruleChild:SetSize(560, 1)
@@ -614,12 +620,14 @@ function Editor:CreateFrame()
     local scroll = CreateFrame("ScrollFrame", "OmniCategoryEditorItemScroll", editorFrame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 24, -402)
     scroll:SetPoint("BOTTOMRIGHT", -46, 24)
+    editorFrame.itemScroll = scroll
 
     local child = CreateFrame("Frame", nil, scroll)
     child:SetSize(560, 1)
     scroll:SetScrollChild(child)
     editorFrame.itemChild = child
 
+    RaiseEditorFrames()
     editorFrame:Hide()
     return editorFrame
 end
@@ -708,6 +716,7 @@ function Editor:Refresh()
                 Editor:Refresh()
             end)
 
+            SetRowLayer(row, EDITOR_FRAME_LEVEL)
             ruleRows[i] = row
         end
 
@@ -771,6 +780,7 @@ function Editor:Refresh()
                 Editor:Refresh()
             end)
 
+            SetRowLayer(row, EDITOR_FRAME_LEVEL)
             rows[i] = row
         end
 
