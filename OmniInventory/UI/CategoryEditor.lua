@@ -7,6 +7,8 @@ local editorFrame = nil
 local helpFrame = nil
 local rows = {}
 local ruleRows = {}
+local EDITOR_FRAME_LEVEL = 700
+local HELP_FRAME_LEVEL = 720
 
 local RULE_HELP_TEXT = [[Rule scripts decide whether the current item belongs in this category.
 
@@ -99,6 +101,17 @@ local function RefreshInventory(reason)
     end
     if Omni.Settings and Omni.Settings.RefreshCategoryOrderControls then
         Omni.Settings:RefreshCategoryOrderControls()
+    end
+end
+
+local function RaiseEditorFrames()
+    if editorFrame then
+        editorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        editorFrame:SetFrameLevel(EDITOR_FRAME_LEVEL)
+    end
+    if helpFrame then
+        helpFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        helpFrame:SetFrameLevel(HELP_FRAME_LEVEL)
     end
 end
 
@@ -272,11 +285,13 @@ function Editor:CreateRuleHelpFrame()
     helpFrame = CreateFrame("Frame", "OmniCategoryRuleHelp", UIParent)
     helpFrame:SetSize(520, 500)
     helpFrame:SetPoint("CENTER", 220, 0)
-    helpFrame:SetFrameStrata("DIALOG")
+    helpFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    helpFrame:SetFrameLevel(HELP_FRAME_LEVEL)
     helpFrame:EnableMouse(true)
     helpFrame:SetMovable(true)
     helpFrame:SetClampedToScreen(true)
     helpFrame:RegisterForDrag("LeftButton")
+    helpFrame:SetScript("OnMouseDown", RaiseEditorFrames)
     helpFrame:SetScript("OnDragStart", helpFrame.StartMoving)
     helpFrame:SetScript("OnDragStop", helpFrame.StopMovingOrSizing)
     helpFrame:SetBackdrop({
@@ -320,6 +335,7 @@ function Editor:ToggleRuleHelp()
     if frame:IsShown() then
         frame:Hide()
     else
+        RaiseEditorFrames()
         frame:Show()
     end
 end
@@ -330,11 +346,13 @@ function Editor:CreateFrame()
     editorFrame = CreateFrame("Frame", "OmniCategoryEditor", UIParent)
     editorFrame:SetSize(660, 660)
     editorFrame:SetPoint("CENTER")
-    editorFrame:SetFrameStrata("DIALOG")
+    editorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    editorFrame:SetFrameLevel(EDITOR_FRAME_LEVEL)
     editorFrame:EnableMouse(true)
     editorFrame:SetMovable(true)
     editorFrame:SetClampedToScreen(true)
     editorFrame:RegisterForDrag("LeftButton")
+    editorFrame:SetScript("OnMouseDown", RaiseEditorFrames)
     editorFrame:SetScript("OnDragStart", editorFrame.StartMoving)
     editorFrame:SetScript("OnDragStop", editorFrame.StopMovingOrSizing)
     editorFrame:SetBackdrop({
@@ -562,6 +580,7 @@ function Editor:Open(categoryName)
     if not editorFrame then self:CreateFrame() end
     self.selectedCategory = TrimCategoryName(categoryName)
     self:Refresh()
+    RaiseEditorFrames()
     editorFrame:Show()
 end
 
